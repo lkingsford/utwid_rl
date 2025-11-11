@@ -51,7 +51,7 @@ struct MctsSettings {
 }
 
 fn run_episode<G: Game>(game: G, players: Vec<PlayerSettings>) -> Vec<f64> {
-    let mut state = game.init_game();
+    let mut state = game.init_game(&G::HyperparamsType::default());
     while !state.terminal() {
         let actor = state.next_actor();
         match actor {

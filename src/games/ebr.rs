@@ -1689,8 +1689,9 @@ pub struct EBR {
 impl Game for EBR {
     type StateType = EBRState;
     type ActionType = EBRAction;
+    type HyperparamsType = ();
 
-    fn init_game(&self) -> Self::StateType {
+    fn init_game(&self, _hyperparams: &Self::HyperparamsType) -> Self::StateType {
         EBRState {
             terminal: false,
             next_actor: Actor::Player(0),
@@ -1802,7 +1803,7 @@ mod test {
 
     fn init_game() -> EBRState {
         let mut game = EBR { player_count: 3 };
-        game.init_game()
+        game.init_game( &() )
     }
 
     #[test]

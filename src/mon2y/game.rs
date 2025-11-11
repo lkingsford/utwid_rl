@@ -23,6 +23,7 @@ pub enum Actor<ActionType> {
 
 pub trait State: Clone {
     type ActionType: Action<StateType = Self>;
+
     fn permitted_actions(&self) -> Vec<Self::ActionType>;
     fn possible_non_player_actions(&self) -> Vec<(Self::ActionType, u32)> {
         vec![]

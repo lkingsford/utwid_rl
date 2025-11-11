@@ -294,8 +294,9 @@ pub struct CS {
 impl Game for CS {
     type StateType = CSState;
     type ActionType = CSAction;
+    type HyperparamsType = ();
 
-    fn init_game(&self) -> Self::StateType {
+    fn init_game(&self, _hyperparams: &Self::HyperparamsType) -> Self::StateType {
         let positions: Vec<[u8; COLUMN_COUNT]> =
             (0..self.player_count).map(|_| [0; COLUMN_COUNT]).collect();
         CSState {

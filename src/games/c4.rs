@@ -162,6 +162,8 @@ pub struct C4;
 impl Game for C4 {
     type StateType = C4State;
     type ActionType = C4Action;
+    type HyperparamsType = ();
+
     fn visualise_state(&self, state: &Self::StateType) {
         for x in 0..BOARD_WIDTH {
             print!("{}", x);
@@ -192,7 +194,7 @@ impl Game for C4 {
         C4Action::Drop(action)
     }
 
-    fn init_game(&self) -> Self::StateType {
+    fn init_game(&self, _hyperparams: &Self::HyperparamsType) -> Self::StateType {
         C4State {
             board: vec![C4Cell::Empty; BOARD_HEIGHT * BOARD_WIDTH],
             next_player: 0,

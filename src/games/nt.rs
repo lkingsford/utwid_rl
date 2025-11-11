@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-
 use crate::game::Game;
 use crate::mon2y::game::{Action, Actor, State};
 
@@ -159,6 +158,7 @@ pub struct NT {
 impl Game for NT {
     type StateType = NTState;
     type ActionType = NTAction;
+    type HyperparamsType = ();
 
     fn visualise_state(&self, state: &Self::StateType) {
         for i in 0..self.player_count {
@@ -190,7 +190,7 @@ impl Game for NT {
         }
     }
 
-    fn init_game(&self) -> Self::StateType {
+    fn init_game(&self, _hyperparams: &Self::HyperparamsType) -> Self::StateType {
         NTState {
             cards: (3..35)
                 .map(|card| (card, CardState::Drawable))

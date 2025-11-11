@@ -76,7 +76,7 @@ fn run_game<G: Game>(
     constant: f64,
     log_children: bool,
 ) {
-    let mut state = game.init_game();
+    let mut state = game.init_game(&G::HyperparamsType::default());
     while !state.terminal() {
         let actor = state.next_actor();
         game.visualise_state(&state);

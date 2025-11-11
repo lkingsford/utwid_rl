@@ -29,7 +29,7 @@ struct Args {
 }
 
 fn run_benchmark<G: Game>(game: G, iterations: usize, thread_count: usize) -> f64 {
-    let state = game.init_game();
+    let state = game.init_game(&G::HyperparamsType::default());
     let start = Instant::now();
     calculate_best_turn(
         iterations,
