@@ -1,3 +1,4 @@
+use crate::hyperparam::Hyperparams;
 use crate::mcts::game_trait::{Action, State};
 
 use std::io;
@@ -5,7 +6,7 @@ pub trait Game {
     type StateType: State<ActionType = Self::ActionType> + 'static + Send + Sync;
     type ActionType: Action<StateType = Self::StateType> + 'static + Send + Sync;
     /// Values to inject to modify game for shape exploration.
-    type HyperparamsType: Clone + Send + Sync + Default + 'static;
+    type HyperparamsType: Hyperparams;
     fn get_human_turn(&self, state: &Self::StateType) -> Self::ActionType {
         for (i, action) in state.permitted_actions().iter().enumerate() {
             println!("{} {:?}", i, action);
