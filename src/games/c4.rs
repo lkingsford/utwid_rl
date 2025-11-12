@@ -1,7 +1,7 @@
 use std::io;
 
 use crate::game::Game;
-use crate::mon2y::game_trait::{Action, Actor, State};
+use crate::mcts::game_trait::{Action, Actor, State};
 
 pub const BOARD_WIDTH: usize = 7;
 pub const BOARD_HEIGHT: usize = 6;
@@ -9,7 +9,9 @@ pub const BOARD_HEIGHT: usize = 6;
 pub struct C4Hyperparams {}
 
 impl Default for C4Hyperparams {
-    fn default() -> Self { C4Hyperparams {}}
+    fn default() -> Self {
+        C4Hyperparams {}
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]

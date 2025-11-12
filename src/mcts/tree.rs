@@ -234,7 +234,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mon2y::node::create_expanded_node;
+    use crate::mcts::node::create_expanded_node;
     use crate::test::injectable_game::{InjectableGameAction, InjectableGameState};
     use std::vec;
 

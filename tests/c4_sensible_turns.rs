@@ -1,10 +1,10 @@
 use mon2y_rs::game_trait::Game;
 use mon2y_rs::games::c4;
 use mon2y_rs::games::c4::C4;
-use mon2y_rs::mon2y::game_trait::{Action, State};
-use mon2y_rs::mon2y::node::create_expanded_node;
-use mon2y_rs::mon2y::tree::Tree;
-use mon2y_rs::mon2y::{calculate_best_turn, BestTurnPolicy};
+use mon2y_rs::mcts::game_trait::{Action, State};
+use mon2y_rs::mcts::node::create_expanded_node;
+use mon2y_rs::mcts::tree::Tree;
+use mon2y_rs::mcts::{calculate_best_turn, BestTurnPolicy};
 
 #[test]
 fn test_c4_one_action_blocks_win() {
@@ -91,7 +91,7 @@ fn test_c4_play_out_repeated() {
 fn test_c4_plays_through_without_crash() {
     let mut c4_state = C4.init_game();
     while !c4_state.terminal() {
-        if let mon2y_rs::mon2y::game::Actor::Player(_) = c4_state.next_actor() {
+        if let mon2y_rs::mcts::game::Actor::Player(_) = c4_state.next_actor() {
             let action = calculate_best_turn(
                 100,
                 None,
@@ -109,7 +109,7 @@ fn test_c4_plays_through_without_crash() {
 fn test_c4_plays_through_multiple_threads_without_crash() {
     let mut c4_state = C4.init_game();
     while !c4_state.terminal() {
-        if let mon2y_rs::mon2y::game::Actor::Player(_) = c4_state.next_actor() {
+        if let mon2y_rs::mcts::game::Actor::Player(_) = c4_state.next_actor() {
             let action = calculate_best_turn(
                 100,
                 None,

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use log::trace;
 
-use crate::mon2y::tree::Selection;
+use crate::mcts::tree::Selection;
 
 use super::game_trait::{Action, Actor, State};
 use super::node::{best_pick, create_expanded_node, Node};

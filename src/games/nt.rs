@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::game::Game;
-use crate::mon2y::game_trait::{Action, Actor, State};
+use crate::mcts::game_trait::{Action, Actor, State};
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum NTAction {

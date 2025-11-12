@@ -1,4 +1,4 @@
-use crate::mon2y::game_trait::{Action, State};
+use crate::mcts::game_trait::{Action, State};
 
 use std::io;
 pub trait Game {

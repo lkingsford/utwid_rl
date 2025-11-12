@@ -1,4 +1,4 @@
-use crate::mon2y::game::{Action, Actor, State};
+use crate::mcts::game::{Action, Actor, State};
 
 ///
 /// A generic test game that can have injected reward, terminal state, and permitted actions

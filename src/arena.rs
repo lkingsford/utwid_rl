@@ -1,7 +1,7 @@
 //! Plays configurations of the MCTS against one another
 mod game;
 mod games;
-mod mon2y;
+mod mcts;
 mod test;
 
 //use crate::mon2y::action_log::{Action, ActionLogEntry};
@@ -11,8 +11,8 @@ use game::Game;
 use games::Games;
 use games::{C4, CS, EBR, NT};
 use log::Record;
-use mon2y::game_trait::{Action, Actor, State};
-use mon2y::{calculate_best_turn, BestTurnPolicy};
+use mcts::game_trait::{Action, Actor, State};
+use mcts::{calculate_best_turn, BestTurnPolicy};
 use rand::Rng;
 use serde::Deserialize;
 use std::io::Write;
