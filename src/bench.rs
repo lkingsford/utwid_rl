@@ -1,14 +1,9 @@
 //! Benchmarks mon2y_rs by just taking the first turn and timing it
-mod game;
-mod games;
-mod mcts;
-mod test;
-
 use clap::Parser;
-use game::Game;
-use games::Games;
-use games::{C4, CS, EBR, NT};
-use mcts::{calculate_best_turn, BestTurnPolicy};
+use mon2y::game::Game;
+use mon2y::games::Games;
+use mon2y::games::{C4, CS, EBR, NT};
+use mon2y::mcts::{calculate_best_turn, BestTurnPolicy};
 use std::time::Instant;
 
 #[derive(Debug, Parser)]
