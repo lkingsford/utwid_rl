@@ -1,7 +1,7 @@
-use mon2y_rs::game::Game;
+use mon2y_rs::game_trait::Game;
 use mon2y_rs::games::c4;
 use mon2y_rs::games::c4::C4;
-use mon2y_rs::mon2y::game::{Action, State};
+use mon2y_rs::mon2y::game_trait::{Action, State};
 use mon2y_rs::mon2y::node::create_expanded_node;
 use mon2y_rs::mon2y::tree::Tree;
 use mon2y_rs::mon2y::{calculate_best_turn, BestTurnPolicy};

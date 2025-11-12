@@ -1,17 +1,12 @@
-mod game;
-mod games;
-mod mon2y;
-mod test;
-
 //use crate::mon2y::action_log::{Action, ActionLogEntry};
 use clap::{Parser, ValueEnum};
 use env_logger::fmt::Formatter;
-use game::Game;
-use games::Games;
-use games::{C4, CS, EBR, NT};
 use log::Record;
-use mon2y::game::{Action, Actor, State};
-use mon2y::{calculate_best_turn, BestTurnPolicy};
+use mon2y::game::Game;
+use mon2y::games::Games;
+use mon2y::games::{C4, CS, EBR, NT};
+use mon2y::mon2y::game_trait::{Action, Actor, State};
+use mon2y::mon2y::{calculate_best_turn, BestTurnPolicy};
 use std::io;
 use std::io::Write;
 use std::thread;

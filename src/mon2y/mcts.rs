@@ -3,10 +3,9 @@ use std::sync::Arc;
 
 use log::trace;
 
-use crate::mon2y::game::Actor;
 use crate::mon2y::tree::Selection;
 
-use super::game::{Action, State};
+use super::game_trait::{Action, Actor, State};
 use super::node::{best_pick, create_expanded_node, Node};
 use super::tree::Tree;
 use super::BestTurnPolicy;

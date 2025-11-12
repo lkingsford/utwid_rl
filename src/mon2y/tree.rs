@@ -1,4 +1,4 @@
-use super::game::{Action, Actor, State};
+use super::game_trait::{Action, Actor, State};
 use super::node::Node;
 use super::weighted_random::weighted_random;
 use super::Reward;

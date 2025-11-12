@@ -11,7 +11,7 @@ use game::Game;
 use games::Games;
 use games::{C4, CS, EBR, NT};
 use log::Record;
-use mon2y::game::{Action, Actor, State};
+use mon2y::game_trait::{Action, Actor, State};
 use mon2y::{calculate_best_turn, BestTurnPolicy};
 use rand::Rng;
 use serde::Deserialize;

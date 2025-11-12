@@ -28,5 +28,5 @@ path = "src/arena.rs"
 
 [lib]
 name = "mon2y"
-path = "src/mon2y_lib.rs"
+path = "src/lib.rs"
 crate-type = ["cdylib", "rlib", "staticlib"]

@@ -1,4 +1,4 @@
-use super::game::{Action, Actor, State};
+use super::game_trait::{Action, Actor, State};
 use core::panic;
 use log::{trace, warn};
 use rand::Rng;

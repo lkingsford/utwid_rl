@@ -1,4 +1,4 @@
-pub mod game;
+pub mod game_trait;
 mod mcts;
 pub use mcts::calculate_best_turn;
 pub mod node;

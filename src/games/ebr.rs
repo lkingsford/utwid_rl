@@ -5,7 +5,7 @@ use std::hash::Hash;
 use std::sync::LazyLock;
 
 use crate::game::Game;
-use crate::mon2y::game::{Action, Actor, State};
+use crate::mon2y::game_trait::{Action, Actor, State};
 
 /*
 OK - here's the deal. This is to help me playtest something.
