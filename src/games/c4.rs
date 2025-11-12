@@ -1,16 +1,46 @@
+use std::collections::HashMap;
 use std::io;
 
 use crate::game::Game;
+use crate::hyperparam::{Hyperparams, ParamMeta, ParamRange, ParamValue};
 use crate::mcts::game_trait::{Action, Actor, State};
 
 pub const BOARD_WIDTH: usize = 7;
 pub const BOARD_HEIGHT: usize = 6;
 
-pub struct C4Hyperparams {}
+#[derive(Clone, Debug)]
+pub struct C4Hyperparams {
+    pub board_width: i64,
+    pub board_height: i64,
+}
 
 impl Default for C4Hyperparams {
     fn default() -> Self {
-        C4Hyperparams {}
+        C4Hyperparams {
+            board_width: 7,
+            board_height: 6,
+        }
+    }
+}
+
+impl Hyperparams for C4Hyperparams {
+    fn metadata() -> std::collections::HashMap<String, crate::hyperparam::ParamMeta> {
+        HashMap::from([
+            (
+                String::from("board_width"),
+                ParamMeta {
+                    default: ParamValue::Int(7),
+                    range: Option::Some(ParamRange::IntRange(0, i64::MAX)),
+                },
+            ),
+            (
+                String::from("board_height"),
+                ParamMeta {
+                    default: ParamValue::Int(6),
+                    range: Option::Some(ParamRange::IntRange(0, i64::MAX)),
+                },
+            ),
+        ])
     }
 }
 

@@ -22,7 +22,6 @@ pub struct ParamMeta {
 }
 
 pub trait Hyperparams: Clone + Send + Sync + Default + 'static {
-    fn defaults() -> Self;
     fn metadata() -> HashMap<String, ParamMeta>;
 }
 
@@ -30,5 +29,4 @@ impl Hyperparams for () {
     fn metadata() -> HashMap<String, ParamMeta> {
         HashMap::new()
     }
-    fn defaults() -> Self {}
 }
