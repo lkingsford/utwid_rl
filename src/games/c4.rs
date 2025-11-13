@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io;
 
 use crate::game::Game;
-use crate::hyperparam::{Hyperparams, ParamMeta, ParamRange, ParamValue};
+use crate::hyper::{Hyperparams, ParamMeta, ParamRange, ParamValue};
 use crate::mcts::game_trait::{Action, Actor, State};
 
 pub const BOARD_WIDTH: usize = 7;

@@ -1,4 +1,4 @@
-use crate::hyperparam::Hyperparams;
+use crate::hyper::Hyperparams;
 use crate::mcts::game_trait::{Action, State};
 
 use std::io;

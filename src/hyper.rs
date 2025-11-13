@@ -4,6 +4,7 @@ use std::collections::HashMap;
 pub enum ParamValue {
     Float(f64),
     Int(i64),
+    Uint(u64),
     Bool(bool),
     Enum(String),
     Stanza(HashMap<String, ParamMeta>),
@@ -13,6 +14,7 @@ pub enum ParamValue {
 pub enum ParamRange {
     FloatRange(f64, f64),
     IntRange(i64, i64),
+    UintRange(u64, u64),
     EnumOptions(Vec<String>),
 }
 #[derive(Clone, Debug)]
