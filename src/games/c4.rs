@@ -5,13 +5,10 @@ use crate::game::Game;
 use crate::hyper::{Hyperparams, ParamMeta, ParamRange, ParamValue};
 use crate::mcts::game_trait::{Action, Actor, State};
 
-pub const BOARD_WIDTH: usize = 7;
-pub const BOARD_HEIGHT: usize = 6;
-
 #[derive(Clone, Debug)]
 pub struct C4Hyperparams {
-    pub board_width: i64,
-    pub board_height: i64,
+    pub board_width: usize,
+    pub board_height: usize,
 }
 
 impl Default for C4Hyperparams {
@@ -24,20 +21,20 @@ impl Default for C4Hyperparams {
 }
 
 impl Hyperparams for C4Hyperparams {
-    fn metadata() -> std::collections::HashMap<String, crate::hyperparam::ParamMeta> {
+    fn metadata() -> std::collections::HashMap<String, crate::hyper::ParamMeta> {
         HashMap::from([
             (
                 String::from("board_width"),
                 ParamMeta {
-                    default: ParamValue::Int(7),
-                    range: Option::Some(ParamRange::IntRange(0, i64::MAX)),
+                    default: ParamValue::Uint(7),
+                    range: Option::None,
                 },
             ),
             (
                 String::from("board_height"),
                 ParamMeta {
-                    default: ParamValue::Int(6),
-                    range: Option::Some(ParamRange::IntRange(0, i64::MAX)),
+                    default: ParamValue::Uint(6),
+                    range: Option::None,
                 },
             ),
         ])
@@ -56,13 +53,14 @@ impl Action for C4Action {
         match self {
             C4Action::Drop(x) => {
                 let column = *x as usize;
-                for y in (0..BOARD_HEIGHT).rev() {
-                    if new_board[y * BOARD_WIDTH + column] == C4Cell::Empty {
-                        new_board[y * BOARD_WIDTH + column] = C4Cell::Filled(state.next_player);
+                for y in (0..state.hyperparams.board_height).rev() {
+                    if new_board[y * state.hyperparams.board_width + column] == C4Cell::Empty {
+                        new_board[y * state.hyperparams.board_width + column] =
+                            C4Cell::Filled(state.next_player);
                         break;
                     }
                 }
-                let winner = check_for_win(&new_board);
+                let winner = check_for_win(&new_board, &state);
                 let (terminal, reward) = match winner {
                     CheckForWinResult::Winner(0) => (true, [1.0 as f64, -1.0 as f64].to_vec()),
                     CheckForWinResult::Winner(1) => (true, [-1.0 as f64, 1.0 as f64].to_vec()),
@@ -74,6 +72,7 @@ impl Action for C4Action {
                     board: new_board,
                     next_player: (state.next_player + 1) % 2,
                     terminal,
+                    hyperparams: C4Hyperparams::default(),
                     reward,
                 }
             }
@@ -88,72 +87,92 @@ enum CheckForWinResult {
     Ongoing,
 }
 
-fn check_for_win(board: &Vec<C4Cell>) -> CheckForWinResult {
+fn check_for_win(board: &Vec<C4Cell>, state: &C4State) -> CheckForWinResult {
     // Check stalemate
     if board.iter().all(|&cell| cell != C4Cell::Empty) {
         return CheckForWinResult::Stalemate;
     }
 
     // Check Horizontal win
-    for row in 0..BOARD_HEIGHT {
-        for column in 0..BOARD_WIDTH - 3 {
-            if board[row * BOARD_WIDTH + column] == board[row * BOARD_WIDTH + column + 1]
-                && board[row * BOARD_WIDTH + column] == board[row * BOARD_WIDTH + column + 2]
-                && board[row * BOARD_WIDTH + column] == board[row * BOARD_WIDTH + column + 3]
-                && board[row * BOARD_WIDTH + column] != C4Cell::Empty
+    for row in 0..state.hyperparams.board_height {
+        for column in 0..state.hyperparams.board_width - 3 {
+            if board[row * state.hyperparams.board_width + column]
+                == board[row * state.hyperparams.board_width + column + 1]
+                && board[row * state.hyperparams.board_width + column]
+                    == board[row * state.hyperparams.board_width + column + 2]
+                && board[row * state.hyperparams.board_width + column]
+                    == board[row * state.hyperparams.board_width + column + 3]
+                && board[row * state.hyperparams.board_width + column] != C4Cell::Empty
             {
-                return CheckForWinResult::Winner(match board[row * BOARD_WIDTH + column] {
-                    C4Cell::Filled(player) => player,
-                    _ => unreachable!(),
-                });
+                return CheckForWinResult::Winner(
+                    match board[row * state.hyperparams.board_width + column] {
+                        C4Cell::Filled(player) => player,
+                        _ => unreachable!(),
+                    },
+                );
             }
         }
     }
 
     // Check Vertical win
-    for column in 0..BOARD_WIDTH {
-        for row in 0..BOARD_HEIGHT - 3 {
-            if board[row * BOARD_WIDTH + column] == board[(row + 1) * BOARD_WIDTH + column]
-                && board[row * BOARD_WIDTH + column] == board[(row + 2) * BOARD_WIDTH + column]
-                && board[row * BOARD_WIDTH + column] == board[(row + 3) * BOARD_WIDTH + column]
-                && board[row * BOARD_WIDTH + column] != C4Cell::Empty
+    for column in 0..state.hyperparams.board_width {
+        for row in 0..state.hyperparams.board_height - 3 {
+            if board[row * state.hyperparams.board_width + column]
+                == board[(row + 1) * state.hyperparams.board_width + column]
+                && board[row * state.hyperparams.board_width + column]
+                    == board[(row + 2) * state.hyperparams.board_width + column]
+                && board[row * state.hyperparams.board_width + column]
+                    == board[(row + 3) * state.hyperparams.board_width + column]
+                && board[row * state.hyperparams.board_width + column] != C4Cell::Empty
             {
-                return CheckForWinResult::Winner(match board[row * BOARD_WIDTH + column] {
-                    C4Cell::Filled(player) => player,
-                    _ => unreachable!(),
-                });
+                return CheckForWinResult::Winner(
+                    match board[row * state.hyperparams.board_width + column] {
+                        C4Cell::Filled(player) => player,
+                        _ => unreachable!(),
+                    },
+                );
             }
         }
     }
 
     // Check \ win
-    for column in 0..BOARD_WIDTH - 3 {
-        for row in 0..BOARD_HEIGHT - 3 {
-            if board[row * BOARD_WIDTH + column] == board[(row + 1) * BOARD_WIDTH + column + 1]
-                && board[row * BOARD_WIDTH + column] == board[(row + 2) * BOARD_WIDTH + column + 2]
-                && board[row * BOARD_WIDTH + column] == board[(row + 3) * BOARD_WIDTH + column + 3]
-                && board[row * BOARD_WIDTH + column] != C4Cell::Empty
+    for column in 0..state.hyperparams.board_width - 3 {
+        for row in 0..state.hyperparams.board_height - 3 {
+            if board[row * state.hyperparams.board_width + column]
+                == board[(row + 1) * state.hyperparams.board_width + column + 1]
+                && board[row * state.hyperparams.board_width + column]
+                    == board[(row + 2) * state.hyperparams.board_width + column + 2]
+                && board[row * state.hyperparams.board_width + column]
+                    == board[(row + 3) * state.hyperparams.board_width + column + 3]
+                && board[row * state.hyperparams.board_width + column] != C4Cell::Empty
             {
-                return CheckForWinResult::Winner(match board[row * BOARD_WIDTH + column] {
-                    C4Cell::Filled(player) => player,
-                    _ => unreachable!(),
-                });
+                return CheckForWinResult::Winner(
+                    match board[row * state.hyperparams.board_width + column] {
+                        C4Cell::Filled(player) => player,
+                        _ => unreachable!(),
+                    },
+                );
             }
         }
     }
 
     // Check / win
-    for column in 0..BOARD_WIDTH - 3 {
-        for row in 3..BOARD_HEIGHT {
-            if board[row * BOARD_WIDTH + column] == board[(row - 1) * BOARD_WIDTH + column + 1]
-                && board[row * BOARD_WIDTH + column] == board[(row - 2) * BOARD_WIDTH + column + 2]
-                && board[row * BOARD_WIDTH + column] == board[(row - 3) * BOARD_WIDTH + column + 3]
-                && board[row * BOARD_WIDTH + column] != C4Cell::Empty
+    for column in 0..state.hyperparams.board_width - 3 {
+        for row in 3..state.hyperparams.board_height {
+            if board[row * state.hyperparams.board_width + column]
+                == board[(row - 1) * state.hyperparams.board_width + column + 1]
+                && board[row * state.hyperparams.board_width + column]
+                    == board[(row - 2) * state.hyperparams.board_width + column + 2]
+                && board[row * state.hyperparams.board_width + column]
+                    == board[(row - 3) * state.hyperparams.board_width + column + 3]
+                && board[row * state.hyperparams.board_width + column] != C4Cell::Empty
             {
-                return CheckForWinResult::Winner(match board[row * BOARD_WIDTH + column] {
-                    C4Cell::Filled(player) => player,
-                    _ => unreachable!(),
-                });
+                return CheckForWinResult::Winner(
+                    match board[row * state.hyperparams.board_width + column] {
+                        C4Cell::Filled(player) => player,
+                        _ => unreachable!(),
+                    },
+                );
             }
         }
     }
@@ -173,12 +192,13 @@ pub struct C4State {
     next_player: u8,
     terminal: bool,
     reward: Vec<f64>,
+    hyperparams: C4Hyperparams,
 }
 
 impl State for C4State {
     type ActionType = C4Action;
     fn permitted_actions(&self) -> Vec<Self::ActionType> {
-        (0..BOARD_WIDTH)
+        (0..self.hyperparams.board_width)
             .filter(|&i| self.board[i] == C4Cell::Empty)
             .map(|i| C4Action::Drop(i as u8))
             .collect::<Vec<C4Action>>()
@@ -200,18 +220,18 @@ pub struct C4;
 impl Game for C4 {
     type StateType = C4State;
     type ActionType = C4Action;
-    type HyperparamsType = ();
+    type HyperparamsType = C4Hyperparams;
 
     fn visualise_state(&self, state: &Self::StateType) {
-        for x in 0..BOARD_WIDTH {
+        for x in 0..state.hyperparams.board_width {
             print!("{}", x);
         }
         print!("\n");
-        for y in 0..BOARD_HEIGHT {
-            for x in 0..BOARD_WIDTH {
+        for y in 0..state.hyperparams.board_height {
+            for x in 0..state.hyperparams.board_width {
                 print!(
                     "{}",
-                    match state.board[y * BOARD_WIDTH + x] {
+                    match state.board[y * state.hyperparams.board_width + x] {
                         C4Cell::Empty => "◦",
                         C4Cell::Filled(1) => "◯",
                         C4Cell::Filled(0) => "●",
@@ -232,12 +252,16 @@ impl Game for C4 {
         C4Action::Drop(action)
     }
 
-    fn init_game(&self, _hyperparams: &Self::HyperparamsType) -> Self::StateType {
+    fn init_game(&self, hyperparams: &Self::HyperparamsType) -> Self::StateType {
         C4State {
-            board: vec![C4Cell::Empty; BOARD_HEIGHT * BOARD_WIDTH],
+            board: vec![
+                C4Cell::Empty;
+                usize::from(hyperparams.board_width * hyperparams.board_height)
+            ],
             next_player: 0,
             terminal: false,
             reward: [0.0 as f64, 0.0 as f64].to_vec(),
+            hyperparams: hyperparams.clone(),
         }
     }
 }
