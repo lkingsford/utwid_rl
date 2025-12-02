@@ -12,7 +12,8 @@ use std::marker::PhantomData;
 #[derive(Debug, PartialEq, Clone)]
 pub struct SelectionResult<ActionType: Action, GameHyperrewardType> {
     pub selection: Vec<ActionType>,
-    pub random_walk_steps: i64,
+    pub random_walk_steps: u32,
+    pub selected_steps: u32,
     pub round_hyperreward: GameHyperrewardType,
 }
 
@@ -29,7 +30,7 @@ pub struct Tree<StateType: State, ActionType: Action<StateType = StateType>> {
 #[derive(Debug, PartialEq)]
 pub struct PlayOutResult {
     pub reward: Vec<Reward>,
-    pub random_walk_steps: i64,
+    pub random_walk_steps: u32,
 }
 
 impl<StateType: State<ActionType = ActionType>, ActionType: Action<StateType = StateType>>
@@ -64,12 +65,13 @@ where
     /// Returns a path to the current selection
     ///
     pub fn selection(&self) -> Selection<ActionType, StateType::GameHyperrewardType> {
-        return Tree::select_from(self.root.clone(), self.constant);
+        return Tree::select_from(self.root.clone(), self.constant, 1);
     }
 
     fn select_from(
         node: Arc<RwLock<Node<StateType, ActionType>>>,
         constant: f64,
+        depth: u32,
     ) -> Selection<ActionType, StateType::GameHyperrewardType> {
         let best_pick = super::node::best_pick(&node, constant);
         if best_pick.is_empty() {
@@ -87,7 +89,7 @@ where
                 }
             };
             if is_expanded {
-                let selection = Tree::select_from(child, constant);
+                let selection = Tree::select_from(child, constant, depth + 1);
                 match selection {
                     // FullyExplored shouldn't normally happen here (because
                     // best_pick will handle it) - but with multithreading, it's
@@ -106,6 +108,7 @@ where
                         return Selection::Selection(SelectionResult {
                             selection: result_selection,
                             random_walk_steps: selection_result.random_walk_steps,
+                            selected_steps: depth,
                             round_hyperreward: selection_result.round_hyperreward,
                         });
                     }
@@ -114,6 +117,7 @@ where
                 return Selection::Selection(SelectionResult {
                     selection: vec![action.clone()],
                     random_walk_steps: 0,
+                    selected_steps: depth,
                     round_hyperreward: node.read().unwrap().state().round_hyperreward(),
                 });
             }
@@ -257,6 +261,7 @@ where
             return Selection::Selection(SelectionResult {
                 selection: selection_result.selection,
                 random_walk_steps: play_out_result.random_walk_steps,
+                selected_steps: selection_result.selected_steps,
                 round_hyperreward: selection_result.round_hyperreward, // Propagate from selection_result
             });
         }
@@ -401,6 +406,7 @@ mod tests {
         ];
         let selection = Selection::Selection(SelectionResult {
             selection: selection_path.clone(),
+            selected_steps: 2,
             random_walk_steps: 0,
             round_hyperreward: (),
         });

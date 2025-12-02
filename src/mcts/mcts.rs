@@ -1,8 +1,10 @@
 use std::sync::atomic::AtomicUsize;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::channel;
 use std::sync::Arc;
 
 use log::trace;
+
+use crate::hyper::Hyperrewards;
 
 use super::game_trait::{Action, Actor, State};
 use super::node::{create_expanded_node, Node};
@@ -19,7 +21,7 @@ pub fn run_mcts_iterations<
     iterations: usize,
     time_limit: Option<std::time::Duration>,
     thread_count: usize,
-    sender: Box<dyn MctsSender<StateType::GameHyperrewardType>>,
+    sender: Box<dyn MctsSender<Hyperrewards<StateType::GameHyperrewardType>>>,
 ) {
     let mut threads = vec![];
 
@@ -46,12 +48,29 @@ pub fn run_mcts_iterations<
                 {
                     // If the tree is fully explored, we want to notify the sender
                     if let Selection::Selection(selection_result) = result {
-                        sender_clone.send(selection_result.round_hyperreward).unwrap();
+                        let hyperrewards_to_send = Hyperrewards {
+                            // TBD if this should be adding here, or just the 'selected turns' and
+                            // add it later.
+                            turns: selection_result.random_walk_steps
+                                + selection_result.selected_steps,
+                            rwalk: selection_result.random_walk_steps as u32,
+                            ucb: selection_result.ucb,
+                            game_hrs: selection_result.round_hyperreward,
+                        };
+                        sender_clone.send(hyperrewards_to_send).unwrap();
                     }
                     break;
                 }
-                if let Selection::Selection(selection_result) = result { // Send the round_hyperreward
-                    sender_clone.send(selection_result.round_hyperreward).unwrap();
+                if let Selection::Selection(selection_result) = result {
+                    // Send the round_hyperreward
+                    let hyperrewards_to_send = Hyperrewards {
+                        // Like above - should figure out if we expose selected turns or overall
+                        turns: selection_result.random_walk_steps + selection_result.selected_steps,
+                        rwalk: selection_result.random_walk_steps as u32,
+                        ucb: selection_result.ucb,
+                        game_hrs: selection_result.round_hyperreward,
+                    };
+                    sender_clone.send(hyperrewards_to_send).unwrap();
                 }
             }
         }));
@@ -95,8 +114,14 @@ where
     }
 
     let tree = Arc::new(Tree::new_with_constant(root_node, exploration_constant));
-    let noop_sender: Box<dyn MctsSender<StateType::GameHyperrewardType>> = Box::new(NoopSender::new());
-    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count, noop_sender);
+    let noop_sender = Box::new(NoopSender::new());
+    run_mcts_iterations(
+        tree.clone(),
+        iterations,
+        time_limit,
+        thread_count,
+        noop_sender,
+    );
 
     if log::log_enabled!(log::Level::Trace) || log_children {
         tree.root.clone().read().unwrap().log_children(0);
@@ -195,12 +220,33 @@ where
 
 /// Explore a tree to get the hyperrewards
 pub fn explore_tree<
-    'a,
     StateType: State<ActionType = ActionType> + Sync + Send + 'static,
     ActionType: Action<StateType = StateType> + Sync + Send + 'static,
->()
+>(
+    iterations: usize,
+    time_limit: Option<std::time::Duration>,
+    thread_count: usize,
+    state: StateType,
+    exploration_constant: f64,
+) -> Vec<Hyperrewards<StateType::GameHyperrewardType>>
 where
     StateType: State<ActionType = ActionType>,
     ActionType: Action<StateType = StateType>,
+    <StateType as State>::GameHyperrewardType: Clone,
 {
+    log::debug!("Starting explore tree");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let root_node = create_expanded_node(state, None);
+    if let Node::Expanded { children, .. } = &root_node {
+        if children.len() == 1 {
+            log::debug!("Short circuited - only one option");
+            return vec![];
+        }
+    }
+
+    let tree = Arc::new(Tree::new_with_constant(root_node, exploration_constant));
+    let sender = Box::new(tx);
+    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count, sender);
+
+    rx.iter().collect()
 }
