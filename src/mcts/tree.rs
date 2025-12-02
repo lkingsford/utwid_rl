@@ -105,8 +105,8 @@ where
                         result_selection.extend(selection_result.selection);
                         return Selection::Selection(SelectionResult {
                             selection: result_selection,
-                            random_walk_steps: selection_result.random_walk_steps, // Propagate from child
-                            round_hyperreward: selection_result.round_hyperreward, // Propagate from child
+                            random_walk_steps: selection_result.random_walk_steps,
+                            round_hyperreward: selection_result.round_hyperreward,
                         });
                     }
                 }
@@ -114,7 +114,7 @@ where
                 return Selection::Selection(SelectionResult {
                     selection: vec![action.clone()],
                     random_walk_steps: 0,
-                    round_hyperreward: node.read().unwrap().state().round_hyperreward(), // Get from current state
+                    round_hyperreward: node.read().unwrap().state().round_hyperreward(),
                 });
             }
         }
@@ -641,4 +641,3 @@ mod tests {
         );
     }
 }
-

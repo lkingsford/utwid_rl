@@ -1,10 +1,12 @@
 use std::sync::atomic::AtomicUsize;
+use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 
 use log::trace;
 
 use super::game_trait::{Action, Actor, State};
-use super::node::{best_pick, create_expanded_node, Node};
+use super::node::{create_expanded_node, Node};
+use super::sender::{MctsSender, NoopSender};
 use super::tree::{Selection, Tree};
 use super::BestTurnPolicy;
 
@@ -17,6 +19,7 @@ pub fn run_mcts_iterations<
     iterations: usize,
     time_limit: Option<std::time::Duration>,
     thread_count: usize,
+    sender: Box<dyn MctsSender<StateType::GameHyperrewardType>>,
 ) {
     let mut threads = vec![];
 
@@ -26,6 +29,7 @@ pub fn run_mcts_iterations<
         let tree_clone: Arc<Tree<StateType, ActionType>> = Arc::clone(&tree);
         let finished_iterations_clone: Arc<AtomicUsize> = Arc::clone(&finished_iterations);
         let time_started = std::time::Instant::now();
+        let sender_clone = sender.clone_sender();
         threads.push(std::thread::spawn(move || loop {
             {
                 trace!(
@@ -40,7 +44,14 @@ pub fn run_mcts_iterations<
                     || matches!(result, Selection::FullyExplored)
                     || time_started.elapsed() > time_limit.unwrap_or(std::time::Duration::MAX)
                 {
+                    // If the tree is fully explored, we want to notify the sender
+                    if let Selection::Selection(selection_result) = result {
+                        sender_clone.send(selection_result.round_hyperreward).unwrap();
+                    }
                     break;
+                }
+                if let Selection::Selection(selection_result) = result { // Send the round_hyperreward
+                    sender_clone.send(selection_result.round_hyperreward).unwrap();
                 }
             }
         }));
@@ -72,6 +83,7 @@ pub fn calculate_best_turn<
 where
     StateType: State<ActionType = ActionType>,
     ActionType: Action<StateType = StateType>,
+    <StateType as State>::GameHyperrewardType: Clone,
 {
     log::debug!("Starting next turn");
     let root_node = create_expanded_node(state, None);
@@ -83,7 +95,8 @@ where
     }
 
     let tree = Arc::new(Tree::new_with_constant(root_node, exploration_constant));
-    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count);
+    let noop_sender: Box<dyn MctsSender<StateType::GameHyperrewardType>> = Box::new(NoopSender::new());
+    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count, noop_sender);
 
     if log::log_enabled!(log::Level::Trace) || log_children {
         tree.root.clone().read().unwrap().log_children(0);
