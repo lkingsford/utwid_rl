@@ -9,8 +9,10 @@ pub use ebr::EBR;
 pub use nt::NT;
 
 use clap::ValueEnum;
+use pyo3::prelude::*;
 use serde::Deserialize;
 
+#[pyclass]
 #[derive(Debug, Clone, ValueEnum, Deserialize)]
 pub enum Games {
     C4,

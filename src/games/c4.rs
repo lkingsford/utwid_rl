@@ -1,9 +1,12 @@
+use crate::game::Game;
+use crate::hyper::{
+    GameHyperrewardTrait, Hyperparams, Hyperrewards, ParamMeta, ParamRange, ParamValue,
+};
+use crate::mcts::game_trait::{Action, Actor, State};
+use pyo3::prelude::*;
+use pyo3::types::PyAny;
 use std::collections::HashMap;
 use std::io;
-
-use crate::game::Game;
-use crate::hyper::{Hyperparams, Hyperrewards, ParamMeta, ParamRange, ParamValue};
-use crate::mcts::game_trait::{Action, Actor, State};
 
 #[derive(Clone, Debug)]
 pub struct C4Hyperparams {
@@ -41,8 +44,43 @@ impl Hyperparams for C4Hyperparams {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct C4Hyperrewards {}
+#[derive(Debug, Clone)]
+pub struct C4Hyperrewards {
+    pub first_player_won: bool,
+}
+
+#[pyclass(name = "C4Hyperrewards")]
+#[derive(Clone)]
+pub struct PyC4Hyperrewards {
+    #[pyo3(get)]
+    first_player_won: bool,
+}
+
+#[pymethods]
+impl PyC4Hyperrewards {
+    #[new]
+    fn new(first_player_won: bool) -> Self {
+        Self { first_player_won }
+    }
+}
+
+impl GameHyperrewardTrait for C4Hyperrewards {
+    fn to_py(&self, py: Python) -> PyResult<Py<PyAny>> {
+        let py_hr = PyC4Hyperrewards {
+            first_player_won: self.first_player_won,
+        };
+        let py_obj = Py::new(py, py_hr)?;
+        Ok(py_obj.into())
+    }
+}
+
+impl Default for C4Hyperrewards {
+    fn default() -> Self {
+        C4Hyperrewards {
+            first_player_won: false,
+        }
+    }
+}
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum C4Action {
@@ -200,7 +238,7 @@ pub struct C4State {
 
 impl State for C4State {
     type ActionType = C4Action;
-    type GameHyperrewardType = ();
+    type GameHyperrewardType = C4Hyperrewards;
     fn permitted_actions(&self) -> Vec<Self::ActionType> {
         (0..self.hyperparams.board_width)
             .filter(|&i| self.board[i] == C4Cell::Empty)
@@ -218,7 +256,18 @@ impl State for C4State {
         self.reward.clone()
     }
     fn round_hyperreward(&self) -> Self::GameHyperrewardType {
-        ()
+        if !self.terminal {
+            return C4Hyperrewards::default();
+        }
+        match check_for_win(&self.board, self) {
+            CheckForWinResult::Winner(0) => C4Hyperrewards {
+                first_player_won: true,
+            },
+            CheckForWinResult::Winner(1) => C4Hyperrewards {
+                first_player_won: false,
+            },
+            _ => C4Hyperrewards::default(),
+        }
     }
 }
 
@@ -228,7 +277,7 @@ impl Game for C4 {
     type StateType = C4State;
     type ActionType = C4Action;
     type HyperparamsType = C4Hyperparams;
-    type HyperrewardsType = ();
+    type HyperrewardsType = C4Hyperrewards;
 
     fn visualise_state(&self, state: &Self::StateType) {
         for x in 0..state.hyperparams.board_width {
