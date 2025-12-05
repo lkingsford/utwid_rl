@@ -32,3 +32,16 @@ impl Hyperparams for () {
         HashMap::new()
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct Hyperrewards<T> {
+    pub turns: u32,
+    pub rwalk: u32,
+    pub game_hrs: T,
+}
+
+impl<T> Hyperrewards<T> {
+    fn random_walk_prop(&self) -> f64 {
+        f64::from(self.rwalk) / f64::from(self.turns)
+    }
+}

@@ -98,6 +98,7 @@ impl NTState {
 
 impl State for NTState {
     type ActionType = NTAction;
+    type GameHyperrewardType = ();
 
     fn next_actor(&self) -> Actor<NTAction> {
         match self.to_draw {
@@ -149,6 +150,10 @@ impl State for NTState {
         log::trace!("Reward: {:?}", reward);
         reward
     }
+
+    fn round_hyperreward(&self) -> Self::GameHyperrewardType {
+        ()
+    }
 }
 
 pub struct NT {
@@ -159,6 +164,7 @@ impl Game for NT {
     type StateType = NTState;
     type ActionType = NTAction;
     type HyperparamsType = ();
+    type HyperrewardsType = ();
 
     fn visualise_state(&self, state: &Self::StateType) {
         for i in 0..self.player_count {

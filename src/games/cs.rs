@@ -165,6 +165,7 @@ impl CSState {
 
 impl State for CSState {
     type ActionType = CSAction;
+    type GameHyperrewardType = ();
 
     fn next_actor(&self) -> Actor<CSAction> {
         self.next_actor.clone()
@@ -285,6 +286,10 @@ impl State for CSState {
             .values()
             .any(|&count| count >= 3)
     }
+
+    fn round_hyperreward(&self) -> Self::GameHyperrewardType {
+        ()
+    }
 }
 
 pub struct CS {
@@ -295,6 +300,7 @@ impl Game for CS {
     type StateType = CSState;
     type ActionType = CSAction;
     type HyperparamsType = ();
+    type HyperrewardsType = ();
 
     fn init_game(&self, _hyperparams: &Self::HyperparamsType) -> Self::StateType {
         let positions: Vec<[u8; COLUMN_COUNT]> =

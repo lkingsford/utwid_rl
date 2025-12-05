@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io;
 
 use crate::game::Game;
-use crate::hyper::{Hyperparams, ParamMeta, ParamRange, ParamValue};
+use crate::hyper::{Hyperparams, Hyperrewards, ParamMeta, ParamRange, ParamValue};
 use crate::mcts::game_trait::{Action, Actor, State};
 
 #[derive(Clone, Debug)]
@@ -40,6 +40,9 @@ impl Hyperparams for C4Hyperparams {
         ])
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct C4Hyperrewards {}
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum C4Action {
@@ -197,6 +200,7 @@ pub struct C4State {
 
 impl State for C4State {
     type ActionType = C4Action;
+    type GameHyperrewardType = ();
     fn permitted_actions(&self) -> Vec<Self::ActionType> {
         (0..self.hyperparams.board_width)
             .filter(|&i| self.board[i] == C4Cell::Empty)
@@ -213,6 +217,9 @@ impl State for C4State {
     fn reward(&self) -> Vec<f64> {
         self.reward.clone()
     }
+    fn round_hyperreward(&self) -> Self::GameHyperrewardType {
+        ()
+    }
 }
 
 pub struct C4;
@@ -221,6 +228,7 @@ impl Game for C4 {
     type StateType = C4State;
     type ActionType = C4Action;
     type HyperparamsType = C4Hyperparams;
+    type HyperrewardsType = ();
 
     fn visualise_state(&self, state: &Self::StateType) {
         for x in 0..state.hyperparams.board_width {

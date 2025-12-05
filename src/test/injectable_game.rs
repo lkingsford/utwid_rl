@@ -1,4 +1,4 @@
-use crate::mcts::game::{Action, Actor, State};
+use crate::mcts::game_trait::{Action, Actor, State};
 
 ///
 /// A generic test game that can have injected reward, terminal state, and permitted actions
@@ -15,6 +15,8 @@ pub struct InjectableGameState {
 
 impl State for InjectableGameState {
     type ActionType = InjectableGameAction;
+    type GameHyperrewardType = ();
+
     fn permitted_actions(&self) -> Vec<Self::ActionType> {
         self.injected_permitted_actions.clone()
     }
@@ -27,6 +29,9 @@ impl State for InjectableGameState {
 
     fn terminal(&self) -> bool {
         return self.injected_terminal;
+    }
+    fn round_hyperreward(&self) -> Self::GameHyperrewardType {
+        ()
     }
 }
 

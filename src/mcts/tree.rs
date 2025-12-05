@@ -7,15 +7,29 @@ use log::trace;
 use rand::Rng;
 use std::sync::{Arc, RwLock};
 
-#[derive(Debug, PartialEq)]
-pub enum Selection<ActionType: Action> {
-    FullyExplored,
-    Selection(Vec<ActionType>),
+use std::marker::PhantomData;
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct SelectionResult<ActionType: Action, GameHyperrewardType> {
+    pub selection: Vec<ActionType>,
+    pub random_walk_steps: i64,
+    pub round_hyperreward: GameHyperrewardType,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub enum Selection<ActionType: Action, GameHyperrewardType> {
+    FullyExplored,
+    Selection(SelectionResult<ActionType, GameHyperrewardType>),
+}
 pub struct Tree<StateType: State, ActionType: Action<StateType = StateType>> {
     pub root: Arc<RwLock<Node<StateType, ActionType>>>,
     pub constant: f64,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct PlayOutResult {
+    pub reward: Vec<Reward>,
+    pub random_walk_steps: i64,
 }
 
 impl<StateType: State<ActionType = ActionType>, ActionType: Action<StateType = StateType>>
@@ -49,22 +63,20 @@ where
     ///
     /// Returns a path to the current selection
     ///
-    pub fn selection(&self) -> Selection<ActionType> {
+    pub fn selection(&self) -> Selection<ActionType, StateType::GameHyperrewardType> {
         return Tree::select_from(self.root.clone(), self.constant);
     }
 
     fn select_from(
         node: Arc<RwLock<Node<StateType, ActionType>>>,
         constant: f64,
-    ) -> Selection<ActionType> {
-        let best_pick: Vec<_> = super::node::best_pick(&node, constant)
-            .iter()
-            .map(|x| x.0.clone())
-            .collect();
+    ) -> Selection<ActionType, StateType::GameHyperrewardType> {
+        let best_pick = super::node::best_pick(&node, constant);
         if best_pick.is_empty() {
             return Selection::FullyExplored;
         }
-        for action in best_pick.iter() {
+        for pick in best_pick.iter() {
+            let action = pick.0.clone();
             let child = { node.read().unwrap().get_child(action.clone()) };
             let is_expanded = {
                 let node = child.read().unwrap();
@@ -86,16 +98,24 @@ where
                         trace!("FullyExplored hit in selection");
                         continue;
                     }
-                    Selection::Selection(selection) => {
+                    Selection::Selection(selection_result) => {
                         // TBD if this would be faster with .insert or
                         // preallocation
                         let mut result_selection = vec![action.clone()];
-                        result_selection.extend(selection);
-                        return Selection::Selection(result_selection);
+                        result_selection.extend(selection_result.selection);
+                        return Selection::Selection(SelectionResult {
+                            selection: result_selection,
+                            random_walk_steps: selection_result.random_walk_steps, // Propagate from child
+                            round_hyperreward: selection_result.round_hyperreward, // Propagate from child
+                        });
                     }
                 }
             } else {
-                return Selection::Selection(vec![action.clone()]);
+                return Selection::Selection(SelectionResult {
+                    selection: vec![action.clone()],
+                    random_walk_steps: 0,
+                    round_hyperreward: node.read().unwrap().state().round_hyperreward(), // Get from current state
+                });
             }
         }
         Selection::FullyExplored
@@ -103,7 +123,7 @@ where
 
     pub fn expansion(
         &self,
-        selection: &Selection<ActionType>,
+        selection: &Selection<ActionType, StateType::GameHyperrewardType>,
     ) -> Vec<Arc<RwLock<Node<StateType, ActionType>>>> {
         trace!("Expansion: Selection: {:#?}", selection);
         let mut cur_node = self.root.clone();
@@ -112,8 +132,8 @@ where
         // Could also be in iterate, but that was going to result in more memory allocations.
         let mut result: Vec<Arc<RwLock<Node<StateType, ActionType>>>> = vec![self.root.clone()];
 
-        if let Selection::Selection(selection) = selection {
-            for action in selection.iter() {
+        if let Selection::Selection(selection_result) = selection {
+            for action in selection_result.selection.iter() {
                 {
                     let child_node = {
                         let node = cur_node.read().unwrap();
@@ -155,12 +175,15 @@ where
         result
     }
 
-    pub fn play_out(&self, state: StateType) -> Vec<Reward> {
+    pub fn play_out(&self, state: StateType) -> PlayOutResult {
         let mut rng = rand::thread_rng();
 
         let mut cur_state = Box::new(state.clone());
 
+        let mut random_walk_steps = 0;
+
         while !cur_state.terminal() {
+            random_walk_steps += 1;
             match cur_state.next_actor() {
                 Actor::Player(_) => {
                     let permitted_actions = cur_state.permitted_actions();
@@ -176,7 +199,10 @@ where
             }
         }
         trace!("Reward is {:?}", cur_state.reward());
-        cur_state.reward()
+        PlayOutResult {
+            reward: cur_state.reward(),
+            random_walk_steps: random_walk_steps,
+        }
     }
 
     pub fn propagate_reward(
@@ -206,15 +232,15 @@ where
         }
     }
 
-    pub fn iterate(&self) -> Selection<ActionType> {
+    pub fn iterate(&self) -> Selection<ActionType, StateType::GameHyperrewardType> {
         let selection = self.selection();
         if let Selection::FullyExplored = selection {
             log::warn!("Iterate short circuited - fully explored");
             return Selection::FullyExplored;
         };
         let expanded_nodes = self.expansion(&selection);
-        if let Selection::Selection(..) = selection {
-            let reward = {
+        if let Selection::Selection(selection_result) = selection {
+            let play_out_result = {
                 self.play_out(
                     expanded_nodes
                         .last()
@@ -225,9 +251,16 @@ where
                         .clone(),
                 )
             };
+            let reward = play_out_result.reward.clone();
             self.propagate_reward(expanded_nodes, reward);
+
+            return Selection::Selection(SelectionResult {
+                selection: selection_result.selection,
+                random_walk_steps: play_out_result.random_walk_steps,
+                round_hyperreward: selection_result.round_hyperreward, // Propagate from selection_result
+            });
         }
-        selection
+        panic!("Should be unreachable");
     }
 }
 
@@ -267,11 +300,14 @@ mod tests {
         );
         root.visit(0.0f64);
         let tree = Tree::new(root);
-
-        assert_eq!(
-            tree.selection(),
-            Selection::Selection(vec![InjectableGameAction::WinInXTurns(3)])
-        );
+        if let Selection::Selection(selection_result) = tree.selection() {
+            assert_eq!(
+                selection_result.selection,
+                vec![InjectableGameAction::WinInXTurns(3)]
+            )
+        } else {
+            self::panic!("Incorrect selection type")
+        }
     }
 
     ///
@@ -311,15 +347,19 @@ mod tests {
         root.visit(0.0f64);
         root.visit(0.0f64);
         root.visit(0.0f64);
-        let tree = Tree::new(root);
 
-        assert_eq!(
-            tree.selection(),
-            Selection::Selection(vec![
-                InjectableGameAction::WinInXTurns(2),
-                InjectableGameAction::WinInXTurns(1)
-            ])
-        );
+        let tree = Tree::new(root);
+        if let Selection::Selection(selection_result) = tree.selection() {
+            assert_eq!(
+                selection_result.selection,
+                vec![
+                    InjectableGameAction::WinInXTurns(2),
+                    InjectableGameAction::WinInXTurns(1)
+                ]
+            )
+        } else {
+            self::panic!("Incorrect selection type")
+        }
     }
 
     #[test]
@@ -359,7 +399,11 @@ mod tests {
             InjectableGameAction::WinInXTurns(2),
             InjectableGameAction::NextTurnInjectActionCount(5),
         ];
-        let selection = Selection::Selection(selection_path.clone());
+        let selection = Selection::Selection(SelectionResult {
+            selection: selection_path.clone(),
+            random_walk_steps: 0,
+            round_hyperreward: (),
+        });
 
         let tree = Tree::new(root);
         tree.expansion(&selection);
@@ -388,7 +432,7 @@ mod tests {
         let tree = Tree::new(root);
         let reward = tree.play_out(explored_state);
 
-        assert_eq!(reward, vec![1.0]);
+        assert_eq!(reward.reward, vec![1.0]);
     }
 
     #[test]
@@ -578,7 +622,7 @@ mod tests {
         let mut weight_1_visits = 0;
         let mut weight_2_visits = 0;
         for _ in 0..1000 {
-            let reward = tree.play_out(root_state.clone());
+            let reward = tree.play_out(root_state.clone()).reward;
             if reward[0] < 0.0 {
                 weight_1_visits += 1
             } else {
@@ -597,3 +641,4 @@ mod tests {
         );
     }
 }
+

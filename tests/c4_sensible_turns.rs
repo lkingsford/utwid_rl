@@ -1,14 +1,14 @@
-use mon2y_rs::game_trait::Game;
-use mon2y_rs::games::c4;
-use mon2y_rs::games::c4::C4;
-use mon2y_rs::mcts::game_trait::{Action, State};
-use mon2y_rs::mcts::node::create_expanded_node;
-use mon2y_rs::mcts::tree::Tree;
-use mon2y_rs::mcts::{calculate_best_turn, BestTurnPolicy};
+use mon2y::game::Game;
+use mon2y::games::c4;
+use mon2y::games::c4::{C4Hyperparams, C4};
+use mon2y::mcts::game_trait::{Action, State};
+use mon2y::mcts::node::create_expanded_node;
+use mon2y::mcts::tree::Tree;
+use mon2y::mcts::{calculate_best_turn, BestTurnPolicy};
 
 #[test]
 fn test_c4_one_action_blocks_win() {
-    let mut c4_state = C4.init_game();
+    let mut c4_state = C4.init_game(&C4Hyperparams::default());
     for action in vec![
         c4::C4Action::Drop(0),
         c4::C4Action::Drop(1),
@@ -32,7 +32,7 @@ fn test_c4_one_action_blocks_win() {
 
 #[test]
 fn test_c4_one_action_gets_win() {
-    let mut c4_state = C4.init_game();
+    let mut c4_state = C4.init_game(&C4Hyperparams::default());
     for action in vec![
         c4::C4Action::Drop(3),
         c4::C4Action::Drop(1),
@@ -58,7 +58,7 @@ fn test_c4_one_action_gets_win() {
 #[test]
 fn test_c4_play_out_repeated() {
     env_logger::init();
-    let mut c4_state = C4.init_game();
+    let mut c4_state = C4.init_game(&C4Hyperparams::default());
     for action in vec![
         c4::C4Action::Drop(3),
         c4::C4Action::Drop(1),
@@ -76,7 +76,7 @@ fn test_c4_play_out_repeated() {
     for _ in 0..1000 {
         let root_ref = tree.root.clone();
         let root = root_ref.read().unwrap();
-        let result = tree.play_out(root.state().clone());
+        let result = tree.play_out(root.state().clone()).reward;
         if result[0] > 0.0 {
             p0_wins += 1.0;
         };
@@ -89,9 +89,9 @@ fn test_c4_play_out_repeated() {
 
 #[test]
 fn test_c4_plays_through_without_crash() {
-    let mut c4_state = C4.init_game();
+    let mut c4_state = C4.init_game(&C4Hyperparams::default());
     while !c4_state.terminal() {
-        if let mon2y_rs::mcts::game::Actor::Player(_) = c4_state.next_actor() {
+        if let mon2y::mcts::game_trait::Actor::Player(_) = c4_state.next_actor() {
             let action = calculate_best_turn(
                 100,
                 None,
@@ -107,9 +107,9 @@ fn test_c4_plays_through_without_crash() {
 }
 #[test]
 fn test_c4_plays_through_multiple_threads_without_crash() {
-    let mut c4_state = C4.init_game();
+    let mut c4_state = C4.init_game(&C4Hyperparams::default());
     while !c4_state.terminal() {
-        if let mon2y_rs::mcts::game::Actor::Player(_) = c4_state.next_actor() {
+        if let mon2y::mcts::game_trait::Actor::Player(_) = c4_state.next_actor() {
             let action = calculate_best_turn(
                 100,
                 None,
@@ -128,7 +128,7 @@ fn test_c4_plays_through_multiple_threads_without_crash() {
 fn test_c4_full_exploration() {
     // This is more of a test that it doesn't freeze when getting fully explored
     // is very likely.
-    let mut c4_state = C4.init_game();
+    let mut c4_state = C4.init_game(&C4Hyperparams::default());
     for action in vec![
         c4::C4Action::Drop(3),
         c4::C4Action::Drop(3),

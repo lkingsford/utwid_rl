@@ -23,6 +23,7 @@ pub enum Actor<ActionType> {
 
 pub trait State: Clone {
     type ActionType: Action<StateType = Self>;
+    type GameHyperrewardType: std::fmt::Debug;
 
     fn permitted_actions(&self) -> Vec<Self::ActionType>;
     fn possible_non_player_actions(&self) -> Vec<(Self::ActionType, u32)> {
@@ -31,4 +32,5 @@ pub trait State: Clone {
     fn next_actor(&self) -> Actor<Self::ActionType>;
     fn terminal(&self) -> bool;
     fn reward(&self) -> Vec<Reward>;
+    fn round_hyperreward(&self) -> Self::GameHyperrewardType;
 }

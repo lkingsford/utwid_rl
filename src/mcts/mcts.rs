@@ -3,16 +3,61 @@ use std::sync::Arc;
 
 use log::trace;
 
-use crate::mcts::tree::Selection;
-
 use super::game_trait::{Action, Actor, State};
 use super::node::{best_pick, create_expanded_node, Node};
-use super::tree::Tree;
+use super::tree::{Selection, Tree};
 use super::BestTurnPolicy;
 
 /// Run multiple iterations of the MCTS algorithm on a state.
+pub fn run_mcts_iterations<
+    StateType: State<ActionType = ActionType> + Sync + Send + 'static,
+    ActionType: Action<StateType = StateType> + Sync + Send + 'static,
+>(
+    tree: Arc<Tree<StateType, ActionType>>,
+    iterations: usize,
+    time_limit: Option<std::time::Duration>,
+    thread_count: usize,
+) {
+    let mut threads = vec![];
+
+    let finished_iterations: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+
+    for _ in 0..thread_count {
+        let tree_clone: Arc<Tree<StateType, ActionType>> = Arc::clone(&tree);
+        let finished_iterations_clone: Arc<AtomicUsize> = Arc::clone(&finished_iterations);
+        let time_started = std::time::Instant::now();
+        threads.push(std::thread::spawn(move || loop {
+            {
+                trace!(
+                    "Starting iteration {}",
+                    finished_iterations_clone.load(std::sync::atomic::Ordering::SeqCst)
+                );
+                let result = tree_clone.iterate();
+                let current_iterations =
+                    finished_iterations_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                trace!("Finished iteration {}", current_iterations);
+                if current_iterations >= iterations
+                    || matches!(result, Selection::FullyExplored)
+                    || time_started.elapsed() > time_limit.unwrap_or(std::time::Duration::MAX)
+                {
+                    break;
+                }
+            }
+        }));
+    }
+
+    for thread in threads {
+        thread.join().unwrap();
+    }
+
+    log::debug!(
+        "Completed {} iterations",
+        finished_iterations.load(std::sync::atomic::Ordering::SeqCst)
+    );
+}
+
+/// Run multiple iterations of the MCTS algorithm on a state.
 pub fn calculate_best_turn<
-    'a,
     StateType: State<ActionType = ActionType> + Sync + Send + 'static,
     ActionType: Action<StateType = StateType> + Sync + Send + 'static,
 >(
@@ -38,48 +83,12 @@ where
     }
 
     let tree = Arc::new(Tree::new_with_constant(root_node, exploration_constant));
-    let mut threads = vec![];
-
-    let finished_iterations: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
-
-    for _ in 0..thread_count {
-        let tree_clone = Arc::clone(&tree);
-        let finished_iterations_clone: Arc<AtomicUsize> = Arc::clone(&finished_iterations);
-        let time_started = std::time::Instant::now();
-        threads.push(std::thread::spawn(move || loop {
-            {
-                trace!(
-                    "Starting iteration {}",
-                    finished_iterations_clone.load(std::sync::atomic::Ordering::SeqCst)
-                );
-                let result = tree_clone.iterate();
-                let current_iterations =
-                    finished_iterations_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                trace!("Finished iteration {}", current_iterations);
-                if current_iterations >= iterations
-                    || result == Selection::FullyExplored
-                    || time_started.elapsed() > time_limit.unwrap_or(std::time::Duration::MAX)
-                {
-                    break;
-                }
-            }
-        }));
-    }
-
-    for thread in threads {
-        thread.join().unwrap();
-    }
-
-    log::debug!(
-        "Completed {} iterations",
-        finished_iterations.load(std::sync::atomic::Ordering::SeqCst)
-    );
+    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count);
 
     if log::log_enabled!(log::Level::Trace) || log_children {
         tree.root.clone().read().unwrap().log_children(0);
     }
     let root_ref = tree.root.clone();
-
     match policy {
         BestTurnPolicy::Ucb0 => {
             let node = root_ref.read().unwrap();
@@ -169,4 +178,16 @@ where
             }
         }
     }
+}
+
+/// Explore a tree to get the hyperrewards
+pub fn explore_tree<
+    'a,
+    StateType: State<ActionType = ActionType> + Sync + Send + 'static,
+    ActionType: Action<StateType = StateType> + Sync + Send + 'static,
+>()
+where
+    StateType: State<ActionType = ActionType>,
+    ActionType: Action<StateType = StateType>,
+{
 }
