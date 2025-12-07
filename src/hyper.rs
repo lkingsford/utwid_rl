@@ -3,7 +3,8 @@ use serde::Serialize;
 use serde_json;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
 pub enum ParamValue {
     Float(f64),
     Int(i64),
@@ -13,14 +14,15 @@ pub enum ParamValue {
     Stanza(HashMap<String, ParamMeta>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
 pub enum ParamRange {
     FloatRange(f64, f64),
     IntRange(i64, i64),
     UintRange(u64, u64),
     EnumOptions(Vec<String>),
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ParamMeta {
     pub default: ParamValue,
     pub range: Option<ParamRange>,

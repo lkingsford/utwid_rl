@@ -2,7 +2,7 @@ import mon2y
 import pytest
 
 def test_c4_hyperrewards_structure():
-    results = mon2y.explore(mon2y.Games.C4, iterations=10, time_limit_secs=None, thread_count=1, exploration_constant=None)
+    results = mon2y.explore(mon2y.Games.C4, iterations=10, thread_count=1, time_limit_secs=None, exploration_constant=None)
     assert len(results) > 0
     
     for result in results:

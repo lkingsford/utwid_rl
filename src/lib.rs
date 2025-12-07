@@ -1,10 +1,11 @@
 use crate::{
     game::Game,
     games::{c4::C4Hyperparams, c4::C4, cs::CS, ebr::EBR, nt::NT, Games},
+    hyper::Hyperparams,
     mcts::mcts::explore_tree,
 };
 use log::LevelFilter;
-use pyo3::{prelude::*, types::PyAny};
+use pyo3::{prelude::*, types::PyAny, types::PyDict};
 use std::str::FromStr;
 
 pub mod game;
@@ -23,6 +24,9 @@ fn set_log_level(level: &str) -> PyResult<()> {
 }
 
 #[pyfunction]
+#[pyo3(
+    signature = (game, iterations, thread_count, time_limit_secs = None, exploration_constant = None, hyperparams = None)
+)]
 fn explore(
     py: Python,
     game: Games,
@@ -30,6 +34,7 @@ fn explore(
     thread_count: usize,
     time_limit_secs: Option<u64>,
     exploration_constant: Option<f64>,
+    hyperparams: Option<&Bound<PyDict>>,
 ) -> PyResult<Vec<Py<PyAny>>> {
     let time_limit = time_limit_secs.map(std::time::Duration::from_secs);
 
@@ -41,8 +46,19 @@ fn explore(
     let results = match game {
         Games::C4 => {
             let game = C4;
-            let hyperparams = C4Hyperparams::default();
-            let state = game.init_game(&hyperparams);
+            let h_params = if let Some(py_dict) = hyperparams {
+                let mut hp = C4Hyperparams::default();
+                if let Some(width) = py_dict.get_item("board_width")? {
+                    hp.board_width = width.extract()?;
+                }
+                if let Some(height) = py_dict.get_item("board_height")? {
+                    hp.board_height = height.extract()?;
+                }
+                hp
+            } else {
+                C4Hyperparams::default()
+            };
+            let state = game.init_game(&h_params);
             explore_tree(
                 iterations,
                 time_limit,
@@ -114,6 +130,22 @@ fn get_hyperreward_meta(py: Python, game: Games) -> PyResult<Py<PyAny>> {
     }
 }
 
+#[pyfunction]
+fn get_hyperparam_meta(py: Python, game: Games) -> PyResult<Py<PyAny>> {
+    let meta = match game {
+        Games::C4 => C4Hyperparams::metadata(),
+        Games::NT => <() as Hyperparams>::metadata(),
+        Games::CS => <() as Hyperparams>::metadata(),
+        Games::EBR => <() as Hyperparams>::metadata(),
+    };
+
+    let json_str = serde_json::to_string(&meta)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    let json = PyModule::import_bound(py, "json")?;
+    let py_dict = json.call_method1("loads", (json_str,))?;
+    Ok(py_dict.to_object(py))
+}
+
 #[pymodule]
 fn mon2y(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let _ = env_logger::builder()
@@ -123,6 +155,7 @@ fn mon2y(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Games>()?;
     m.add_function(wrap_pyfunction!(explore, m)?)?;
     m.add_function(wrap_pyfunction!(get_hyperreward_meta, m)?)?;
+    m.add_function(wrap_pyfunction!(get_hyperparam_meta, m)?)?;
     m.add_function(wrap_pyfunction!(set_log_level, m)?)?;
     Ok(())
 }
