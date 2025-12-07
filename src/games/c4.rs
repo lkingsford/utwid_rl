@@ -5,6 +5,7 @@ use crate::hyper::{
 use crate::mcts::game_trait::{Action, Actor, State};
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::io;
 
@@ -44,41 +45,17 @@ impl Hyperparams for C4Hyperparams {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct C4Hyperrewards {
     pub first_player_won: bool,
 }
 
-#[pyclass(name = "C4Hyperrewards")]
-#[derive(Clone)]
-pub struct PyC4Hyperrewards {
-    #[pyo3(get)]
-    first_player_won: bool,
-}
-
-#[pymethods]
-impl PyC4Hyperrewards {
-    #[new]
-    fn new(first_player_won: bool) -> Self {
-        Self { first_player_won }
-    }
-}
-
 impl GameHyperrewardTrait for C4Hyperrewards {
-    fn to_py(&self, py: Python) -> PyResult<Py<PyAny>> {
-        let py_hr = PyC4Hyperrewards {
-            first_player_won: self.first_player_won,
-        };
-        let py_obj = Py::new(py, py_hr)?;
-        Ok(py_obj.into())
-    }
-}
-
-impl Default for C4Hyperrewards {
-    fn default() -> Self {
-        C4Hyperrewards {
-            first_player_won: false,
-        }
+    fn meta() -> HashMap<String, String> {
+        HashMap::from([(
+            String::from("first_player_won"),
+            String::from("bool"),
+        )])
     }
 }
 

@@ -1,17 +1,10 @@
 use crate::{
     game::Game,
-    games::{
-        c4::{C4Hyperparams, C4, PyC4Hyperrewards},
-        cs::CS,
-        ebr::EBR,
-        nt::NT,
-        Games,
-    },
-    hyper::PyHyperrewardsWrapper,
+    games::{c4::C4Hyperparams, c4::C4, cs::CS, ebr::EBR, nt::NT, Games},
     mcts::mcts::explore_tree,
 };
 use log::LevelFilter;
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyAny};
 use std::str::FromStr;
 
 pub mod game;
@@ -31,12 +24,13 @@ fn set_log_level(level: &str) -> PyResult<()> {
 
 #[pyfunction]
 fn explore(
+    py: Python,
     game: Games,
     iterations: usize,
-    time_limit_secs: Option<u64>,
     thread_count: usize,
+    time_limit_secs: Option<u64>,
     exploration_constant: Option<f64>,
-) -> PyResult<Vec<PyHyperrewardsWrapper>> {
+) -> PyResult<Vec<Py<PyAny>>> {
     let time_limit = time_limit_secs.map(std::time::Duration::from_secs);
 
     let exploration_constant = match exploration_constant {
@@ -44,7 +38,7 @@ fn explore(
         Some(constant) => constant,
     };
 
-    let results: Vec<Box<dyn hyper::PyHyperrewards>> = match game {
+    let results = match game {
         Games::C4 => {
             let game = C4;
             let hyperparams = C4Hyperparams::default();
@@ -57,8 +51,8 @@ fn explore(
                 exploration_constant,
             )
             .into_iter()
-            .map(|r| Box::new(r) as Box<dyn hyper::PyHyperrewards>)
-            .collect()
+            .map(|r| r.to_py_dict(py))
+            .collect::<PyResult<Vec<_>>>()?
         }
         Games::NT => {
             let game = NT { player_count: 2 };
@@ -72,8 +66,8 @@ fn explore(
                 exploration_constant,
             )
             .into_iter()
-            .map(|r| Box::new(r) as Box<dyn hyper::PyHyperrewards>)
-            .collect()
+            .map(|r| r.to_py_dict(py))
+            .collect::<PyResult<Vec<_>>>()?
         }
         Games::CS => {
             let game = CS { player_count: 2 };
@@ -87,8 +81,8 @@ fn explore(
                 exploration_constant,
             )
             .into_iter()
-            .map(|r| Box::new(r) as Box<dyn hyper::PyHyperrewards>)
-            .collect()
+            .map(|r| r.to_py_dict(py))
+            .collect::<PyResult<Vec<_>>>()?
         }
         Games::EBR => {
             let game = EBR { player_count: 2 };
@@ -102,15 +96,22 @@ fn explore(
                 exploration_constant,
             )
             .into_iter()
-            .map(|r| Box::new(r) as Box<dyn hyper::PyHyperrewards>)
-            .collect()
+            .map(|r| r.to_py_dict(py))
+            .collect::<PyResult<Vec<_>>>()?
         }
     };
 
-    Ok(results
-        .into_iter()
-        .map(PyHyperrewardsWrapper::new)
-        .collect())
+    Ok(results)
+}
+
+#[pyfunction]
+fn get_hyperreward_meta(py: Python, game: Games) -> PyResult<Py<PyAny>> {
+    match game {
+        Games::C4 => hyper::Hyperrewards::<games::c4::C4Hyperrewards>::py_meta(py),
+        Games::NT => hyper::Hyperrewards::<()>::py_meta(py),
+        Games::CS => hyper::Hyperrewards::<()>::py_meta(py),
+        Games::EBR => hyper::Hyperrewards::<()>::py_meta(py),
+    }
 }
 
 #[pymodule]
@@ -120,9 +121,8 @@ fn mon2y(m: &Bound<'_, PyModule>) -> PyResult<()> {
         .try_init();
 
     m.add_class::<Games>()?;
-    m.add_class::<PyHyperrewardsWrapper>()?;
-    m.add_class::<PyC4Hyperrewards>()?;
     m.add_function(wrap_pyfunction!(explore, m)?)?;
+    m.add_function(wrap_pyfunction!(get_hyperreward_meta, m)?)?;
     m.add_function(wrap_pyfunction!(set_log_level, m)?)?;
     Ok(())
 }
