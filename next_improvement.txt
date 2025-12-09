@@ -1,0 +1,18 @@
+ Modify best_pick to output Vec<BestPickEntry>. Currently, it's Vec<(ActionToTake, UCB)>. BestPickEntry
+  should be a pub struct with action_to_take, ucb.
+
+  Run Tests.
+
+  Modify BestPickEntry to include expected_value. Populate it in best_pick. Add unit test with
+  injectable_game (manually creating a tree of 3 steps. Run tests.
+
+  sum_expected_value is the sum of all expected_value from all nodes from all players in the select
+  before reward_propogation is done, + the reward for the final state after the evaluate.
+
+  Add sum_expected_value: f64 to select_from parameters.
+
+  In fn selection, send sum_expected_value as 0
+
+  In select_from, when select_from is called, populate sum_expected_reward with sum_expected_reward +
+  expected_reward for the node being select_from'd.
+

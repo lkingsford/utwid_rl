@@ -3,13 +3,11 @@ use crate::hyper::{
     GameHyperrewardTrait, Hyperparams, Hyperrewards, ParamMeta, ParamRange, ParamValue,
 };
 use crate::mcts::game_trait::{Action, Actor, State};
-use pyo3::prelude::*;
-use pyo3::types::PyAny;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct C4Hyperparams {
     pub board_width: usize,
     pub board_height: usize,
@@ -52,7 +50,7 @@ pub struct C4Hyperrewards {
 
 impl GameHyperrewardTrait for C4Hyperrewards {
     fn meta() -> HashMap<String, String> {
-        HashMap::from([(
+        HashMap::from([( 
             String::from("first_player_won"),
             String::from("bool"),
         )])
@@ -271,7 +269,7 @@ impl Game for C4 {
                         C4Cell::Filled(0) => "●",
                         _ => " ",
                     }
-                )
+                );
             }
             print!("\n");
         }

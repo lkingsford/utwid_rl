@@ -1,5 +1,8 @@
-use pyo3::{prelude::*, types::PyAny};
-use serde::Serialize;
+use pyo3::{
+    prelude::*,
+    types::{PyAny, PyDict},
+};
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json;
 use std::collections::HashMap;
 
@@ -28,8 +31,16 @@ pub struct ParamMeta {
     pub range: Option<ParamRange>,
 }
 
-pub trait Hyperparams: Clone + Send + Sync + Default + 'static {
+pub trait Hyperparams: Clone + Send + Sync + Default + DeserializeOwned + 'static {
     fn metadata() -> HashMap<String, ParamMeta>;
+    fn from_pydict<'py>(py: Python<'py>, pydict: &Bound<'py, PyDict>) -> PyResult<Self> {
+        let json_module = PyModule::import(py, "json")?;
+        let json_str = json_module.call_method1("dumps", (pydict,))?.to_string();
+
+        let hyperparams: Self = serde_json::from_str(&json_str)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(hyperparams)
+    }
 }
 
 pub trait GameHyperrewardTrait: Clone + Send + Sync + Default + Serialize + 'static {
