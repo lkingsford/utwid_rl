@@ -32,9 +32,7 @@ pub trait Hyperparams: Clone + Send + Sync + Default + 'static {
     fn metadata() -> HashMap<String, ParamMeta>;
 }
 
-pub trait GameHyperrewardTrait:
-    Clone + Send + Sync + Default + Serialize + 'static
-{
+pub trait GameHyperrewardTrait: Clone + Send + Sync + Default + Serialize + 'static {
     fn meta() -> HashMap<String, String>;
 }
 
@@ -66,9 +64,9 @@ impl<T: GameHyperrewardTrait> Hyperrewards<T> {
     pub fn to_py_dict(&self, py: Python) -> PyResult<Py<PyAny>> {
         let json_str = serde_json::to_string(self)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        let json_module = PyModule::import_bound(py, "json")?;
+        let json_module = PyModule::import(py, "json")?;
         let py_dict = json_module.call_method1("loads", (json_str,))?;
-        Ok(py_dict.to_object(py))
+        Ok(py_dict.into())
     }
 
     pub fn meta() -> HashMap<String, String> {
@@ -84,10 +82,8 @@ impl<T: GameHyperrewardTrait> Hyperrewards<T> {
         let meta = Self::meta();
         let json_str = serde_json::to_string(&meta)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        let json_module = PyModule::import_bound(py, "json")?;
+        let json_module = PyModule::import(py, "json")?;
         let py_dict = json_module.call_method1("loads", (json_str,))?;
-        Ok(py_dict.to_object(py))
+        Ok(py_dict.into())
     }
 }
-
-

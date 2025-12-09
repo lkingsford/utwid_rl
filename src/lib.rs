@@ -34,7 +34,7 @@ fn explore(
     thread_count: usize,
     time_limit_secs: Option<u64>,
     exploration_constant: Option<f64>,
-    hyperparams: Option<&Bound<PyDict>>,
+    hyperparams: Option<Py<PyDict>>,
 ) -> PyResult<Vec<Py<PyAny>>> {
     let time_limit = time_limit_secs.map(std::time::Duration::from_secs);
 
@@ -46,12 +46,13 @@ fn explore(
     let results = match game {
         Games::C4 => {
             let game = C4;
-            let h_params = if let Some(py_dict) = hyperparams {
+            let h_params = if let Some(hyperparams) = hyperparams {
+                let hyperparams = hyperparams.bind(py);
                 let mut hp = C4Hyperparams::default();
-                if let Some(width) = py_dict.get_item("board_width")? {
+                if let Some(width) = hyperparams.get_item("board_width")? {
                     hp.board_width = width.extract()?;
                 }
-                if let Some(height) = py_dict.get_item("board_height")? {
+                if let Some(height) = hyperparams.get_item("board_height")? {
                     hp.board_height = height.extract()?;
                 }
                 hp
@@ -141,9 +142,9 @@ fn get_hyperparam_meta(py: Python, game: Games) -> PyResult<Py<PyAny>> {
 
     let json_str = serde_json::to_string(&meta)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-    let json = PyModule::import_bound(py, "json")?;
+    let json = PyModule::import(py, "json")?;
     let py_dict = json.call_method1("loads", (json_str,))?;
-    Ok(py_dict.to_object(py))
+    Ok(py_dict.unbind())
 }
 
 #[pymodule]
