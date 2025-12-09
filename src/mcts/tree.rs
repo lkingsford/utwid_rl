@@ -78,7 +78,7 @@ where
             return Selection::FullyExplored;
         }
         for pick in best_pick.iter() {
-            let action = pick.0.clone();
+            let action = pick.action_to_take.clone();
             let child = { node.read().unwrap().get_child(action.clone()) };
             let is_expanded = {
                 let node = child.read().unwrap();

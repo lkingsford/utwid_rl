@@ -274,10 +274,17 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
     }
 }
 
+#[derive(Debug)]
+pub struct BestPickEntry<ActionType> {
+    pub action_to_take: ActionType,
+    pub ucb: f64,
+    pub expected_value: f64,
+}
+
 pub fn best_pick<StateType, ActionType>(
     node_lock: &RwLock<Node<StateType, ActionType>>,
     constant: f64,
-) -> Vec<(ActionType, f64)>
+) -> Vec<BestPickEntry<ActionType>>
 where
     StateType: State<ActionType = ActionType>,
     ActionType: Action<StateType = StateType>,
@@ -304,38 +311,57 @@ where
         (node.game_action(), parent_visit_count)
     };
 
-    let mut ucbs: Vec<(ActionType, f64)> = children
-                    .iter()
-                    .filter_map(|(action, child_node)| {
-                        let (visit_count, value_sum) = {
-                            let child_ref = child_node.clone();
-                            let child_node = child_ref.read().unwrap();
-                            if child_node.fully_explored() {
-                                log::trace!("Select short circuited - fully explored");
-                                return None;
-                            }
-                            let cached_ucb = child_node.cached_ucb(
-                                child_node.value_sum(), child_node.visit_count(), parent_visit_count);
-                            if let Some(ucb) = cached_ucb {
-                                return Some((action.clone(), ucb));
-                            }
-                            if game_action {
-                                (child_node.visit_count() as f64 / child_node.weight() as f64, 1.0)
-                            } else {
-                                (child_node.visit_count() as f64, child_node.value_sum())
-                            }
-                        };
-                        let parent_visits = parent_visit_count as f64;
-                        if visit_count == 0.0 {
-                            return Some((action.clone(), f64::INFINITY));
-                        }
-                        let q: f64 = value_sum / visit_count;
-                        let u: f64 = (parent_visits.ln() / visit_count).sqrt();
-                        // Random used to break ties
-                        // Todo: Cache the rng
-                        let r: f64 = rand::thread_rng().gen::<f64>() * RANDOM_FACTOR;
-                        let ucb: f64 = q + constant * u + r;
-                        trace!(
+    let mut ucbs: Vec<BestPickEntry<ActionType>> = children
+        .iter()
+        .filter_map(|(action, child_node)| {
+            let (visit_count, value_sum) = {
+                let child_ref = child_node.clone();
+                let child_node = child_ref.read().unwrap();
+                if child_node.fully_explored() {
+                    log::trace!("Select short circuited - fully explored");
+                    return None;
+                }
+                let cached_ucb = child_node.cached_ucb(
+                    child_node.value_sum(),
+                    child_node.visit_count(),
+                    parent_visit_count,
+                );
+                if let Some(ucb) = cached_ucb {
+                    let q = if child_node.visit_count() == 0 {
+                        0.0
+                    } else {
+                        child_node.value_sum() / child_node.visit_count() as f64
+                    };
+                    return Some(BestPickEntry {
+                        action_to_take: action.clone(),
+                        ucb,
+                        expected_value: q,
+                    });
+                }
+                if game_action {
+                    (
+                        child_node.visit_count() as f64 / child_node.weight() as f64,
+                        1.0,
+                    )
+                } else {
+                    (child_node.visit_count() as f64, child_node.value_sum())
+                }
+            };
+            let parent_visits = parent_visit_count as f64;
+            if visit_count == 0.0 {
+                return Some(BestPickEntry {
+                    action_to_take: action.clone(),
+                    ucb: f64::INFINITY,
+                    expected_value: 0.0,
+                });
+            }
+            let q: f64 = value_sum / visit_count;
+            let u: f64 = (parent_visits.ln() / visit_count).sqrt();
+            // Random used to break ties
+            // Todo: Cache the rng
+            let r: f64 = rand::thread_rng().gen::<f64>() * RANDOM_FACTOR;
+            let ucb: f64 = q + constant * u + r;
+            trace!(
                             "UCB action: {:?}, value_sum: {}, visit_count: {}, parent_visits: {}, q: {}, u: {}, c: {} ucb: {}",
                             action,
                             value_sum,
@@ -346,21 +372,25 @@ where
                             constant,
                             ucb
                         );
-                        Some((action.clone(), ucb))
-                    })
-                    .collect();
+            Some(BestPickEntry {
+                action_to_take: action.clone(),
+                ucb,
+                expected_value: q,
+            })
+        })
+        .collect();
 
-    for (action, ucb) in ucbs.iter_mut() {
-        let node = children.get(action).unwrap();
+    for entry in ucbs.iter_mut() {
+        let node = children.get(&entry.action_to_take).unwrap();
         let read_node = node.read().unwrap();
         read_node.cache_ucb(
-            *ucb,
+            entry.ucb,
             read_node.value_sum(),
             read_node.visit_count(),
             parent_visit_count,
         );
     }
-    ucbs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    ucbs.sort_by(|a, b| b.ucb.partial_cmp(&a.ucb).unwrap());
     trace!("UCBS action, ucb: {:?}", ucbs.iter().collect::<Vec<_>>());
     ucbs
 }
@@ -524,7 +554,7 @@ mod tests {
         {
             let best_pick = best_pick(&locked_node, 2.0_f64.sqrt());
             assert_eq!(
-                best_pick.first().unwrap().0,
+                best_pick.first().unwrap().action_to_take,
                 InjectableGameAction::WinInXTurns(1)
             );
         }
@@ -540,7 +570,7 @@ mod tests {
         // We're checking for 2 - because it's the first node from the root (and best-pick isn't
         // iterative down the tree, selection is)
         assert_eq!(
-            best_pick.first().unwrap().0,
+            best_pick.first().unwrap().action_to_take,
             InjectableGameAction::WinInXTurns(2)
         );
     }
