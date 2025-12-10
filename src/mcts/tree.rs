@@ -195,6 +195,11 @@ where
                 Actor::Player(_) => {
                     let permitted_actions = cur_state.permitted_actions();
 
+                    if permitted_actions.is_empty() {
+                        log::warn!("Player has no permitted actions in a non-terminal state.");
+                        break;
+                    }
+
                     let action: ActionType =
                         permitted_actions[rng.gen_range(0..permitted_actions.len())].clone();
                     cur_state = Box::new(action.execute(&cur_state));
