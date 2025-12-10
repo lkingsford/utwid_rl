@@ -50,10 +50,7 @@ pub struct C4Hyperrewards {
 
 impl GameHyperrewardTrait for C4Hyperrewards {
     fn meta() -> HashMap<String, String> {
-        HashMap::from([( 
-            String::from("first_player_won"),
-            String::from("bool"),
-        )])
+        HashMap::from([(String::from("first_player_won"), String::from("bool"))])
     }
 }
 
@@ -88,7 +85,7 @@ impl Action for C4Action {
                     board: new_board,
                     next_player: (state.next_player + 1) % 2,
                     terminal,
-                    hyperparams: C4Hyperparams::default(),
+                    hyperparams: state.hyperparams.clone(),
                     reward,
                 }
             }
@@ -297,3 +294,4 @@ impl Game for C4 {
         }
     }
 }
+
