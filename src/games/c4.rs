@@ -45,12 +45,12 @@ impl Hyperparams for C4Hyperparams {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct C4Hyperrewards {
-    pub first_player_won: bool,
+    pub winning_player: Option<usize>,
 }
 
 impl GameHyperrewardTrait for C4Hyperrewards {
     fn meta() -> HashMap<String, String> {
-        HashMap::from([(String::from("first_player_won"), String::from("bool"))])
+        HashMap::from([(String::from("winning_player"), String::from("int"))])
     }
 }
 
@@ -232,11 +232,8 @@ impl State for C4State {
             return C4Hyperrewards::default();
         }
         match check_for_win(&self.board, self) {
-            CheckForWinResult::Winner(0) => C4Hyperrewards {
-                first_player_won: true,
-            },
-            CheckForWinResult::Winner(1) => C4Hyperrewards {
-                first_player_won: false,
+            CheckForWinResult::Winner(winner) => C4Hyperrewards {
+                winning_player: Option::Some(usize::from(winner)),
             },
             _ => C4Hyperrewards::default(),
         }
@@ -294,4 +291,3 @@ impl Game for C4 {
         }
     }
 }
-
