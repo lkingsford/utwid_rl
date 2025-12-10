@@ -1,4 +1,16 @@
+use crate::hyper::GameHyperrewardTrait;
 use crate::mcts::game_trait::{Action, Actor, State};
+use serde::Serialize;
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+pub struct TestHyperreward {
+    pub value: i32,
+}
+impl GameHyperrewardTrait for TestHyperreward {
+    fn meta() -> std::collections::HashMap<String, String> {
+        std::collections::HashMap::from([(String::from("value"), String::from("int"))])
+    }
+}
 
 ///
 /// A generic test game that can have injected reward, terminal state, and permitted actions
@@ -11,11 +23,13 @@ pub struct InjectableGameState {
     pub injected_permitted_actions: Vec<InjectableGameAction>,
     pub player_count: u8,
     pub next_actor: Actor<InjectableGameAction>,
+    pub injected_hyperreward: TestHyperreward,
+    pub terminal_hyperreward: TestHyperreward,
 }
 
 impl State for InjectableGameState {
     type ActionType = InjectableGameAction;
-    type GameHyperrewardType = ();
+    type GameHyperrewardType = TestHyperreward;
 
     fn permitted_actions(&self) -> Vec<Self::ActionType> {
         self.injected_permitted_actions.clone()
@@ -31,7 +45,11 @@ impl State for InjectableGameState {
         return self.injected_terminal;
     }
     fn round_hyperreward(&self) -> Self::GameHyperrewardType {
-        ()
+        if self.terminal() {
+            self.terminal_hyperreward.clone()
+        } else {
+            self.injected_hyperreward.clone()
+        }
     }
 }
 

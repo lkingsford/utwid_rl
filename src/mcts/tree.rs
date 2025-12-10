@@ -1,3 +1,5 @@
+use crate::hyper::GameHyperrewardTrait;
+
 use super::game_trait::{Action, Actor, State};
 use super::node::Node;
 use super::weighted_random::weighted_random;
@@ -10,15 +12,15 @@ use std::sync::{Arc, RwLock};
 use std::marker::PhantomData;
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct SelectionResult<ActionType: Action, GameHyperrewardType> {
+pub struct SelectionResult<ActionType: Action, GameHyperrewardType: GameHyperrewardTrait> {
     pub selection: Vec<ActionType>,
     pub random_walk_steps: u32,
     pub selected_steps: u32,
-    pub round_hyperreward: GameHyperrewardType,
+    pub round_hyperreward: Option<GameHyperrewardType>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Selection<ActionType: Action, GameHyperrewardType> {
+pub enum Selection<ActionType: Action, GameHyperrewardType: GameHyperrewardTrait> {
     FullyExplored,
     Selection(SelectionResult<ActionType, GameHyperrewardType>),
 }
@@ -28,9 +30,10 @@ pub struct Tree<StateType: State, ActionType: Action<StateType = StateType>> {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct PlayOutResult {
+pub struct PlayOutResult<GameHyperrewardType> {
     pub reward: Vec<Reward>,
     pub random_walk_steps: u32,
+    pub round_hyperreward: GameHyperrewardType,
 }
 
 impl<StateType: State<ActionType = ActionType>, ActionType: Action<StateType = StateType>>
@@ -109,7 +112,7 @@ where
                             selection: result_selection,
                             random_walk_steps: selection_result.random_walk_steps,
                             selected_steps: depth,
-                            round_hyperreward: selection_result.round_hyperreward,
+                            round_hyperreward: None,
                         });
                     }
                 }
@@ -118,7 +121,7 @@ where
                     selection: vec![action.clone()],
                     random_walk_steps: 0,
                     selected_steps: depth,
-                    round_hyperreward: node.read().unwrap().state().round_hyperreward(),
+                    round_hyperreward: None,
                 });
             }
         }
@@ -179,7 +182,7 @@ where
         result
     }
 
-    pub fn play_out(&self, state: StateType) -> PlayOutResult {
+    pub fn play_out(&self, state: StateType) -> PlayOutResult<StateType::GameHyperrewardType> {
         let mut rng = rand::thread_rng();
 
         let mut cur_state = Box::new(state.clone());
@@ -206,6 +209,7 @@ where
         PlayOutResult {
             reward: cur_state.reward(),
             random_walk_steps: random_walk_steps,
+            round_hyperreward: cur_state.round_hyperreward(),
         }
     }
 
@@ -262,7 +266,7 @@ where
                 selection: selection_result.selection,
                 random_walk_steps: play_out_result.random_walk_steps,
                 selected_steps: selection_result.selected_steps,
-                round_hyperreward: selection_result.round_hyperreward, // Propagate from selection_result
+                round_hyperreward: Some(play_out_result.round_hyperreward),
             });
         }
         panic!("Should be unreachable");
@@ -273,7 +277,9 @@ where
 mod tests {
     use super::*;
     use crate::mcts::node::create_expanded_node;
-    use crate::test::injectable_game::{InjectableGameAction, InjectableGameState};
+    use crate::test::injectable_game::{
+        InjectableGameAction, InjectableGameState, TestHyperreward,
+    };
     use std::vec;
 
     ///
@@ -290,6 +296,8 @@ mod tests {
             ],
             player_count: 1,
             next_actor: Actor::Player(0),
+            injected_hyperreward: Default::default(),
+            terminal_hyperreward: Default::default(),
         };
 
         let explored_state = InjectableGameAction::WinInXTurns(2).execute(&root_state);
@@ -329,6 +337,8 @@ mod tests {
             ],
             player_count: 1,
             next_actor: Actor::Player(0),
+            injected_hyperreward: Default::default(),
+            terminal_hyperreward: Default::default(),
         };
 
         let mut explored_state_1 = InjectableGameAction::WinInXTurns(2).execute(&root_state);
@@ -378,6 +388,8 @@ mod tests {
             ],
             player_count: 1,
             next_actor: Actor::Player(0),
+            injected_hyperreward: Default::default(),
+            terminal_hyperreward: Default::default(),
         };
         let mut explored_state_1 = InjectableGameAction::WinInXTurns(2).execute(&root_state);
         explored_state_1.injected_permitted_actions =
@@ -408,7 +420,7 @@ mod tests {
             selection: selection_path.clone(),
             selected_steps: 2,
             random_walk_steps: 0,
-            round_hyperreward: (),
+            round_hyperreward: Some(TestHyperreward::default()),
         });
 
         let tree = Tree::new(root);
@@ -431,6 +443,8 @@ mod tests {
             injected_permitted_actions: vec![InjectableGameAction::WinInXTurns(3)],
             player_count: 1,
             next_actor: Actor::Player(0),
+            injected_hyperreward: Default::default(),
+            terminal_hyperreward: Default::default(),
         };
 
         let explored_state = InjectableGameAction::WinInXTurns(2).execute(&root_state);
@@ -452,6 +466,8 @@ mod tests {
             ],
             player_count: 1,
             next_actor: Actor::Player(0),
+            injected_hyperreward: Default::default(),
+            terminal_hyperreward: Default::default(),
         };
 
         let explored_state = InjectableGameAction::WinInXTurns(2).execute(&root_state);
@@ -531,6 +547,8 @@ mod tests {
             ],
             player_count: 2,
             next_actor: Actor::Player(0),
+            injected_hyperreward: Default::default(),
+            terminal_hyperreward: Default::default(),
         };
 
         let explored_state = InjectableGameAction::WinInXTurns(2).execute(&root_state);
@@ -620,6 +638,8 @@ mod tests {
                 (InjectableGameAction::Lose, 1),
                 (InjectableGameAction::Win, 2),
             ]),
+            injected_hyperreward: Default::default(),
+            terminal_hyperreward: Default::default(),
         };
 
         let root = create_expanded_node(root_state.clone(), None);
@@ -645,5 +665,34 @@ mod tests {
             1.0 / 2.0,
             tolerance
         );
+    }
+
+    #[test]
+    fn test_iterate_hyperreward() {
+        use crate::test::injectable_game::TestHyperreward;
+
+        let root_state = InjectableGameState {
+            injected_reward: vec![0.0],
+            injected_terminal: false,
+            injected_permitted_actions: vec![InjectableGameAction::Win],
+            player_count: 1,
+            next_actor: Actor::Player(0),
+            injected_hyperreward: TestHyperreward { value: 1 },
+            terminal_hyperreward: TestHyperreward { value: 100 },
+        };
+
+        let root = create_expanded_node(root_state, None);
+        let tree = Tree::new(root);
+
+        let selection = tree.iterate();
+
+        if let Selection::Selection(selection_result) = selection {
+            assert_eq!(
+                selection_result.round_hyperreward,
+                Some(TestHyperreward { value: 100 })
+            );
+        } else {
+            self::panic!("Expected a selection");
+        }
     }
 }

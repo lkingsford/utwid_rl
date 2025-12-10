@@ -43,14 +43,31 @@ impl Hyperparams for C4Hyperparams {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub enum HyperrewardStatus {
+    Default,
+    InProgress,
+    Final,
+}
+
+impl Default for HyperrewardStatus {
+    fn default() -> Self {
+        HyperrewardStatus::Default
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct C4Hyperrewards {
     pub winning_player: Option<usize>,
+    pub status: HyperrewardStatus,
 }
 
 impl GameHyperrewardTrait for C4Hyperrewards {
     fn meta() -> HashMap<String, String> {
-        HashMap::from([(String::from("winning_player"), String::from("int"))])
+        HashMap::from([
+            (String::from("winning_player"), String::from("int")),
+            (String::from("status"), String::from("string")),
+        ])
     }
 }
 
@@ -229,13 +246,20 @@ impl State for C4State {
     }
     fn round_hyperreward(&self) -> Self::GameHyperrewardType {
         if !self.terminal {
-            return C4Hyperrewards::default();
+            return C4Hyperrewards {
+                winning_player: None,
+                status: HyperrewardStatus::InProgress,
+            };
         }
         match check_for_win(&self.board, self) {
             CheckForWinResult::Winner(winner) => C4Hyperrewards {
                 winning_player: Option::Some(usize::from(winner)),
+                status: HyperrewardStatus::Final,
             },
-            _ => C4Hyperrewards::default(),
+            _ => C4Hyperrewards {
+                winning_player: None,
+                status: HyperrewardStatus::Final,
+            },
         }
     }
 }

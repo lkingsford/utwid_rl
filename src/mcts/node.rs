@@ -448,7 +448,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test::injectable_game::{InjectableGameAction, InjectableGameState};
+    use crate::test::injectable_game::{
+        InjectableGameAction, InjectableGameState, TestHyperreward,
+    };
 
     #[test]
     fn test_create_expanded_node() {
@@ -458,6 +460,8 @@ mod tests {
             injected_permitted_actions: vec![InjectableGameAction::Win],
             player_count: 1,
             next_actor: Actor::Player(0),
+            injected_hyperreward: TestHyperreward { value: 0 },
+            terminal_hyperreward: TestHyperreward { value: 1 },
         };
         let node = create_expanded_node(state, None);
         assert_eq!(node.visit_count(), 0);
@@ -473,6 +477,7 @@ mod tests {
 
         let mut root_node = create_expanded_node(
             InjectableGameState {
+                terminal_hyperreward: TestHyperreward { value: 1 },
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![],
@@ -481,28 +486,33 @@ mod tests {
                     (InjectableGameAction::WinInXTurns(1), 1),
                     (InjectableGameAction::WinInXTurns(2), 2),
                 ]),
+                injected_hyperreward: TestHyperreward { value: 0 },
             },
             None,
         );
 
         let mut win_in_x_turns_1 = create_expanded_node(
             InjectableGameState {
+                terminal_hyperreward: TestHyperreward { value: 1 },
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![],
                 player_count: 1,
                 next_actor: Actor::Player(0),
+                injected_hyperreward: TestHyperreward { value: 0 },
             },
             Some(1),
         );
 
         let mut win_in_x_turns_2 = create_expanded_node(
             InjectableGameState {
+                terminal_hyperreward: TestHyperreward { value: 1 },
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![],
                 player_count: 1,
                 next_actor: Actor::Player(0),
+                injected_hyperreward: TestHyperreward { value: 0 },
             },
             Some(2),
         );
@@ -586,7 +596,9 @@ mod tests {
                     InjectableGameAction::WinInXTurns(2),
                 ],
                 player_count: 1,
+                injected_hyperreward: TestHyperreward { value: 0 },
                 next_actor: Actor::Player(0),
+                terminal_hyperreward: TestHyperreward { value: 1 },
             },
             None,
         );
@@ -598,6 +610,8 @@ mod tests {
                 injected_permitted_actions: vec![InjectableGameAction::Win],
                 player_count: 1,
                 next_actor: Actor::Player(0),
+                injected_hyperreward: TestHyperreward { value: 0 },
+                terminal_hyperreward: TestHyperreward { value: 1 },
             },
             None,
         );
@@ -611,6 +625,8 @@ mod tests {
                 injected_permitted_actions: vec![InjectableGameAction::Win],
                 player_count: 1,
                 next_actor: Actor::Player(0),
+                injected_hyperreward: TestHyperreward { value: 0 },
+                terminal_hyperreward: TestHyperreward { value: 1 },
             },
             None,
         );
@@ -637,3 +653,4 @@ mod tests {
         assert_eq!(pick2.expected_value, 0.0);
     }
 }
+
