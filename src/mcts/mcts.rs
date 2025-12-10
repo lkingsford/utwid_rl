@@ -56,7 +56,9 @@ pub fn run_mcts_iterations<
                             rwalk: selection_result.random_walk_steps as u32,
                             game_hrs: selection_result.round_hyperreward.unwrap(),
                         };
-                        sender_clone.send(hyperrewards_to_send).unwrap();
+                        if sender_clone.send(hyperrewards_to_send).is_err() {
+                            trace!("Receiver has been dropped, not sending final rewards.");
+                        }
                     }
                     break;
                 }
@@ -68,14 +70,19 @@ pub fn run_mcts_iterations<
                         rwalk: selection_result.random_walk_steps as u32,
                         game_hrs: selection_result.round_hyperreward.unwrap(),
                     };
-                    sender_clone.send(hyperrewards_to_send).unwrap();
+                    if sender_clone.send(hyperrewards_to_send).is_err() {
+                        trace!("Receiver has been dropped, exiting thread.");
+                        break;
+                    }
                 }
             }
         }));
     }
 
     for thread in threads {
-        thread.join().unwrap();
+        if let Err(e) = thread.join() {
+            log::error!("A worker thread panicked: {:?}", e);
+        }
     }
 
     log::debug!(
