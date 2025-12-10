@@ -574,4 +574,66 @@ mod tests {
             InjectableGameAction::WinInXTurns(2)
         );
     }
+
+    #[test]
+    fn test_best_pick_expected_value() {
+        let mut root_node = create_expanded_node(
+            InjectableGameState {
+                injected_reward: vec![0.0f64],
+                injected_terminal: false,
+                injected_permitted_actions: vec![
+                    InjectableGameAction::WinInXTurns(1),
+                    InjectableGameAction::WinInXTurns(2),
+                ],
+                player_count: 1,
+                next_actor: Actor::Player(0),
+            },
+            None,
+        );
+
+        let mut child1 = create_expanded_node(
+            InjectableGameState {
+                injected_reward: vec![0.0f64],
+                injected_terminal: false,
+                injected_permitted_actions: vec![InjectableGameAction::Win],
+                player_count: 1,
+                next_actor: Actor::Player(0),
+            },
+            None,
+        );
+        child1.visit(10.0);
+        child1.visit(0.0);
+
+        let child2 = create_expanded_node(
+            InjectableGameState {
+                injected_reward: vec![0.0f64],
+                injected_terminal: false,
+                injected_permitted_actions: vec![InjectableGameAction::Win],
+                player_count: 1,
+                next_actor: Actor::Player(0),
+            },
+            None,
+        );
+
+        root_node.insert_child(InjectableGameAction::WinInXTurns(1), child1);
+        root_node.insert_child(InjectableGameAction::WinInXTurns(2), child2);
+        root_node.visit(0.0);
+
+        let locked_node = RwLock::new(root_node);
+        let best_picks = best_pick(&locked_node, 2.0_f64.sqrt());
+
+        assert_eq!(best_picks.len(), 2);
+
+        let pick1 = best_picks
+            .iter()
+            .find(|p| p.action_to_take == InjectableGameAction::WinInXTurns(1))
+            .unwrap();
+        assert_eq!(pick1.expected_value, 5.0);
+
+        let pick2 = best_picks
+            .iter()
+            .find(|p| p.action_to_take == InjectableGameAction::WinInXTurns(2))
+            .unwrap();
+        assert_eq!(pick2.expected_value, 0.0);
+    }
 }
