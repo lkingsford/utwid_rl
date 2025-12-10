@@ -14,7 +14,7 @@ pub enum ParamValue {
     Uint(u64),
     Bool(bool),
     Enum(String),
-    Stanza(HashMap<String, ParamMeta>),
+    // Stanza(HashMap<String, ParamMeta>),
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -25,6 +25,7 @@ pub enum ParamRange {
     UintRange(u64, u64),
     EnumOptions(Vec<String>),
 }
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ParamMeta {
     pub default: ParamValue,
