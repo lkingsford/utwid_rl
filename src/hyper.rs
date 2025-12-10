@@ -1,6 +1,6 @@
 use pyo3::{
     prelude::*,
-    types::{PyAny, PyDict},
+    types::{PyAny, PyDict, PyMapping},
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json;
@@ -38,7 +38,9 @@ pub trait Hyperparams: Clone + Send + Sync + Default + DeserializeOwned + 'stati
         // Make it work, make it good.
         // This is the alternative to doing a dreserialize of that specific type -
         // it doesn't happen that often, so handling this bit python side.
-
+        let defaults = Self::meta_default_pydict(py)?;
+        let bound_defaults = defaults.bind(py).cast::<PyMapping>()?;
+        pydict.update_if_missing(bound_defaults)?;
         let json_module = PyModule::import(py, "json")?;
         let json_str = json_module.call_method1("dumps", (pydict,))?.to_string();
 
