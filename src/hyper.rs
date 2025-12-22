@@ -90,6 +90,7 @@ impl Hyperparams for () {
 pub struct Hyperrewards<T: GameHyperrewardTrait> {
     pub turns: u32,
     pub rwalk: u32,
+    pub sum_diff_est_reward: f64,
     #[serde(flatten)]
     pub game_hrs: T,
 }

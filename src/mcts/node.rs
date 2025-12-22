@@ -95,6 +95,23 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         }
     }
 
+    pub fn est_reward(&self) -> f64 {
+        match self {
+            Node::Expanded {
+                value_sum,
+                visit_count,
+                ..
+            } => {
+                if *visit_count == 0 {
+                    0.0
+                } else {
+                    *value_sum / *visit_count as f64
+                }
+            }
+            Node::Placeholder { .. } => 0.0,
+        }
+    }
+
     pub fn weight(&self) -> u32 {
         match self {
             Node::Expanded { weight, .. } => weight.unwrap_or(1),
@@ -216,6 +233,28 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         weight: Option<u32>,
     ) -> Node<StateType, <StateType as State>::ActionType> {
         create_expanded_node(state, weight)
+    }
+
+    pub fn mean_child_est_reward(&self) -> f64 {
+        match self {
+            Node::Expanded { children, .. } => {
+                let expanded_children: Vec<_> = children
+                    .values()
+                    .filter(|c| matches!(*c.read().unwrap(), Node::Expanded { .. }))
+                    .collect();
+
+                if expanded_children.is_empty() {
+                    0.0
+                } else {
+                    let sum: f64 = expanded_children
+                        .iter()
+                        .map(|child_lock| child_lock.read().unwrap().est_reward())
+                        .sum();
+                    sum / expanded_children.len() as f64
+                }
+            }
+            Node::Placeholder { .. } => 0.0,
+        }
     }
 
     pub fn get_node_by_path(
@@ -651,6 +690,79 @@ mod tests {
             .find(|p| p.action_to_take == InjectableGameAction::WinInXTurns(2))
             .unwrap();
         assert_eq!(pick2.expected_value, 0.0);
+    }
+
+    #[test]
+    fn test_est_reward() {
+        let state = InjectableGameState {
+            injected_reward: vec![0.0],
+            injected_terminal: false,
+            injected_permitted_actions: vec![],
+            player_count: 1,
+            next_actor: Actor::Player(0),
+            injected_hyperreward: TestHyperreward { value: 0 },
+            terminal_hyperreward: TestHyperreward { value: 1 },
+        };
+        let mut node = create_expanded_node(state, None);
+        assert_eq!(node.est_reward(), 0.0);
+        node.visit(10.0);
+        assert_eq!(node.est_reward(), 10.0);
+        node.visit(5.0);
+        assert_eq!(node.est_reward(), 7.5);
+    }
+
+    #[test]
+    fn test_mean_child_est_reward() {
+        let mut root_node = create_expanded_node(
+            InjectableGameState {
+                injected_reward: vec![0.0f64],
+                injected_terminal: false,
+                injected_permitted_actions: vec![
+                    InjectableGameAction::WinInXTurns(1),
+                    InjectableGameAction::WinInXTurns(2),
+                ],
+                player_count: 1,
+                injected_hyperreward: TestHyperreward { value: 0 },
+                next_actor: Actor::Player(0),
+                terminal_hyperreward: TestHyperreward { value: 1 },
+            },
+            None,
+        );
+
+        let mut child1 = create_expanded_node(
+            InjectableGameState {
+                injected_reward: vec![0.0f64],
+                injected_terminal: false,
+                injected_permitted_actions: vec![],
+                player_count: 1,
+                next_actor: Actor::Player(0),
+                injected_hyperreward: TestHyperreward { value: 0 },
+                terminal_hyperreward: TestHyperreward { value: 1 },
+            },
+            None,
+        );
+        child1.visit(10.0); // est_reward = 10.0
+
+        let mut child2 = create_expanded_node(
+            InjectableGameState {
+                injected_reward: vec![0.0f64],
+                injected_terminal: false,
+                injected_permitted_actions: vec![],
+                player_count: 1,
+                next_actor: Actor::Player(0),
+                injected_hyperreward: TestHyperreward { value: 0 },
+                terminal_hyperreward: TestHyperreward { value: 1 },
+            },
+            None,
+        );
+        child2.visit(20.0);
+        child2.visit(4.0); // est_reward = 12.0
+
+        root_node.insert_child(InjectableGameAction::WinInXTurns(1), child1);
+        root_node.insert_child(InjectableGameAction::WinInXTurns(2), child2);
+
+        // Mean of 10.0 and 12.0 should be 11.0
+        assert_eq!(root_node.mean_child_est_reward(), 11.0);
     }
 }
 

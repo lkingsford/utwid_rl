@@ -54,6 +54,7 @@ pub fn run_mcts_iterations<
                             turns: selection_result.random_walk_steps
                                 + selection_result.selected_steps,
                             rwalk: selection_result.random_walk_steps as u32,
+                            sum_diff_est_reward: selection_result.sum_diff_est_reward,
                             game_hrs: selection_result.round_hyperreward.unwrap(),
                         };
                         if sender_clone.send(hyperrewards_to_send).is_err() {
@@ -68,6 +69,7 @@ pub fn run_mcts_iterations<
                         // Like above - should figure out if we expose selected turns or overall
                         turns: selection_result.random_walk_steps + selection_result.selected_steps,
                         rwalk: selection_result.random_walk_steps as u32,
+                        sum_diff_est_reward: selection_result.sum_diff_est_reward,
                         game_hrs: selection_result.round_hyperreward.unwrap(),
                     };
                     if sender_clone.send(hyperrewards_to_send).is_err() {

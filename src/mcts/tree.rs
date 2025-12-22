@@ -17,6 +17,7 @@ pub struct SelectionResult<ActionType: Action, GameHyperrewardType: GameHyperrew
     pub random_walk_steps: u32,
     pub selected_steps: u32,
     pub round_hyperreward: Option<GameHyperrewardType>,
+    pub sum_diff_est_reward: f64,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -80,6 +81,12 @@ where
         if best_pick.is_empty() {
             return Selection::FullyExplored;
         }
+
+        let mean_reward = {
+            let n = node.read().unwrap();
+            n.mean_child_est_reward()
+        };
+
         for pick in best_pick.iter() {
             let action = pick.action_to_take.clone();
             let child = { node.read().unwrap().get_child(action.clone()) };
@@ -108,20 +115,26 @@ where
                         // preallocation
                         let mut result_selection = vec![action.clone()];
                         result_selection.extend(selection_result.selection);
+
+                        let diff_est_reward = pick.expected_value - mean_reward;
+
                         return Selection::Selection(SelectionResult {
                             selection: result_selection,
                             random_walk_steps: selection_result.random_walk_steps,
                             selected_steps: depth,
-                            round_hyperreward: None,
+                            round_hyperreward: selection_result.round_hyperreward,
+                            sum_diff_est_reward: selection_result.sum_diff_est_reward + diff_est_reward,
                         });
                     }
                 }
             } else {
+                let diff_est_reward = pick.expected_value - mean_reward;
                 return Selection::Selection(SelectionResult {
                     selection: vec![action.clone()],
                     random_walk_steps: 0,
                     selected_steps: depth,
                     round_hyperreward: None,
+                    sum_diff_est_reward: diff_est_reward,
                 });
             }
         }
@@ -272,6 +285,7 @@ where
                 random_walk_steps: play_out_result.random_walk_steps,
                 selected_steps: selection_result.selected_steps,
                 round_hyperreward: Some(play_out_result.round_hyperreward),
+                sum_diff_est_reward: selection_result.sum_diff_est_reward,
             });
         }
         panic!("Should be unreachable");
@@ -426,6 +440,7 @@ mod tests {
             selected_steps: 2,
             random_walk_steps: 0,
             round_hyperreward: Some(TestHyperreward::default()),
+            sum_diff_est_reward: 0.0,
         });
 
         let tree = Tree::new(root);
@@ -698,6 +713,72 @@ mod tests {
             );
         } else {
             self::panic!("Expected a selection");
+        }
+    }
+
+    #[test]
+    fn test_sum_diff_est_reward() {
+        let mut root_node = create_expanded_node(
+            InjectableGameState {
+                injected_reward: vec![0.0f64],
+                injected_terminal: false,
+                injected_permitted_actions: vec![
+                    InjectableGameAction::WinInXTurns(1),
+                    InjectableGameAction::WinInXTurns(2),
+                    InjectableGameAction::WinInXTurns(3),
+                ],
+                player_count: 1,
+                injected_hyperreward: TestHyperreward { value: 0 },
+                next_actor: Actor::Player(0),
+                terminal_hyperreward: TestHyperreward { value: 1 },
+            },
+            None,
+        );
+
+        let mut child1 = create_expanded_node(
+            InjectableGameState {
+                injected_reward: vec![0.0f64],
+                injected_terminal: false,
+                injected_permitted_actions: vec![],
+                player_count: 1,
+                next_actor: Actor::Player(0),
+                injected_hyperreward: TestHyperreward { value: 0 },
+                terminal_hyperreward: TestHyperreward { value: 1 },
+            },
+            None,
+        );
+        child1.visit(10.0); // est_reward = 10.0
+
+        let mut child2 = create_expanded_node(
+            InjectableGameState {
+                injected_reward: vec![0.0f64],
+                injected_terminal: false,
+                injected_permitted_actions: vec![],
+                player_count: 1,
+                next_actor: Actor::Player(0),
+                injected_hyperreward: TestHyperreward { value: 0 },
+                terminal_hyperreward: TestHyperreward { value: 1 },
+            },
+            None,
+        );
+        child2.visit(20.0);
+        child2.visit(4.0); // est_reward = 12.0
+
+        root_node.insert_child(InjectableGameAction::WinInXTurns(1), child1);
+        root_node.insert_child(InjectableGameAction::WinInXTurns(2), child2);
+        root_node.insert_child(
+            InjectableGameAction::WinInXTurns(3),
+            Node::Placeholder { weight: None },
+        );
+
+        let tree = Tree::new(root_node);
+        if let Selection::Selection(selection_result) = tree.selection() {
+            // mean_child_est_reward is (10.0 + 12.0) / 2 = 11.0 for the root node's expanded children.
+            // best_pick is WinInXTurns(3) which has an est_reward of 0.
+            // dWe should be 0 - 11.0 = -11.0
+            assert_eq!(selection_result.sum_diff_est_reward, -11.0);
+        } else {
+            self::panic!("Incorrect selection type")
         }
     }
 }
