@@ -1579,9 +1579,40 @@ impl State for EBRState {
             if COMPANY_FIXED_DETAILS[company].private {
                 self.reachable_narrow_track(*company).contains(&location)
             } else {
-                self.track
+                if self.company_details[company].hq.is_none() {
+                    return false;
+                }
+                let hq = self.company_details[company].hq.unwrap();
+                let company_track_type = TrackType::CompanyOwned(*company);
+                if !self
+                    .track
                     .iter()
-                    .any(|t| t.location == location && t.track_type == TrackType::CompanyOwned(*company))
+                    .any(|t| t.location == hq && t.track_type == company_track_type)
+                {
+                    return false;
+                }
+
+                let mut to_visit = vec![hq];
+                let mut visited = HashSet::new();
+
+                while let Some(coord) = to_visit.pop() {
+                    if !visited.insert(coord) {
+                        continue;
+                    }
+                    if coord == location {
+                        return true;
+                    }
+                    for neighbor in get_neighbors(coord) {
+                        if !visited.contains(&neighbor)
+                            && self.track.iter().any(|t| {
+                                t.location == neighbor && t.track_type == company_track_type
+                            })
+                        {
+                            to_visit.push(neighbor);
+                        }
+                    }
+                }
+                false
             }
         };
 
