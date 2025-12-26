@@ -7,6 +7,13 @@ use std::sync::LazyLock;
 use crate::game::Game;
 use crate::mcts::game_trait::{Action, Actor, State};
 
+// ANNOTATION: This file is a machine-readable implementation of the board game rules
+// found in `Rules.md`. It is primarily intended for playtesting and simulation via
+// an MCTS agent. As such, some rules may be simplified, hardcoded for a specific
+// scenario, or marked with TODO/FIXME where the implementation diverges from the
+// official rules document. Key differences will be noted in comments.
+
+
 /*
 OK - here's the deal. This is to help me playtest something.
 It's a lot quicker for me to shove the data directly in the
@@ -50,6 +57,10 @@ type ActionCubeSpaces = [bool; 11];
 
 const ACTION_CUBE_INIT: ActionCubeSpaces = [
     // This might not be the most helpful way to mentally consider this
+    // ANNOTATION: Represents the initial state of the action table.
+    // `true` means a cube is present. This is a hardcoded setup for testing.
+    // As defined, initial available actions are BuildTrack, AuctionShare, IssueBond, Merge.
+    // Initially occupied actions are TakeResources (3 cubes) and PayDividend (1 cube).
     false, false, false, false, false, true, true, true, false, false, true,
 ];
 
@@ -58,6 +69,9 @@ struct Bond {
     face_value: usize,
     coupon: usize,
 }
+// ANNOTATION: Simplified bond structure. The rules specify a two-part dividend cost
+// ('X+Y/div'), but this implementation uses a single `coupon` value.
+// FIXME: The logic for paying interest on these bonds appears to be non-functional.
 const BONDS: [Bond; 7] = [
     Bond {
         face_value: 5,
@@ -95,6 +109,9 @@ struct BondDetails {
     deferred: bool,
 }
 
+// ANNOTATION: This is currently unused. The `init_game` function uses a simple
+// `24 / player_count` formula for starting cash. This map contains different values
+// that are not currently referenced, representing a discrepancy or alternative rule set.
 static INITIAL_CASH: LazyLock<HashMap<u8, u32>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     m.insert(2, 20);
@@ -239,6 +256,8 @@ static COMPANY_FIXED_DETAILS: LazyLock<HashMap<Company, CompanyFixedDetails>> =
         m
     });
 
+// ANNOTATION: A hardcoded list of initial resource cube locations.
+// This differs from the rules, which describe a random setup process using cards.
 const INITIAL_RESOURCE_CUBES: [Coordinate; 4] = [(2, 4), (2, 3), (3, 4), (3, 4)];
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CompanyDetails {
@@ -849,7 +868,9 @@ impl Action for EBRAction {
                     let company_details = state.company_details.get_mut(&company).unwrap();
                     company_details.cash += private_cash;
                     company_details.bonds.extend(private_bonds.clone());
-                    // TODO: Data drive the EBRC exception
+                    // TODO: Rules for share handling on merge are incomplete.
+                    // 1. When merging with EBRC, EBRC should get one of its reserved shares. This logic is missing.
+                    // 2. When merging with another company, one of EBRC's reserved shares should become available for auction. This is also missing.
                     if company != &Company::EBRC {
                         company_details.shares_held += 1;
                         company_details.shares_remaining -= 1;
@@ -889,6 +910,10 @@ impl Action for EBRAction {
                 state
             }
             EBRAction::TakeResources(coordinate) => {
+                // ANNOTATION: Major rules discrepancy here.
+                // Rules: Company pays ₤3 per cube, and its revenue track increases.
+                // Implementation: Company pays nothing. Shareholders receive a small,
+                // immediate cash dividend. The `TAKE_RESOURCE_COST` constant is unused.
                 let mut state = state.clone();
                 if let Stage::TakeResources {
                     company,
@@ -1046,6 +1071,8 @@ impl EBRState {
             .any(|c| self.can_issue(c.0.clone()))
     }
     fn can_issue(&self, company: Company) -> bool {
+        // TODO: This check is incomplete. Rules require that the number of issued
+        // bonds is less than the number of sold shares. This is not currently checked.
         if COMPANY_FIXED_DETAILS[&company].private {
             return false;
         };
@@ -1364,6 +1391,10 @@ impl EBRState {
                 },
             )
             .sum::<isize>();
+        // FIXME: Bond interest logic is non-functional.
+        // A bond is issued as `deferred = true`. The `pay_dividend` function also sets
+        // `deferred = true`. This means a bond's `deferred` status is never `false`,
+        // so its `coupon` value is never actually subtracted from revenue here.
         let bond_interest = self
             .company_details
             .get(&company)
@@ -1423,29 +1454,35 @@ impl EBRState {
             })
             .collect::<HashMap<u8, isize>>();
 
+        // ANNOTATION: This loop updates the state of bonds for the next round.
+        // Any bond that was deferred for this dividend payment will now be flipped
+        // to `deferred = false`, so its interest will be paid in all future rounds.
         for company in self.company_details.values_mut() {
             for bond in company.bonds.iter_mut() {
-                bond.deferred = true;
+                bond.deferred = false;
             }
         }
         self.dividends_paid += 1;
 
+        // ANNOTATION: End-game checks. The game can end due to running out of dividend
+        // rounds, player bankruptcy, or by meeting 2 of the 4 specified conditions.
         self.terminal = self.dividends_paid == 6
-            // TODO: Add bankruptcy
+            // TODO: Bankruptcy is simplified. The game ends, but the rules for other
+            // players covering debt are not implemented.
             || self.player_cash.iter().any(|(_, cash)| *cash < 0)
             ||
             // Two of these conditions must be met
              vec![
-                // No shares unsold
+                // 1. No shares unsold (Implemented)
                 self.company_details
                     .iter()
                     .filter(|c| c.1.shares_remaining > 0)
                     .count()
                     == 0,
-                // <= 2 bonds remaining
+                // 2. <= 2 bonds remaining (Implemented)
                 self.unissued_bonds.len() <= 2,
-                // TODO: 3/4 charters have no remaining trains
-                // <=3 resource cubes on board
+                // TODO: 3. 3/4 charters have no remaining trains (Not Implemented)
+                // 4. <=3 resource cubes on board (Implemented)
                 self.resource_cubes.len() <= 3,
                     
             ]
@@ -1702,6 +1739,11 @@ impl Game for EBR {
     type HyperrewardsType = ();
 
     fn init_game(&self, _hyperparams: &Self::HyperparamsType) -> Self::StateType {
+        // ANNOTATION: This function initializes the game to a fixed state for testing,
+        // deviating from the random setup described in `Rules.md`.
+        // - Player cash is hardcoded to `24 / player_count`.
+        // - Initial track and resource cubes are from `INITIAL_TRACK` and `INITIAL_RESOURCE_CUBES`.
+        // - Initial company revenue is 0, whereas the rules state it should start at 3.
         EBRState {
             terminal: false,
             next_actor: Actor::Player(0),
