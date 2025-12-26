@@ -1,4 +1,6 @@
+use crate::hyper::GameHyperrewardTrait;
 use log::warn;
+use serde::Serialize;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::Hash;
@@ -22,11 +24,119 @@ data files. It's serving its purpose, and it doesn't need to
 be built for maintainability.
 */
 
-enum EndGameReason {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Default)]
+pub enum EndGameReason {
+    #[default]
+    InProgress,
     Shares,
     Bonds,
     Track,
     Resources,
+    Stalemate,
+    Dividends,
+    Bankruptcy,
+}
+
+#[derive(Clone, Debug, Serialize, Default)]
+pub struct EBRHyperrewards {
+    pub total_bonds_issued: usize,
+    pub end_game_reason: EndGameReason,
+    pub remaining_resource_cubes: usize,
+    pub ebrc_connected_to_devonport: bool,
+    pub ebrc_connected_to_launceston: bool,
+    pub ebrc_connected_to_hobart: bool,
+    pub lw_connected_to_devonport: bool,
+    pub lw_connected_to_launceston: bool,
+    pub lw_connected_to_hobart: bool,
+    pub tmlc_connected_to_devonport: bool,
+    pub tmlc_connected_to_launceston: bool,
+    pub tmlc_connected_to_hobart: bool,
+    pub gt_connected_to_devonport: bool,
+    pub gt_connected_to_launceston: bool,
+    pub gt_connected_to_hobart: bool,
+    pub nmft_connected_to_devonport: bool,
+    pub nmft_connected_to_launceston: bool,
+    pub nmft_connected_to_hobart: bool,
+    pub ned_connected_to_devonport: bool,
+    pub ned_connected_to_launceston: bool,
+    pub ned_connected_to_hobart: bool,
+    pub mlm_connected_to_devonport: bool,
+    pub mlm_connected_to_launceston: bool,
+    pub mlm_connected_to_hobart: bool,
+    pub completed_dividend_rounds: usize,
+    pub gt_merged: bool,
+    pub nmft_merged: bool,
+    pub ned_merged: bool,
+    pub mlm_merged: bool,
+}
+
+impl GameHyperrewardTrait for EBRHyperrewards {
+    fn meta() -> HashMap<String, String> {
+        HashMap::from([
+            ("total_bonds_issued".to_string(), "usize".to_string()),
+            ("end_game_reason".to_string(), "enum".to_string()),
+            (
+                "remaining_resource_cubes".to_string(),
+                "usize".to_string(),
+            ),
+            (
+                "ebrc_connected_to_devonport".to_string(),
+                "bool".to_string(),
+            ),
+            (
+                "ebrc_connected_to_launceston".to_string(),
+                "bool".to_string(),
+            ),
+            ("ebrc_connected_to_hobart".to_string(), "bool".to_string()),
+            ("lw_connected_to_devonport".to_string(), "bool".to_string()),
+            ("lw_connected_to_launceston".to_string(), "bool".to_string()),
+            ("lw_connected_to_hobart".to_string(), "bool".to_string()),
+            (
+                "tmlc_connected_to_devonport".to_string(),
+                "bool".to_string(),
+            ),
+            (
+                "tmlc_connected_to_launceston".to_string(),
+                "bool".to_string(),
+            ),
+            ("tmlc_connected_to_hobart".to_string(), "bool".to_string()),
+            ("gt_connected_to_devonport".to_string(), "bool".to_string()),
+            ("gt_connected_to_launceston".to_string(), "bool".to_string()),
+            ("gt_connected_to_hobart".to_string(), "bool".to_string()),
+            (
+                "nmft_connected_to_devonport".to_string(),
+                "bool".to_string(),
+            ),
+            (
+                "nmft_connected_to_launceston".to_string(),
+                "bool".to_string(),
+            ),
+            ("nmft_connected_to_hobart".to_string(), "bool".to_string()),
+            ("ned_connected_to_devonport".to_string(), "bool".to_string()),
+            (
+                "ned_connected_to_launceston".to_string(),
+                "bool".to_string(),
+            ),
+            ("ned_connected_to_hobart".to_string(), "bool".to_string()),
+            (
+                "mlm_connected_to_devonport".to_string(),
+                "bool".to_string(),
+            ),
+            (
+                "mlm_connected_to_launceston".to_string(),
+                "bool".to_string(),
+            ),
+            ("mlm_connected_to_hobart".to_string(), "bool".to_string()),
+            (
+                "completed_dividend_rounds".to_string(),
+                "usize".to_string(),
+            ),
+            ("gt_merged".to_string(), "bool".to_string()),
+            ("nmft_merged".to_string(), "bool".to_string()),
+            ("ned_merged".to_string(), "bool".to_string()),
+            ("mlm_merged".to_string(), "bool".to_string()),
+        ])
+    }
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -65,7 +175,7 @@ const ACTION_CUBE_INIT: ActionCubeSpaces = [
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct Bond {
+pub struct Bond {
     face_value: usize,
     coupon: usize,
 }
@@ -138,7 +248,7 @@ enum FeatureType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Copy)]
-enum Company {
+pub enum Company {
     EBRC,
     LW,
     TMLC,
@@ -571,6 +681,7 @@ impl Action for EBRAction {
             EBRAction::Stalemate => {
                 let mut state = state.clone();
                 state.terminal = true;
+                state.end_game_reason = EndGameReason::Stalemate;
                 state
             }
             EBRAction::Bid(bid) => {
@@ -1012,6 +1123,7 @@ enum Stage {
 #[derive(Clone, Debug)]
 pub struct EBRState {
     terminal: bool,
+    end_game_reason: EndGameReason,
     next_actor: Actor<EBRAction>,
     active_player: PlayerID,
     player_count: u8,
@@ -1466,39 +1578,93 @@ impl EBRState {
 
         // ANNOTATION: End-game checks. The game can end due to running out of dividend
         // rounds, player bankruptcy, or by meeting 2 of the 4 specified conditions.
-        self.terminal = self.dividends_paid == 6
-            // TODO: Bankruptcy is simplified. The game ends, but the rules for other
-            // players covering debt are not implemented.
-            || self.player_cash.iter().any(|(_, cash)| *cash < 0)
-            ||
-            // Two of these conditions must be met
-             vec![
-                // 1. No shares unsold (Implemented)
-                self.company_details
-                    .iter()
-                    .filter(|c| c.1.shares_remaining > 0)
-                    .count()
-                    == 0,
-                // 2. <= 2 bonds remaining (Implemented)
-                self.unissued_bonds.len() <= 2,
-                // TODO: 3. 3/4 charters have no remaining trains (Not Implemented)
-                // 4. <=3 resource cubes on board (Implemented)
-                self.resource_cubes.len() <= 3,
-                    
-            ]
+        let shares_condition = self
+            .company_details
             .iter()
-            .filter(|criteria| **criteria)
+            .filter(|c| !c.1.merged.unwrap_or(false) && c.1.shares_remaining > 0)
             .count()
-                >= 2
+            == 0;
+        let bonds_condition = self.unissued_bonds.len() <= 2;
+        let resources_condition = self.resource_cubes.len() <= 3;
+
+        let end_conditions_met =
+            (shares_condition as u8) + (bonds_condition as u8) + (resources_condition as u8);
+
+        if self.dividends_paid == FINAL_DIVIDEND_COUNT {
+            self.terminal = true;
+            self.end_game_reason = EndGameReason::Dividends;
+        } else if self.player_cash.iter().any(|(_, cash)| *cash < 0) {
+            self.terminal = true;
+            self.end_game_reason = EndGameReason::Bankruptcy;
+        } else if end_conditions_met >= 2 {
+            self.terminal = true;
+            // TODO: This doesn't correctly capture the case where multiple conditions are met
+            if shares_condition {
+                self.end_game_reason = EndGameReason::Shares;
+            } else if bonds_condition {
+                self.end_game_reason = EndGameReason::Bonds;
+            } else if resources_condition {
+                self.end_game_reason = EndGameReason::Resources;
+            }
+        }
     }
 }
 
 impl State for EBRState {
     type ActionType = EBRAction;
-    type GameHyperrewardType = ();
+    type GameHyperrewardType = EBRHyperrewards;
 
     fn next_actor(&self) -> Actor<EBRAction> {
         self.next_actor.clone()
+    }
+    fn round_hyperreward(&self) -> Self::GameHyperrewardType {
+        let devonport = (7, 3);
+        let launceston = (9, 4);
+        let hobart = (10, 9);
+
+        let is_connected = |company: &Company, location: Coordinate| {
+            if COMPANY_FIXED_DETAILS[company].private {
+                self.reachable_narrow_track(*company).contains(&location)
+            } else {
+                self.track
+                    .iter()
+                    .any(|t| t.location == location && t.track_type == TrackType::CompanyOwned(*company))
+            }
+        };
+
+        EBRHyperrewards {
+            total_bonds_issued: 7 - self.unissued_bonds.len(),
+            end_game_reason: self.end_game_reason,
+            remaining_resource_cubes: self.resource_cubes.len(),
+            ebrc_connected_to_devonport: is_connected(&Company::EBRC, devonport),
+            ebrc_connected_to_launceston: is_connected(&Company::EBRC, launceston),
+            ebrc_connected_to_hobart: is_connected(&Company::EBRC, hobart),
+            lw_connected_to_devonport: is_connected(&Company::LW, devonport),
+            lw_connected_to_launceston: is_connected(&Company::LW, launceston),
+            lw_connected_to_hobart: is_connected(&Company::LW, hobart),
+            tmlc_connected_to_devonport: is_connected(&Company::TMLC, devonport),
+            tmlc_connected_to_launceston: is_connected(&Company::TMLC, launceston),
+            tmlc_connected_to_hobart: is_connected(&Company::TMLC, hobart),
+            gt_connected_to_devonport: is_connected(&Company::GT, devonport),
+            gt_connected_to_launceston: is_connected(&Company::GT, launceston),
+            gt_connected_to_hobart: is_connected(&Company::GT, hobart),
+            nmft_connected_to_devonport: is_connected(&Company::NMFT, devonport),
+            nmft_connected_to_launceston: is_connected(&Company::NMFT, launceston),
+            nmft_connected_to_hobart: is_connected(&Company::NMFT, hobart),
+            ned_connected_to_devonport: is_connected(&Company::NED, devonport),
+            ned_connected_to_launceston: is_connected(&Company::NED, launceston),
+            ned_connected_to_hobart: is_connected(&Company::NED, hobart),
+            mlm_connected_to_devonport: is_connected(&Company::MLM, devonport),
+            mlm_connected_to_launceston: is_connected(&Company::MLM, launceston),
+            mlm_connected_to_hobart: is_connected(&Company::MLM, hobart),
+            completed_dividend_rounds: self.dividends_paid,
+            gt_merged: self.company_details[&Company::GT].merged.unwrap_or(false),
+            nmft_merged: self.company_details[&Company::NMFT]
+                .merged
+                .unwrap_or(false),
+            ned_merged: self.company_details[&Company::NED].merged.unwrap_or(false),
+            mlm_merged: self.company_details[&Company::MLM].merged.unwrap_or(false),
+        }
     }
 
     fn permitted_actions(&self) -> Vec<Self::ActionType> {
@@ -1722,10 +1888,6 @@ impl State for EBRState {
     fn terminal(&self) -> bool {
         self.terminal
     }
-
-    fn round_hyperreward(&self) -> Self::GameHyperrewardType {
-        ()
-    }
 }
 
 pub struct EBR {
@@ -1736,7 +1898,7 @@ impl Game for EBR {
     type StateType = EBRState;
     type ActionType = EBRAction;
     type HyperparamsType = ();
-    type HyperrewardsType = ();
+    type HyperrewardsType = EBRHyperrewards;
 
     fn init_game(&self, _hyperparams: &Self::HyperparamsType) -> Self::StateType {
         // ANNOTATION: This function initializes the game to a fixed state for testing,
@@ -1746,6 +1908,7 @@ impl Game for EBR {
         // - Initial company revenue is 0, whereas the rules state it should start at 3.
         EBRState {
             terminal: false,
+            end_game_reason: EndGameReason::InProgress,
             next_actor: Actor::Player(0),
             player_count: self.player_count,
             track: INITIAL_TRACK.to_vec(),
