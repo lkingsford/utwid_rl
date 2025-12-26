@@ -1,6 +1,7 @@
 use crate::hyper::GameHyperrewardTrait;
 use log::warn;
 use serde::Serialize;
+use serde_json;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::Hash;
@@ -72,64 +73,22 @@ pub struct EBRHyperrewards {
 
 impl GameHyperrewardTrait for EBRHyperrewards {
     fn meta() -> HashMap<String, String> {
-        HashMap::from([
-            ("total_bonds_issued".to_string(), "int".to_string()),
-            ("end_game_reason".to_string(), "string".to_string()),
-            ("remaining_resource_cubes".to_string(), "int".to_string()),
-            (
-                "ebrc_connected_to_devonport".to_string(),
-                "bool".to_string(),
-            ),
-            (
-                "ebrc_connected_to_launceston".to_string(),
-                "bool".to_string(),
-            ),
-            ("ebrc_connected_to_hobart".to_string(), "bool".to_string()),
-            ("lw_connected_to_devonport".to_string(), "bool".to_string()),
-            ("lw_connected_to_launceston".to_string(), "bool".to_string()),
-            ("lw_connected_to_hobart".to_string(), "bool".to_string()),
-            (
-                "tmlc_connected_to_devonport".to_string(),
-                "bool".to_string(),
-            ),
-            (
-                "tmlc_connected_to_launceston".to_string(),
-                "bool".to_string(),
-            ),
-            ("tmlc_connected_to_hobart".to_string(), "bool".to_string()),
-            ("gt_connected_to_devonport".to_string(), "bool".to_string()),
-            ("gt_connected_to_launceston".to_string(), "bool".to_string()),
-            ("gt_connected_to_hobart".to_string(), "bool".to_string()),
-            (
-                "nmft_connected_to_devonport".to_string(),
-                "bool".to_string(),
-            ),
-            (
-                "nmft_connected_to_launceston".to_string(),
-                "bool".to_string(),
-            ),
-            ("nmft_connected_to_hobart".to_string(), "bool".to_string()),
-            ("ned_connected_to_devonport".to_string(), "bool".to_string()),
-            (
-                "ned_connected_to_launceston".to_string(),
-                "bool".to_string(),
-            ),
-            ("ned_connected_to_hobart".to_string(), "bool".to_string()),
-            (
-                "mlm_connected_to_devonport".to_string(),
-                "bool".to_string(),
-            ),
-            (
-                "mlm_connected_to_launceston".to_string(),
-                "bool".to_string(),
-            ),
-            ("mlm_connected_to_hobart".to_string(), "bool".to_string()),
-            ("completed_dividend_rounds".to_string(), "int".to_string()),
-            ("gt_merged".to_string(), "bool".to_string()),
-            ("nmft_merged".to_string(), "bool".to_string()),
-            ("ned_merged".to_string(), "bool".to_string()),
-            ("mlm_merged".to_string(), "bool".to_string()),
-        ])
+        let mut meta = HashMap::new();
+        let default_rewards = EBRHyperrewards::default();
+        let json_value = serde_json::to_value(default_rewards).unwrap();
+        let json_object = json_value.as_object().unwrap();
+
+        for (key, value) in json_object {
+            let type_str = match value {
+                serde_json::Value::Bool(_) => "bool".to_string(),
+                serde_json::Value::Number(_) => "int".to_string(),
+                // Enums are serialized as strings.
+                serde_json::Value::String(_) => "string".to_string(),
+                _ => "unknown".to_string(),
+            };
+            meta.insert(key.clone(), type_str);
+        }
+        meta
     }
 }
 
