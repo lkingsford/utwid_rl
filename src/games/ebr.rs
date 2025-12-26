@@ -101,6 +101,7 @@ pub struct TerrainAttributeParams {
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct EBRHyperparams {
     pub terrain_attributes: HashMap<Terrain, TerrainAttributeParams>,
+    pub bonds: Vec<Bond>,
 }
 
 impl Default for EBRHyperparams {
@@ -150,6 +151,36 @@ impl Default for EBRHyperparams {
         );
         EBRHyperparams {
             terrain_attributes,
+            bonds: vec![
+                Bond {
+                    face_value: 5,
+                    coupon: 1,
+                },
+                Bond {
+                    face_value: 5,
+                    coupon: 1,
+                },
+                Bond {
+                    face_value: 10,
+                    coupon: 3,
+                },
+                Bond {
+                    face_value: 10,
+                    coupon: 3,
+                },
+                Bond {
+                    face_value: 10,
+                    coupon: 4,
+                },
+                Bond {
+                    face_value: 15,
+                    coupon: 4,
+                },
+                Bond {
+                    face_value: 15,
+                    coupon: 5,
+                },
+            ],
         }
     }
 }
@@ -196,45 +227,11 @@ const ACTION_CUBE_INIT: ActionCubeSpaces = [
     false, false, false, false, false, true, true, true, false, false, true,
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 pub struct Bond {
     face_value: usize,
     coupon: usize,
 }
-// ANNOTATION: Simplified bond structure. The rules specify a two-part dividend cost
-// ('X+Y/div'), but this implementation uses a single `coupon` value.
-// FIXME: The logic for paying interest on these bonds appears to be non-functional.
-const BONDS: [Bond; 7] = [
-    Bond {
-        face_value: 5,
-        coupon: 1,
-    },
-    Bond {
-        face_value: 5,
-        coupon: 1,
-    },
-    Bond {
-        face_value: 10,
-        coupon: 3,
-    },
-    Bond {
-        face_value: 10,
-        coupon: 3,
-    },
-    Bond {
-        face_value: 10,
-        coupon: 4,
-    },
-    Bond {
-        face_value: 15,
-        coupon: 4,
-    },
-    Bond {
-        face_value: 15,
-        coupon: 5,
-    },
-];
-
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
 struct BondDetails {
     bond: Bond,
@@ -1991,7 +1988,7 @@ impl Game for EBR {
                     )
                 })
                 .collect(),
-            unissued_bonds: BONDS.iter().map(|b| b.clone()).collect::<Vec<Bond>>(),
+            unissued_bonds: hyperparams.bonds.iter().map(|b| b.clone()).collect::<Vec<Bond>>(),
             resource_cubes: INITIAL_RESOURCE_CUBES.to_vec(),
             narrow_gauge_remaining: NARROW_GAUGE_INITIAL,
             terrain_attributes,
