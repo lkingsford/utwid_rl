@@ -73,12 +73,9 @@ pub struct EBRHyperrewards {
 impl GameHyperrewardTrait for EBRHyperrewards {
     fn meta() -> HashMap<String, String> {
         HashMap::from([
-            ("total_bonds_issued".to_string(), "usize".to_string()),
-            ("end_game_reason".to_string(), "enum".to_string()),
-            (
-                "remaining_resource_cubes".to_string(),
-                "usize".to_string(),
-            ),
+            ("total_bonds_issued".to_string(), "int".to_string()),
+            ("end_game_reason".to_string(), "string".to_string()),
+            ("remaining_resource_cubes".to_string(), "int".to_string()),
             (
                 "ebrc_connected_to_devonport".to_string(),
                 "bool".to_string(),
@@ -127,10 +124,7 @@ impl GameHyperrewardTrait for EBRHyperrewards {
                 "bool".to_string(),
             ),
             ("mlm_connected_to_hobart".to_string(), "bool".to_string()),
-            (
-                "completed_dividend_rounds".to_string(),
-                "usize".to_string(),
-            ),
+            ("completed_dividend_rounds".to_string(), "int".to_string()),
             ("gt_merged".to_string(), "bool".to_string()),
             ("nmft_merged".to_string(), "bool".to_string()),
             ("ned_merged".to_string(), "bool".to_string()),
