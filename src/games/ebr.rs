@@ -102,6 +102,7 @@ pub struct TerrainAttributeParams {
 pub struct EBRHyperparams {
     pub terrain_attributes: HashMap<Terrain, TerrainAttributeParams>,
     pub bonds: Vec<Bond>,
+    pub initial_cash: HashMap<u8, u32>,
 }
 
 impl Default for EBRHyperparams {
@@ -149,6 +150,11 @@ impl Default for EBRHyperparams {
                 revenue: [0, 0, 0, 0, 0, 0],
             },
         );
+        let mut initial_cash = HashMap::new();
+        initial_cash.insert(2, 20);
+        initial_cash.insert(3, 13);
+        initial_cash.insert(4, 10);
+        initial_cash.insert(5, 8);
         EBRHyperparams {
             terrain_attributes,
             bonds: vec![
@@ -181,6 +187,7 @@ impl Default for EBRHyperparams {
                     coupon: 5,
                 },
             ],
+            initial_cash,
         }
     }
 }
@@ -237,18 +244,6 @@ struct BondDetails {
     bond: Bond,
     deferred: bool,
 }
-
-// ANNOTATION: This is currently unused. The `init_game` function uses a simple
-// `24 / player_count` formula for starting cash. This map contains different values
-// that are not currently referenced, representing a discrepancy or alternative rule set.
-static INITIAL_CASH: LazyLock<HashMap<u8, u32>> = LazyLock::new(|| {
-    let mut m = HashMap::new();
-    m.insert(2, 20);
-    m.insert(3, 13);
-    m.insert(4, 10);
-    m.insert(5, 8);
-    m
-});
 
 #[derive(Debug, Clone)]
 struct Feature {
@@ -1958,7 +1953,15 @@ impl Game for EBR {
                 .map(|i| (i, Vec::new()))
                 .collect::<HashMap<u8, Vec<Company>>>(),
             player_cash: (0..self.player_count)
-                .map(|i| (i, 24 / self.player_count as isize))
+                .map(|i| {
+                    (
+                        i,
+                        *hyperparams
+                            .initial_cash
+                            .get(&self.player_count)
+                            .unwrap_or(&0) as isize,
+                    )
+                })
                 .collect::<HashMap<u8, isize>>(),
             revenue: ALL_COMPANIES.iter().map(|c| (c.clone(), 0)).collect(),
             action_cubes: ACTION_CUBE_INIT,
