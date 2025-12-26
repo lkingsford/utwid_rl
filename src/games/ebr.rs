@@ -1,6 +1,6 @@
-use crate::hyper::GameHyperrewardTrait;
+use crate::hyper::{GameHyperrewardTrait, Hyperparams, ParamMeta};
 use log::warn;
-use serde::Serialize;
+use serde::{de, Deserializer, Serialize, Serializer};
 use serde_json;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -91,6 +91,75 @@ impl GameHyperrewardTrait for EBRHyperrewards {
         meta
     }
 }
+
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct TerrainAttributeParams {
+    pub build_cost: u32,
+    pub revenue: [isize; 6],
+}
+
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct EBRHyperparams {
+    pub terrain_attributes: HashMap<Terrain, TerrainAttributeParams>,
+}
+
+impl Default for EBRHyperparams {
+    fn default() -> Self {
+        let mut terrain_attributes = HashMap::new();
+        terrain_attributes.insert(
+            Terrain::Nothing,
+            TerrainAttributeParams {
+                build_cost: 0,
+                revenue: [0, 0, 0, 0, 0, 0],
+            },
+        );
+        terrain_attributes.insert(
+            Terrain::Plain,
+            TerrainAttributeParams {
+                build_cost: 3,
+                revenue: [0, 0, 0, 0, 0, 0],
+            },
+        );
+        terrain_attributes.insert(
+            Terrain::Forest,
+            TerrainAttributeParams {
+                build_cost: 4,
+                revenue: [1, 1, 1, 1, 0, 0],
+            },
+        );
+        terrain_attributes.insert(
+            Terrain::Mountain,
+            TerrainAttributeParams {
+                build_cost: 6,
+                revenue: [0, 0, 0, 0, 0, 0],
+            },
+        );
+        terrain_attributes.insert(
+            Terrain::Town,
+            TerrainAttributeParams {
+                build_cost: 4,
+                revenue: [0, 0, 0, 0, 0, 0],
+            },
+        );
+        terrain_attributes.insert(
+            Terrain::Port,
+            TerrainAttributeParams {
+                build_cost: 5,
+                revenue: [0, 0, 0, 0, 0, 0],
+            },
+        );
+        EBRHyperparams {
+            terrain_attributes,
+        }
+    }
+}
+
+impl Hyperparams for EBRHyperparams {
+    fn metadata() -> HashMap<String, ParamMeta> {
+        HashMap::new()
+    }
+}
+
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ChoosableAction {
@@ -338,7 +407,6 @@ struct CompanyDetails {
 #[derive(Debug, Clone, Copy, PartialEq, Hash)]
 struct CommonAttributes {
     build_cost: u32,
-    symbol: Option<&'static str>,
     buildable: bool,
     multiple_allowed: bool,
     revenue: [isize; 6],
@@ -346,8 +414,8 @@ struct CommonAttributes {
 
 const FINAL_DIVIDEND_COUNT: usize = 6;
 
-#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
-enum Terrain {
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, PartialOrd, Ord)]
+pub enum Terrain {
     Nothing,
     Plain,
     Forest,
@@ -356,74 +424,37 @@ enum Terrain {
     Port,
 }
 
-static TERRAIN_ATTRIBUTES: LazyLock<HashMap<Terrain, CommonAttributes>> = LazyLock::new(|| {
-    let mut map = HashMap::new();
-    map.insert(
-        Terrain::Nothing,
-        CommonAttributes {
-            build_cost: 0,
-            symbol: None,
-            buildable: false,
-            multiple_allowed: false,
-            revenue: [0, 0, 0, 0, 0, 0],
-        },
-    );
-    map.insert(
-        Terrain::Plain,
-        CommonAttributes {
-            build_cost: 3,
-            symbol: Some("\u{1B}[37m-"),
-            buildable: true,
-            multiple_allowed: true,
-            revenue: [0, 0, 0, 0, 0, 0],
-        },
-    );
-    map.insert(
-        Terrain::Forest,
-        CommonAttributes {
-            build_cost: 4,
-            symbol: Some("\u{1B}[32m="),
-            buildable: true,
-            multiple_allowed: false,
-            revenue: [1, 1, 1, 1, 0, 0],
-        },
-    );
-    map.insert(
-        Terrain::Mountain,
-        CommonAttributes {
-            build_cost: 6,
-            symbol: Some("\u{1B}[32m^"),
-            multiple_allowed: false,
-            buildable: true,
-            revenue: [0, 0, 0, 0, 0, 0],
-        },
-    );
-    map.insert(
-        Terrain::Town,
-        CommonAttributes {
-            build_cost: 4,
-            symbol: Some("\u{1B}[33mT"),
-            buildable: true,
-            multiple_allowed: true,
-            revenue: [0, 0, 0, 0, 0, 0],
-        },
-    );
-    map.insert(
-        Terrain::Port,
-        CommonAttributes {
-            build_cost: 5,
-            symbol: Some("\u{1B}[31mP"),
-            buildable: true,
-            multiple_allowed: true,
-            revenue: [0, 0, 0, 0, 0, 0],
-        },
-    );
-    map
-});
+impl Serialize for Terrain {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(match *self {
+            Terrain::Nothing => "nothing",
+            Terrain::Plain => "plain",
+            Terrain::Forest => "forest",
+            Terrain::Mountain => "mountain",
+            Terrain::Town => "town",
+            Terrain::Port => "port",
+        })
+    }
+}
 
-impl Terrain {
-    fn attributes(&self) -> &CommonAttributes {
-        &TERRAIN_ATTRIBUTES[self]
+impl<'de> de::Deserialize<'de> for Terrain {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "nothing" => Ok(Terrain::Nothing),
+            "plain" => Ok(Terrain::Plain),
+            "forest" => Ok(Terrain::Forest),
+            "mountain" => Ok(Terrain::Mountain),
+            "town" => Ok(Terrain::Town),
+            "port" => Ok(Terrain::Port),
+            _ => Err(de::Error::custom(format!("unknown terrain: {}", s))),
+        }
     }
 }
 
@@ -1091,6 +1122,7 @@ pub struct EBRState {
     unissued_bonds: Vec<Bond>,
     resource_cubes: Vec<Coordinate>,
     narrow_gauge_remaining: usize,
+    terrain_attributes: HashMap<Terrain, CommonAttributes>,
 }
 
 impl EBRState {
@@ -1269,7 +1301,7 @@ impl EBRState {
                     return None;
                 }
                 let terrain = TERRAIN[t.1][t.0];
-                let attr = TERRAIN_ATTRIBUTES[&terrain];
+                let attr = &self.terrain_attributes[&terrain];
                 if !attr.buildable {
                     return None;
                 }
@@ -1319,7 +1351,7 @@ impl EBRState {
         // Slight repetition of other places where this is called here
         let terrain = TERRAIN[t.1][t.0];
 
-        let attr = TERRAIN_ATTRIBUTES[&terrain];
+        let attr = &self.terrain_attributes[&terrain];
         (1 + other_track_in_location.len()) * attr.build_cost as usize
             + FEATURES
                 .get(&t)
@@ -1362,7 +1394,7 @@ impl EBRState {
             .filter(|t| {
                 !(self.narrow_cost(*t) as isize > cash
                     && !self.track.iter().any(|t2| t2.location == *t))
-                    && TERRAIN[t.1][t.0].attributes().buildable
+                    && self.terrain_attributes[&TERRAIN[t.1][t.0]].buildable
             })
             .collect::<BTreeSet<_>>()
             .iter()
@@ -1445,7 +1477,7 @@ impl EBRState {
             .filter(|t| t.track_type == TrackType::CompanyOwned(company.clone()));
         let track_terrain_revenue = company_track
             .clone()
-            .map(|t| TERRAIN[t.location.1][t.location.0].attributes().revenue[self.dividends_paid])
+            .map(|t| self.terrain_attributes[&TERRAIN[t.location.1][t.location.0]].revenue[self.dividends_paid])
             .sum::<isize>();
         let track_feature_revenue = company_track
             .clone()
@@ -1881,10 +1913,31 @@ pub struct EBR {
 impl Game for EBR {
     type StateType = EBRState;
     type ActionType = EBRAction;
-    type HyperparamsType = ();
+    type HyperparamsType = EBRHyperparams;
     type HyperrewardsType = EBRHyperrewards;
 
-    fn init_game(&self, _hyperparams: &Self::HyperparamsType) -> Self::StateType {
+    fn init_game(&self, hyperparams: &Self::HyperparamsType) -> Self::StateType {
+        let mut terrain_attributes = HashMap::new();
+        for (terrain, params) in &hyperparams.terrain_attributes {
+            let (buildable, multiple_allowed) = match terrain {
+                Terrain::Nothing => (false, false),
+                Terrain::Plain => (true, true),
+                Terrain::Forest => (true, false),
+                Terrain::Mountain => (true, false),
+                Terrain::Town => (true, true),
+                Terrain::Port => (true, true),
+            };
+            terrain_attributes.insert(
+                *terrain,
+                CommonAttributes {
+                    build_cost: params.build_cost,
+                    buildable,
+                    multiple_allowed,
+                    revenue: params.revenue,
+                },
+            );
+        }
+
         // ANNOTATION: This function initializes the game to a fixed state for testing,
         // deviating from the random setup described in `Rules.md`.
         // - Player cash is hardcoded to `24 / player_count`.
@@ -1941,6 +1994,7 @@ impl Game for EBR {
             unissued_bonds: BONDS.iter().map(|b| b.clone()).collect::<Vec<Bond>>(),
             resource_cubes: INITIAL_RESOURCE_CUBES.to_vec(),
             narrow_gauge_remaining: NARROW_GAUGE_INITIAL,
+            terrain_attributes,
         }
     }
 
@@ -2001,8 +2055,8 @@ mod test {
     use super::*;
 
     fn init_game() -> EBRState {
-        let mut game = EBR { player_count: 3 };
-        game.init_game( &() )
+        let game = EBR { player_count: 3 };
+        game.init_game(&EBRHyperparams::default())
     }
 
     #[test]

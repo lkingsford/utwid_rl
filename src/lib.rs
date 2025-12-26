@@ -1,6 +1,6 @@
 use crate::{
     game::Game,
-    games::{c4::C4Hyperparams, c4::C4, cs::CS, ebr::EBR, nt::NT, Games},
+    games::{c4::C4Hyperparams, c4::C4, cs::CS, ebr::EBRHyperparams, ebr::EBR, nt::NT, Games},
     hyper::Hyperparams,
     mcts::mcts::explore_tree,
 };
@@ -103,7 +103,11 @@ fn explore(
         }
         Games::EBR => {
             let game = EBR { player_count: 2 };
-            let hyperparams = ();
+            let hyperparams = if let Some(pydict) = hyperparams {
+                EBRHyperparams::from_pydict(py, pydict.bind(py))?
+            } else {
+                EBRHyperparams::default()
+            };
             let state = game.init_game(&hyperparams);
             explore_tree(
                 iterations,
@@ -137,7 +141,7 @@ fn get_hyperparam_meta(py: Python, game: Games) -> PyResult<Py<PyAny>> {
         Games::C4 => C4Hyperparams::metadata(),
         Games::NT => <() as Hyperparams>::metadata(),
         Games::CS => <() as Hyperparams>::metadata(),
-        Games::EBR => <() as Hyperparams>::metadata(),
+        Games::EBR => EBRHyperparams::metadata(),
     };
 
     let json_str = serde_json::to_string(&meta)
