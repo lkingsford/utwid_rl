@@ -99,10 +99,21 @@ pub struct TerrainAttributeParams {
 }
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct CompanyFixedDetailsParams {
+    pub starting: Option<Coordinate>,
+    pub private: bool,
+    pub stock_available: usize,
+    pub track_available: usize,
+    pub initial_treasury: usize,
+    pub initial_interest: usize,
+}
+
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct EBRHyperparams {
     pub terrain_attributes: HashMap<Terrain, TerrainAttributeParams>,
     pub bonds: Vec<Bond>,
     pub initial_cash: HashMap<u8, u32>,
+    pub company_fixed_details: HashMap<Company, CompanyFixedDetailsParams>,
 }
 
 impl Default for EBRHyperparams {
@@ -155,6 +166,86 @@ impl Default for EBRHyperparams {
         initial_cash.insert(3, 13);
         initial_cash.insert(4, 10);
         initial_cash.insert(5, 8);
+
+        let mut company_fixed_details = HashMap::new();
+        company_fixed_details.insert(
+            Company::EBRC,
+            CompanyFixedDetailsParams {
+                starting: Some((3, 5)),
+                private: false,
+                stock_available: 5,
+                track_available: 10,
+                initial_treasury: 0,
+                initial_interest: 0,
+            },
+        );
+        company_fixed_details.insert(
+            Company::LW,
+            CompanyFixedDetailsParams {
+                starting: Some((9, 4)),
+                private: false,
+                stock_available: 3,
+                track_available: 10,
+                initial_treasury: 0,
+                initial_interest: 0,
+            },
+        );
+        company_fixed_details.insert(
+            Company::TMLC,
+            CompanyFixedDetailsParams {
+                starting: Some((9, 4)),
+                private: false,
+                stock_available: 4,
+                track_available: 10,
+                initial_treasury: 0,
+                initial_interest: 0,
+            },
+        );
+        company_fixed_details.insert(
+            Company::GT,
+            CompanyFixedDetailsParams {
+                starting: Some((2, 4)),
+                private: true,
+                stock_available: 1,
+                track_available: 0,
+                initial_treasury: 10,
+                initial_interest: 2,
+            },
+        );
+        company_fixed_details.insert(
+            Company::NMFT,
+            CompanyFixedDetailsParams {
+                starting: None,
+                private: true,
+                stock_available: 1,
+                track_available: 0,
+                initial_treasury: 0,
+                initial_interest: 0,
+            },
+        );
+        company_fixed_details.insert(
+            Company::NED,
+            CompanyFixedDetailsParams {
+                starting: None,
+                private: true,
+                stock_available: 1,
+                track_available: 0,
+                initial_treasury: 15,
+                initial_interest: 3,
+            },
+        );
+        company_fixed_details.insert(
+            Company::MLM,
+            CompanyFixedDetailsParams {
+                starting: None,
+                private: true,
+                stock_available: 1,
+                track_available: 0,
+                initial_treasury: 20,
+                initial_interest: 5,
+            },
+        );
+
         EBRHyperparams {
             terrain_attributes,
             bonds: vec![
@@ -188,6 +279,7 @@ impl Default for EBRHyperparams {
                 },
             ],
             initial_cash,
+            company_fixed_details,
         }
     }
 }
@@ -272,6 +364,42 @@ pub enum Company {
     MLM,
 }
 
+impl Serialize for Company {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(match *self {
+            Company::EBRC => "EBRC",
+            Company::LW => "LW",
+            Company::TMLC => "TMLC",
+            Company::GT => "GT",
+            Company::NMFT => "NMFT",
+            Company::NED => "NED",
+            Company::MLM => "MLM",
+        })
+    }
+}
+
+impl<'de> de::Deserialize<'de> for Company {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "EBRC" => Ok(Company::EBRC),
+            "LW" => Ok(Company::LW),
+            "TMLC" => Ok(Company::TMLC),
+            "GT" => Ok(Company::GT),
+            "NMFT" => Ok(Company::NMFT),
+            "NED" => Ok(Company::NED),
+            "MLM" => Ok(Company::MLM),
+            _ => Err(de::Error::custom(format!("unknown company: {}", s))),
+        }
+    }
+}
+
 const ALL_COMPANIES: [Company; 7] = [
     Company::EBRC,
     Company::LW,
@@ -286,99 +414,7 @@ const IPO_ORDER: [Company; 4] = [Company::LW, Company::TMLC, Company::EBRC, Comp
 static PRIVATE_ORDER: LazyLock<Vec<Company>> =
     LazyLock::new(|| vec![Company::GT, Company::NMFT, Company::NED, Company::MLM]);
 
-struct CompanyFixedDetails {
-    starting: Option<Coordinate>,
-    private: bool,
-    stock_available: usize,
-    track_available: usize,
-    initial_treasury: usize,
-    initial_interest: usize,
-}
-
 type Coordinate = (usize, usize);
-
-static COMPANY_FIXED_DETAILS: LazyLock<HashMap<Company, CompanyFixedDetails>> =
-    LazyLock::new(|| {
-        let mut m = HashMap::new();
-        m.insert(
-            Company::EBRC,
-            CompanyFixedDetails {
-                starting: Some((3, 5)),
-                private: false,
-                stock_available: 5,
-                track_available: 10,
-                initial_treasury: 0,
-                initial_interest: 0,
-            },
-        );
-        m.insert(
-            Company::LW,
-            CompanyFixedDetails {
-                starting: Some((9, 4)),
-                private: false,
-                stock_available: 3,
-                track_available: 10,
-                initial_treasury: 0,
-                initial_interest: 0,
-            },
-        );
-        m.insert(
-            Company::TMLC,
-            CompanyFixedDetails {
-                starting: Some((9, 4)),
-                private: false,
-                stock_available: 4,
-                track_available: 10,
-                initial_treasury: 0,
-                initial_interest: 0,
-            },
-        );
-        m.insert(
-            Company::GT,
-            CompanyFixedDetails {
-                starting: Some((2, 4)),
-                private: true,
-                stock_available: 1,
-                track_available: 0,
-                initial_treasury: 10,
-                initial_interest: 2,
-            },
-        );
-        m.insert(
-            Company::NMFT,
-            CompanyFixedDetails {
-                starting: None,
-                private: true,
-                stock_available: 1,
-                track_available: 0,
-                initial_treasury: 0,
-                initial_interest: 0,
-            },
-        );
-        m.insert(
-            Company::NED,
-            CompanyFixedDetails {
-                starting: None,
-                private: true,
-                stock_available: 1,
-                track_available: 0,
-                initial_treasury: 15,
-                initial_interest: 3,
-            },
-        );
-        m.insert(
-            Company::MLM,
-            CompanyFixedDetails {
-                starting: None,
-                private: true,
-                stock_available: 1,
-                track_available: 0,
-                initial_treasury: 20,
-                initial_interest: 5,
-            },
-        );
-        m
-    });
 
 // ANNOTATION: A hardcoded list of initial resource cube locations.
 // This differs from the rules, which describe a random setup process using cards.
@@ -735,7 +771,7 @@ impl Action for EBRAction {
                             company_details.shares_remaining -= 1;
                             company_details.cash += current_bid.unwrap();
                         }
-                        if COMPANY_FIXED_DETAILS[&lot].private {
+                        if state.company_fixed_details[&lot].private {
                             let index = PRIVATE_ORDER.iter().position(|c| *c == lot).unwrap();
                             if index != PRIVATE_ORDER.len() - 1 {
                                 state
@@ -815,7 +851,7 @@ impl Action for EBRAction {
             }
             EBRAction::ChooseAuctionCompany(company) => {
                 let mut state = state.clone();
-                if !COMPANY_FIXED_DETAILS[&company].private {
+                if !state.company_fixed_details[&company].private {
                     state.stage = Stage::Auction {
                         initial_auction: false,
                         current_bid: None,
@@ -880,7 +916,7 @@ impl Action for EBRAction {
                     completed_builds,
                 } = state.stage
                 {
-                    if !COMPANY_FIXED_DETAILS[&company].private {
+                    if !state.company_fixed_details[&company].private {
                         state.track.push(Track {
                             location: *location,
                             track_type: TrackType::CompanyOwned(company.clone()),
@@ -1115,6 +1151,7 @@ pub struct EBRState {
     resource_cubes: Vec<Coordinate>,
     narrow_gauge_remaining: usize,
     terrain_attributes: HashMap<Terrain, CommonAttributes>,
+    company_fixed_details: HashMap<Company, CompanyFixedDetailsParams>,
 }
 
 impl EBRState {
@@ -1134,7 +1171,7 @@ impl EBRState {
         };
         // Check for min bid of at least one company with shares available
         // (including the minors)
-        COMPANY_FIXED_DETAILS
+        self.company_fixed_details
             .iter()
             .any(|c| self.can_auction(c.0.clone(), cash))
     }
@@ -1142,7 +1179,7 @@ impl EBRState {
     fn can_auction(&self, company: Company, cash: isize) -> bool {
         // Not quite sure why this needs a clone
         let company_details = self.company_details[&company].clone();
-        let private = COMPANY_FIXED_DETAILS[&company].private;
+        let private = self.company_fixed_details[&company].private;
         ((private
             && company_details
                 .available
@@ -1155,14 +1192,14 @@ impl EBRState {
         if self.unissued_bonds.is_empty() {
             return false;
         }
-        COMPANY_FIXED_DETAILS
+        self.company_fixed_details
             .iter()
             .any(|c| self.can_issue(c.0.clone()))
     }
     fn can_issue(&self, company: Company) -> bool {
         // TODO: This check is incomplete. Rules require that the number of issued
         // bonds is less than the number of sold shares. This is not currently checked.
-        if COMPANY_FIXED_DETAILS[&company].private {
+        if self.company_fixed_details[&company].private {
             return false;
         };
 
@@ -1188,24 +1225,24 @@ impl EBRState {
             .collect::<BTreeSet<Company>>()
             .iter()
             .filter(|c| {
-                !COMPANY_FIXED_DETAILS[&c].private
-                    || (COMPANY_FIXED_DETAILS[&c].private
+                !self.company_fixed_details[&c].private
+                    || (self.company_fixed_details[&c].private
                         && !self.company_details[&c].merged.unwrap_or(false))
             })
             .flat_map(|c| {
-                if COMPANY_FIXED_DETAILS[&c].private {
-                    COMPANY_FIXED_DETAILS
+                if self.company_fixed_details[&c].private {
+                    self.company_fixed_details
                         .iter()
                         .filter(|possible_public| {
-                            !COMPANY_FIXED_DETAILS[&possible_public.0].private
+                            !self.company_fixed_details[&possible_public.0].private
                         })
                         .map(|public_co| (c.clone(), public_co.0.clone()))
                         .collect::<Vec<(Company, Company)>>()
                 } else {
-                    COMPANY_FIXED_DETAILS
+                    self.company_fixed_details
                         .iter()
                         .filter(|possible_private| {
-                            COMPANY_FIXED_DETAILS[&possible_private.0].private
+                            self.company_fixed_details[&possible_private.0].private
                                 && !self.company_details[&possible_private.0]
                                     .merged
                                     .unwrap_or(false)
@@ -1244,7 +1281,7 @@ impl EBRState {
     }
 
     fn connected_majors(&self, private_co: Company) -> Vec<Company> {
-        COMPANY_FIXED_DETAILS
+        self.company_fixed_details
             .iter()
             .filter(|c| !c.1.private)
             .filter(|public_c| self.connected_to(private_co, public_c.0.clone()))
@@ -1269,7 +1306,7 @@ impl EBRState {
         let Actor::Player(next_actor) = self.next_actor else {
             unreachable!()
         };
-        COMPANY_FIXED_DETAILS
+        self.company_fixed_details
             .iter()
             .any(|c| self.can_build(c.0.clone(), next_actor))
     }
@@ -1406,7 +1443,7 @@ impl EBRState {
         if company_details.merged.unwrap_or(false) {
             return false;
         }
-        let company_fixed_details = COMPANY_FIXED_DETAILS.get(&company).unwrap();
+        let company_fixed_details = self.company_fixed_details.get(&company).unwrap();
         if !company_fixed_details.private {
             if company_fixed_details.track_available == 0 {
                 return false;
@@ -1440,7 +1477,7 @@ impl EBRState {
         // Major: Anything in space of track or narrow connected to owned minor
         // Minor: Anything connected to narrow
         let company_details = self.company_details.get(&company).unwrap();
-        let accessible_spaces = if COMPANY_FIXED_DETAILS[&company].private {
+        let accessible_spaces = if self.company_fixed_details[&company].private {
             let mut spaces = self.possible_owned_track(company.clone());
             spaces.extend(
                 company_details
@@ -1600,7 +1637,7 @@ impl State for EBRState {
         let hobart = (10, 9);
 
         let is_connected = |company: &Company, location: Coordinate| {
-            if COMPANY_FIXED_DETAILS[company].private {
+            if self.company_fixed_details[company].private {
                 self.reachable_narrow_track(*company).contains(&location)
             } else {
                 if self.company_details[company].hq.is_none() {
@@ -1760,7 +1797,7 @@ impl State for EBRState {
             }
             Stage::ChooseAuctionCompany => {
                 let cash = self.player_cash[&next_actor];
-                COMPANY_FIXED_DETAILS
+                self.company_fixed_details
                     .iter()
                     .filter(|c| self.can_auction(c.0.clone(), cash))
                     .map(|c| EBRAction::ChooseAuctionCompany(c.0.clone()))
@@ -1776,7 +1813,7 @@ impl State for EBRState {
                 })
                 .map(|location| EBRAction::StartPrivateAt(*company, *location))
                 .collect(),
-            Stage::ChooseBuildCompany => COMPANY_FIXED_DETAILS
+            Stage::ChooseBuildCompany => self.company_fixed_details
                 .iter()
                 .filter(|c| self.can_build(c.0.clone(), next_actor))
                 .map(|c| EBRAction::ChooseBuildCompany(c.0.clone()))
@@ -1785,7 +1822,7 @@ impl State for EBRState {
                 company,
                 completed_builds,
             } => {
-                if COMPANY_FIXED_DETAILS[company].private {
+                if self.company_fixed_details[company].private {
                     if self.narrow_gauge_remaining == 0 {
                         return vec![EBRAction::BuildPass];
                     }
@@ -1813,7 +1850,7 @@ impl State for EBRState {
                     actions
                 }
             }
-            Stage::ChooseBondCompany => COMPANY_FIXED_DETAILS
+            Stage::ChooseBondCompany => self.company_fixed_details
                 .iter()
                 .filter(|c| self.can_issue(c.0.clone()))
                 .map(|c| EBRAction::ChooseBondCompany(c.0.clone()))
@@ -1828,7 +1865,7 @@ impl State for EBRState {
                 .iter()
                 .map(|(private, company)| EBRAction::Merge(*private, *company))
                 .collect(),
-            Stage::ChooseTakeResourcesCompany => COMPANY_FIXED_DETAILS
+            Stage::ChooseTakeResourcesCompany => self.company_fixed_details
                 .iter()
                 .filter(|c| self.can_take(c.0.clone()))
                 .flat_map(|c| {
@@ -1935,6 +1972,7 @@ impl Game for EBR {
         // - Player cash is hardcoded to `24 / player_count`.
         // - Initial track and resource cubes are from `INITIAL_TRACK` and `INITIAL_RESOURCE_CUBES`.
         // - Initial company revenue is 0, whereas the rules state it should start at 3.
+        let company_fixed_details = hyperparams.company_fixed_details.clone();
         EBRState {
             terminal: false,
             end_game_reason: EndGameReason::InProgress,
@@ -1966,7 +2004,7 @@ impl Game for EBR {
             revenue: ALL_COMPANIES.iter().map(|c| (c.clone(), 0)).collect(),
             action_cubes: ACTION_CUBE_INIT,
             dividends_paid: 0,
-            company_details: COMPANY_FIXED_DETAILS
+            company_details: company_fixed_details
                 .iter()
                 .map(|d| {
                     (
@@ -1995,6 +2033,7 @@ impl Game for EBR {
             resource_cubes: INITIAL_RESOURCE_CUBES.to_vec(),
             narrow_gauge_remaining: NARROW_GAUGE_INITIAL,
             terrain_attributes,
+            company_fixed_details,
         }
     }
 
@@ -2056,7 +2095,8 @@ mod test {
 
     fn init_game() -> EBRState {
         let game = EBR { player_count: 3 };
-        game.init_game(&EBRHyperparams::default())
+        let hyperparams = EBRHyperparams::default();
+        game.init_game(&hyperparams)
     }
 
     #[test]
@@ -2112,10 +2152,11 @@ mod test {
         // Test will break if HQ of GT moved
         let mut game_state = init_game();
 
+
         // Check GT has its HQ initially
         assert!(
             game_state.reachable_narrow_track(Company::GT)
-                == vec![COMPANY_FIXED_DETAILS[&Company::GT].starting.unwrap()]
+                == vec![game_state.company_fixed_details[&Company::GT].starting.unwrap()]
         );
 
         // Check that nearby track not connected
@@ -2125,7 +2166,7 @@ mod test {
         });
         assert!(
             game_state.reachable_narrow_track(Company::GT)
-                == vec![COMPANY_FIXED_DETAILS[&Company::GT].starting.unwrap()]
+                == vec![game_state.company_fixed_details[&Company::GT].starting.unwrap()]
         );
 
         // Check that once connected, all three are there
@@ -2140,7 +2181,7 @@ mod test {
                 .map(|t| t.clone())
                 .collect::<HashSet<Coordinate>>()
                 == vec![
-                    COMPANY_FIXED_DETAILS[&Company::GT].starting.unwrap(),
+                    game_state.company_fixed_details[&Company::GT].starting.unwrap(),
                     (3, 4),
                     (4, 4)
                 ]
