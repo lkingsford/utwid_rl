@@ -9,7 +9,6 @@ use log::trace;
 use rand::Rng;
 use std::sync::{Arc, RwLock};
 
-use std::marker::PhantomData;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct SelectionResult<ActionType: Action, GameHyperrewardType: GameHyperrewardTrait> {

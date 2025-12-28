@@ -1,5 +1,4 @@
 use std::sync::atomic::AtomicUsize;
-use std::sync::mpsc::channel;
 use std::sync::Arc;
 
 use log::trace;

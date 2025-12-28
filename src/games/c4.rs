@@ -1,6 +1,6 @@
 use crate::game::Game;
 use crate::hyper::{
-    GameHyperrewardTrait, Hyperparams, Hyperrewards, ParamMeta, ParamRange, ParamValue,
+    GameHyperrewardTrait, Hyperparams, ParamMeta, ParamValue,
 };
 use crate::mcts::game_trait::{Action, Actor, State};
 use serde::{Deserialize, Serialize};
