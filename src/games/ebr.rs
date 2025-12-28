@@ -68,6 +68,13 @@ pub struct EBRHyperrewards {
     pub nmft_merged: bool,
     pub ned_merged: bool,
     pub mlm_merged: bool,
+    pub lw_auction_winner: Option<usize>,
+    pub tmlc_auction_winner: Option<usize>,
+    pub ebrc_auction_winner: Option<usize>,
+    pub gt_auction_winner: Option<usize>,
+    pub winning_player_id: Option<usize>,
+    pub winning_player_score: Option<isize>,
+    pub player_scores: Vec<isize>,
 }
 
 impl GameHyperrewardTrait for EBRHyperrewards {
@@ -835,6 +842,7 @@ impl EBRAction {
                 }
                 // Either next player, or next auction (for initial auction)
                 if initial_auction {
+                    state.initial_auction_winners.insert(lot, winning_bidder.unwrap());
                     if lot == Company::GT {
                         // End of initial auction
                         state.stage = Stage::ChooseAction;
@@ -1268,6 +1276,7 @@ pub struct EBRState {
     terrain_attributes: HashMap<Terrain, CommonAttributes>,
     company_fixed_details: HashMap<Company, CompanyFixedDetailsParams>,
     hyperparams: Arc<EBRHyperparams>,
+    initial_auction_winners: HashMap<Company, PlayerID>,
 }
 
 impl EBRState {
@@ -1802,6 +1811,22 @@ impl State for EBRState {
             }
         };
 
+        let mut sorted_cash: Vec<(u8, isize)> = self
+            .player_cash
+            .iter()
+            .map(|(player, cash)| (*player, *cash))
+            .collect();
+        sorted_cash.sort_by(|a, b| b.1.cmp(&a.1));
+
+        let (winning_player_id, winning_player_score) = if self.terminal {
+            (
+                Some(sorted_cash[0].0 as usize),
+                Some(sorted_cash[0].1),
+            )
+        } else {
+            (None, None)
+        };
+
         EBRHyperrewards {
             total_bonds_issued: 7 - self.unissued_bonds.len(),
             end_game_reason: self.end_game_reason,
@@ -1832,6 +1857,13 @@ impl State for EBRState {
             nmft_merged: self.company_details[&Company::NMFT].merged.unwrap_or(false),
             ned_merged: self.company_details[&Company::NED].merged.unwrap_or(false),
             mlm_merged: self.company_details[&Company::MLM].merged.unwrap_or(false),
+            lw_auction_winner: self.initial_auction_winners.get(&Company::LW).map(|id| *id as usize),
+            tmlc_auction_winner: self.initial_auction_winners.get(&Company::TMLC).map(|id| *id as usize),
+            ebrc_auction_winner: self.initial_auction_winners.get(&Company::EBRC).map(|id| *id as usize),
+            gt_auction_winner: self.initial_auction_winners.get(&Company::GT).map(|id| *id as usize),
+            winning_player_id,
+            winning_player_score,
+            player_scores: sorted_cash.iter().map(|s| s.1).collect(),
         }
     }
 
@@ -2165,6 +2197,7 @@ impl Game for EBR {
             terrain_attributes,
             company_fixed_details,
             hyperparams: Arc::new(hyperparams.clone()),
+            initial_auction_winners: HashMap::new(),
         }
     }
 
