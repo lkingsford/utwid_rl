@@ -975,27 +975,31 @@ impl EBRAction {
             completed_builds,
         } = state.stage
         {
-            if !state.company_fixed_details[&company].private {
-                state.track.push(Track {
-                    location: *location,
-                    track_type: TrackType::CompanyOwned(company.clone()),
-                });
-                let cost = state.owned_cost(*location, None) as isize;
-                if let Some(company_details) = state.company_details.get_mut(&company) {
-                    company_details.cash -= cost;
-                    company_details.track_remaining -= 1;
-                }
-            } else {
-                state.track.push(Track {
-                    location: *location,
-                    track_type: TrackType::Narrow,
-                });
-                let cost = state.narrow_cost(*location) as isize;
+            let is_private = state.company_fixed_details[&company].private;
+
+            let track_type;
+            let cost;
+
+            if is_private {
+                track_type = TrackType::Narrow;
+                cost = state.narrow_cost(*location) as isize;
                 state.narrow_gauge_remaining -= 1;
-                if let Some(company_details) = state.company_details.get_mut(&company) {
-                    company_details.cash -= cost;
-                }
+            } else {
+                track_type = TrackType::CompanyOwned(company.clone());
+                cost = state.owned_cost(*location, None) as isize;
+                state
+                    .company_details
+                    .get_mut(&company)
+                    .unwrap()
+                    .track_remaining -= 1;
             }
+
+            state.track.push(Track {
+                location: *location,
+                track_type,
+            });
+
+            state.company_details.get_mut(&company).unwrap().cash -= cost;
 
             let Actor::Player(next_actor) = state.next_actor else {
                 unreachable!()
