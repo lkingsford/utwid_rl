@@ -117,8 +117,8 @@ pub struct EBRHyperparams {
     pub company_fixed_details: HashMap<Company, CompanyFixedDetailsParams>,
     pub water_1_cost: usize,
     pub water_2_cost: usize,
-    pub narrow_gauge_initial: u32,
-    pub max_builds: u32,
+    pub narrow_gauge_initial: usize,
+    pub max_builds: usize,
     pub narrow_track_cost: usize,
     pub take_resource_cost: u32,
     pub take_dividend: u32,
@@ -373,28 +373,10 @@ impl EBRHyperparams {
             },
         );
 
-        water_features
-            .into_iter()
-            .for_each(|(feature_type, (x, y))| {
-                let cost = match feature_type {
-                    FeatureType::Water1 => DEFAULT_WATER_1_COST,
-                    FeatureType::Water2 => DEFAULT_WATER_2_COST,
-                    _ => unreachable!(),
-                };
-                m.insert(
-                    (x, y),
-                    Feature {
-                        feature_type,
-                        location_name: None,
-                        revenue: [0, 0, 0, 0, 0, 0],
-                        additional_cost: cost,
-                    },
-                );
-            });
         m
     }
 
-    fn default_water() -> Vec<(FeatureType, (u8, u8))> {
+    fn default_water() -> HashMap<(usize, usize), FeatureType> {
         vec![
             (FeatureType::Water1, (8, 2)),
             (FeatureType::Water1, (8, 3)),
@@ -409,6 +391,9 @@ impl EBRHyperparams {
             (FeatureType::Water2, (9, 11)),
             (FeatureType::Water1, (6, 11)),
         ]
+        .into_iter()
+        .map(|(ft, (x, y))| ((x as usize, y as usize), ft))
+        .collect()
     }
 }
 
@@ -441,12 +426,14 @@ impl Hyperparams for EBRHyperparams {
 }
 
 impl EBRHyperparams {
-    fn all_features(self) -> HashMap<(usize, usize), Feature> {
+    fn all_features(&self) -> HashMap<(usize, usize), Feature> {
         // This should be cached
         self.features
+            .clone()
             .into_iter()
             .chain(
                 self.water_features
+                    .clone()
                     .into_iter()
                     .map(|((x, y), feature_type)| {
                         let cost = match feature_type {
@@ -1231,7 +1218,7 @@ enum Stage {
     },
     BuildTrack {
         company: Company,
-        completed_builds: u8,
+        completed_builds: usize,
     },
     ChooseAction,
     TakeResources {
@@ -1499,7 +1486,9 @@ impl EBRState {
 
         let attr = &self.terrain_attributes[&terrain];
         (1 + other_track_in_location.len()) * attr.build_cost as usize
-            + FEATURES
+            + self
+                .hyperparams
+                .all_features()
                 .get(&t)
                 .iter()
                 .map(|f| f.additional_cost)
@@ -1630,12 +1619,16 @@ impl EBRState {
             .sum::<isize>();
         let track_feature_revenue = company_track
             .clone()
-            .map(
-                |t| match FEATURES.get_key_value(&(t.location.0, t.location.1)) {
+            .map(|t| {
+                match self
+                    .hyperparams
+                    .all_features()
+                    .get_key_value(&(t.location.0, t.location.1))
+                {
                     None => 0,
                     Some(feature) => feature.1.revenue[self.dividends_paid],
-                },
-            )
+                }
+            })
             .sum::<isize>();
         // FIXME: Bond interest logic is non-functional.
         // A bond is issued as `deferred = true`. The `pay_dividend` function also sets
