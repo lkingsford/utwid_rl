@@ -786,89 +786,89 @@ impl EBRAction {
 
     fn execute_pass(&self, state: &EBRState) -> EBRState {
         let mut state = state.clone();
-        let stage = state.stage.clone();
-        match stage {
-            Stage::Auction {
-                current_bid,
-                lot,
-                initial_auction,
-                winning_bidder,
-                mut passed,
-            } => {
-                // -2 because need all but one to have passed, and one
-                // isn't on the list yet
-                if passed.len() < (state.player_count - 2) as usize {
-                    let Actor::Player(mut next_actor) = state.next_actor else {
-                        unreachable!()
-                    };
-                    passed.insert(next_actor as u8);
-                    while passed.contains(&next_actor) {
-                        next_actor = (&next_actor + 1) % state.player_count;
-                    }
-                    state.next_actor = Actor::Player(winning_bidder.unwrap());
-                    state.stage = Stage::Auction {
-                        initial_auction,
-                        lot,
-                        current_bid,
-                        winning_bidder,
-                        passed: passed,
-                    };
-                    return state;
+        if let Stage::Auction {
+            current_bid,
+            lot,
+            initial_auction,
+            winning_bidder,
+            mut passed,
+        } = state.stage
+        {
+            // -2 because need all but one to have passed, and one
+            // isn't on the list yet
+            if passed.len() < (state.player_count - 2) as usize {
+                let Actor::Player(mut next_actor) = state.next_actor else {
+                    unreachable!()
                 };
-                // Everybody has passed.
-                state
-                    .holdings
-                    .get_mut(&winning_bidder.unwrap())
-                    .unwrap()
-                    .push(lot.clone());
-                *state.player_cash.get_mut(&winning_bidder.unwrap()).unwrap() -=
-                    current_bid.unwrap_or(0) as isize;
-                {
-                    let company_details = state.company_details.get_mut(&lot).unwrap();
-                    company_details.shares_held += 1;
-                    company_details.shares_remaining -= 1;
-                    company_details.cash += current_bid.unwrap();
+                passed.insert(next_actor as u8);
+                while passed.contains(&next_actor) {
+                    next_actor = (&next_actor + 1) % state.player_count;
                 }
-                if state.company_fixed_details[&lot].private {
-                    let index = PRIVATE_ORDER.iter().position(|c| *c == lot).unwrap();
-                    if index != PRIVATE_ORDER.len() - 1 {
-                        state
-                            .company_details
-                            .get_mut(&PRIVATE_ORDER[index + 1])
-                            .unwrap()
-                            .available = Some(true);
-                    }
-                    state.company_details.get_mut(&lot).unwrap().available = Some(false);
-                }
-                // Either next player, or next auction (for initial auction)
-                if initial_auction {
-                    state.initial_auction_winners.insert(lot, winning_bidder.unwrap());
-                    if lot == Company::GT {
-                        // End of initial auction
-                        state.stage = Stage::ChooseAction;
-                        state.next_actor = Actor::Player(winning_bidder.unwrap());
-                    } else {
-                        state.stage = Stage::Auction {
-                            initial_auction: true,
-                            current_bid: None,
-                            // Todo: Use the constant
-                            lot: match lot {
-                                Company::LW => Company::TMLC,
-                                Company::TMLC => Company::EBRC,
-                                Company::EBRC => Company::GT,
-                                _ => unreachable!(),
-                            },
-                            winning_bidder: None,
-                            passed: HashSet::new(),
-                        }
-                    }
-                } else {
-                    state.stage = Stage::ChooseAction;
-                    state.next_actor =
-                        Actor::Player((state.active_player + 1) % state.player_count);
-                }
+                state.next_actor = Actor::Player(winning_bidder.unwrap());
+                state.stage = Stage::Auction {
+                    initial_auction,
+                    lot,
+                    current_bid,
+                    winning_bidder,
+                    passed,
+                };
+                return state;
+            };
+            // Everybody has passed.
+            let winner = winning_bidder.unwrap();
+            state
+                .holdings
+                .get_mut(&winner)
+                .unwrap()
+                .push(lot);
+            *state.player_cash.get_mut(&winner).unwrap() -=
+                current_bid.unwrap_or(0) as isize;
+            {
+                let company_details = state.company_details.get_mut(&lot).unwrap();
+                company_details.shares_held += 1;
+                company_details.shares_remaining -= 1;
+                company_details.cash += current_bid.unwrap();
             }
-            _ => unreachable!(),
+            if state.company_fixed_details[&lot].private {
+                let index = PRIVATE_ORDER.iter().position(|c| *c == lot).unwrap();
+                if index != PRIVATE_ORDER.len() - 1 {
+                    state
+                        .company_details
+                        .get_mut(&PRIVATE_ORDER[index + 1])
+                        .unwrap()
+                        .available = Some(true);
+                }
+                state.company_details.get_mut(&lot).unwrap().available = Some(false);
+            }
+            // Either next player, or next auction (for initial auction)
+            if initial_auction {
+                state.initial_auction_winners.insert(lot, winner);
+                if lot == Company::GT {
+                    // End of initial auction
+                    state.stage = Stage::ChooseAction;
+                    state.next_actor = Actor::Player(winner);
+                } else {
+                    state.stage = Stage::Auction {
+                        initial_auction: true,
+                        current_bid: None,
+                        // Todo: Use the constant
+                        lot: match lot {
+                            Company::LW => Company::TMLC,
+                            Company::TMLC => Company::EBRC,
+                            Company::EBRC => Company::GT,
+                            _ => unreachable!(),
+                        },
+                        winning_bidder: None,
+                        passed: HashSet::new(),
+                    }
+                }
+            } else {
+                state.stage = Stage::ChooseAction;
+                state.next_actor =
+                    Actor::Player((state.active_player + 1) % state.player_count);
+            }
+        } else {
+            unreachable!()
         }
         state
     }
@@ -955,7 +955,7 @@ impl EBRAction {
             });
         }
         // Place resource cubes around
-        let mut potential_locations = get_neighbors(location.clone());
+        let mut potential_locations = get_neighbors(location.clone()).to_vec();
         potential_locations.push(*location);
         for location in potential_locations {
             if location.0 >= WIDTH || location.1 >= HEIGHT {
@@ -1302,8 +1302,7 @@ impl EBRState {
     }
 
     fn can_auction(&self, company: Company, cash: isize) -> bool {
-        // Not quite sure why this needs a clone
-        let company_details = self.company_details[&company].clone();
+        let company_details = &self.company_details[&company];
         let private = self.company_fixed_details[&company].private;
         ((private
             && company_details
@@ -2229,10 +2228,10 @@ fn div_ceil(numerator: isize, denominator: isize) -> isize {
 /// 1,3        3, 3       5,3
 ///      2,3        4, 3
 /// This doesn't take into account the map
-fn get_neighbors(coord: Coordinate) -> Vec<Coordinate> {
+fn get_neighbors(coord: Coordinate) -> [Coordinate; 6] {
     let (x, y) = coord;
     if x % 2 == 1 {
-        vec![
+        [
             (x, y - 1),
             (x + 1, y - 1),
             (x + 1, y),
@@ -2241,7 +2240,7 @@ fn get_neighbors(coord: Coordinate) -> Vec<Coordinate> {
             (x - 1, y - 1),
         ]
     } else {
-        vec![
+        [
             (x, y - 1),
             (x + 1, y),
             (x + 1, y + 1),
