@@ -2,9 +2,9 @@ pub mod game_trait;
 pub mod mcts;
 pub use mcts::calculate_best_turn;
 pub mod node;
+mod sender;
 pub mod tree;
-pub mod weighted_random;
-mod sender; // Changed from noop_sender
+pub mod weighted_random; // Changed from noop_sender
 use clap::ValueEnum;
 use serde::Deserialize;
 

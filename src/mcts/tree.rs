@@ -123,7 +123,8 @@ where
                             random_walk_steps: selection_result.random_walk_steps,
                             selected_steps: selection_result.selected_steps,
                             round_hyperreward: selection_result.round_hyperreward,
-                            sum_diff_est_reward: selection_result.sum_diff_est_reward + diff_est_reward,
+                            sum_diff_est_reward: selection_result.sum_diff_est_reward
+                                + diff_est_reward,
                         });
                     }
                 }

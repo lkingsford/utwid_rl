@@ -765,4 +765,3 @@ mod tests {
         assert_eq!(root_node.mean_child_est_reward(), 11.0);
     }
 }
-

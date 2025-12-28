@@ -1,4 +1,4 @@
-use std::sync::mpsc::{Sender, SendError};
+use std::sync::mpsc::{SendError, Sender};
 
 pub trait MctsSender<T>: Send + Sync + 'static {
     fn send(&self, t: T) -> Result<(), SendError<T>>;
@@ -6,7 +6,10 @@ pub trait MctsSender<T>: Send + Sync + 'static {
 }
 
 #[derive(Clone, Debug)]
-pub struct NoopSender<T> where T: Clone {
+pub struct NoopSender<T>
+where
+    T: Clone,
+{
     _phantom: std::marker::PhantomData<T>,
 }
 
