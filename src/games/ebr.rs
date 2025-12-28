@@ -5,7 +5,7 @@ use serde_json;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::Hash;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use crate::game::Game;
 use crate::mcts::game_trait::{Action, Actor, State};
@@ -15,7 +15,6 @@ use crate::mcts::game_trait::{Action, Actor, State};
 // an MCTS agent. As such, some rules may be simplified, hardcoded for a specific
 // scenario, or marked with TODO/FIXME where the implementation diverges from the
 // official rules document. Key differences will be noted in comments.
-
 
 /*
 OK - here's the deal. This is to help me playtest something.
@@ -111,9 +110,20 @@ pub struct CompanyFixedDetailsParams {
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct EBRHyperparams {
     pub terrain_attributes: HashMap<Terrain, TerrainAttributeParams>,
+    pub features: HashMap<(usize, usize), Feature>,
+    pub water_features: HashMap<(usize, usize), FeatureType>,
     pub bonds: Vec<Bond>,
     pub initial_cash: HashMap<u8, u32>,
     pub company_fixed_details: HashMap<Company, CompanyFixedDetailsParams>,
+    pub water_1_cost: usize,
+    pub water_2_cost: usize,
+    pub narrow_gauge_initial: u32,
+    pub max_builds: u32,
+    pub narrow_track_cost: usize,
+    pub take_resource_cost: u32,
+    pub take_dividend: u32,
+    pub take_town_deliver_dividend: u32,
+    pub take_port_deliver_dividend: u32,
 }
 
 impl EBRHyperparams {
@@ -287,15 +297,139 @@ impl EBRHyperparams {
         );
         company_fixed_details
     }
+
+    fn default_features() -> HashMap<(usize, usize), Feature> {
+        let mut m = HashMap::new();
+        m.insert(
+            (2, 5),
+            Feature {
+                feature_type: FeatureType::Port,
+                location_name: Some("Port of Strahan".to_string()),
+                revenue: ([2, 2, 0, 0, 0, 0]),
+                additional_cost: 0,
+            },
+        );
+        m.insert(
+            (10, 9),
+            Feature {
+                feature_type: FeatureType::Port,
+                location_name: Some("Hobart".to_string()),
+                revenue: ([5, 5, 4, 4, 3, 3]),
+                additional_cost: 0,
+            },
+        );
+        m.insert(
+            (9, 9),
+            Feature {
+                feature_type: FeatureType::Town,
+                location_name: Some("New Norfolk".to_string()),
+                revenue: ([2, 2, 2, 2, 2, 2]),
+                additional_cost: 0,
+            },
+        );
+        m.insert(
+            (2, 5),
+            Feature {
+                feature_type: FeatureType::Port,
+                location_name: Some("Burnie".to_string()),
+                revenue: ([2, 2, 1, 1, 0, 0]),
+                additional_cost: 0,
+            },
+        );
+        m.insert(
+            (2, 6),
+            Feature {
+                feature_type: FeatureType::Town,
+                location_name: Some("Ulverstone".to_string()),
+                revenue: ([2, 2, 1, 1, 1, 1]),
+                additional_cost: 0,
+            },
+        );
+        m.insert(
+            (7, 3),
+            Feature {
+                feature_type: FeatureType::Port,
+                location_name: Some("Devonport".to_string()),
+                revenue: ([3, 3, 1, 1, 0, 0]),
+                additional_cost: 0,
+            },
+        );
+        m.insert(
+            (9, 4),
+            Feature {
+                feature_type: FeatureType::Port,
+                location_name: Some("Launceston".to_string()),
+                revenue: ([3, 3, 1, 1, 0, 0]),
+                additional_cost: 0,
+            },
+        );
+        m.insert(
+            (3, 5),
+            Feature {
+                feature_type: FeatureType::Town,
+                location_name: Some("Queenstown".to_string()),
+                revenue: ([2, 2, 2, 2, 2, 2]),
+                additional_cost: 0,
+            },
+        );
+
+        water_features
+            .into_iter()
+            .for_each(|(feature_type, (x, y))| {
+                let cost = match feature_type {
+                    FeatureType::Water1 => DEFAULT_WATER_1_COST,
+                    FeatureType::Water2 => DEFAULT_WATER_2_COST,
+                    _ => unreachable!(),
+                };
+                m.insert(
+                    (x, y),
+                    Feature {
+                        feature_type,
+                        location_name: None,
+                        revenue: [0, 0, 0, 0, 0, 0],
+                        additional_cost: cost,
+                    },
+                );
+            });
+        m
+    }
+
+    fn default_water() -> Vec<(FeatureType, (u8, u8))> {
+        vec![
+            (FeatureType::Water1, (8, 2)),
+            (FeatureType::Water1, (8, 3)),
+            (FeatureType::Water2, (8, 5)),
+            (FeatureType::Water1, (9, 6)),
+            (FeatureType::Water2, (3, 7)),
+            (FeatureType::Water1, (4, 7)),
+            (FeatureType::Water1, (6, 8)),
+            (FeatureType::Water1, (6, 9)),
+            (FeatureType::Water1, (10, 9)),
+            (FeatureType::Water2, (5, 11)),
+            (FeatureType::Water2, (9, 11)),
+            (FeatureType::Water1, (6, 11)),
+        ]
+    }
 }
 
 impl Default for EBRHyperparams {
     fn default() -> Self {
         EBRHyperparams {
             terrain_attributes: EBRHyperparams::default_terrain_attributes(),
+            features: EBRHyperparams::default_features(),
+            water_features: EBRHyperparams::default_water(),
             bonds: EBRHyperparams::default_bonds(),
             initial_cash: EBRHyperparams::default_initial_cash(),
             company_fixed_details: EBRHyperparams::default_company_fixed_details(),
+            water_1_cost: 1,
+            water_2_cost: 3,
+            narrow_gauge_initial: 12,
+            max_builds: 3,
+            narrow_track_cost: 2,
+            take_resource_cost: 3,
+            take_dividend: 1,
+            take_town_deliver_dividend: 1,
+            take_port_deliver_dividend: 1,
         }
     }
 }
@@ -306,6 +440,34 @@ impl Hyperparams for EBRHyperparams {
     }
 }
 
+impl EBRHyperparams {
+    fn all_features(self) -> HashMap<(usize, usize), Feature> {
+        // This should be cached
+        self.features
+            .into_iter()
+            .chain(
+                self.water_features
+                    .into_iter()
+                    .map(|((x, y), feature_type)| {
+                        let cost = match feature_type {
+                            FeatureType::Water1 => self.water_1_cost,
+                            FeatureType::Water2 => self.water_2_cost,
+                            _ => unreachable!(),
+                        };
+                        (
+                            (x, y),
+                            Feature {
+                                feature_type,
+                                location_name: None,
+                                revenue: [0, 0, 0, 0, 0, 0],
+                                additional_cost: cost,
+                            },
+                        )
+                    }),
+            )
+            .collect()
+    }
+}
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ChoosableAction {
@@ -353,7 +515,7 @@ struct BondDetails {
     deferred: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 struct Feature {
     feature_type: FeatureType,
     location_name: Option<String>,
@@ -361,7 +523,7 @@ struct Feature {
     additional_cost: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 enum FeatureType {
     Port,
     Town,
@@ -528,9 +690,6 @@ const TERRAIN: [[Terrain; WIDTH]; HEIGHT] = [
     /* */ [N, N, N, N, N, N, N, F, N, N, N, N, N, N],
 ];
 
-const WATER_1_COST: usize = 1;
-const WATER_2_COST: usize = 3;
-
 static PRIVATE_STARTING_LOCATIONS: LazyLock<Vec<Coordinate>> = LazyLock::new(|| {
     TERRAIN
         .iter()
@@ -546,117 +705,6 @@ static PRIVATE_STARTING_LOCATIONS: LazyLock<Vec<Coordinate>> = LazyLock::new(|| 
 });
 // Privates can start anywhere on a Forest or Mountain (without an existing HQ,
 // but obviously, that bit is state dependent)
-
-static FEATURES: LazyLock<HashMap<(usize, usize), Feature>> = LazyLock::new(|| {
-    let mut m = HashMap::new();
-    m.insert(
-        (2, 5),
-        Feature {
-            feature_type: FeatureType::Port,
-            location_name: Some("Port of Strahan".to_string()),
-            revenue: ([2, 2, 0, 0, 0, 0]),
-            additional_cost: 0,
-        },
-    );
-    m.insert(
-        (10, 9),
-        Feature {
-            feature_type: FeatureType::Port,
-            location_name: Some("Hobart".to_string()),
-            revenue: ([5, 5, 4, 4, 3, 3]),
-            additional_cost: 0,
-        },
-    );
-    m.insert(
-        (9, 9),
-        Feature {
-            feature_type: FeatureType::Town,
-            location_name: Some("New Norfolk".to_string()),
-            revenue: ([2, 2, 2, 2, 2, 2]),
-            additional_cost: 0,
-        },
-    );
-    m.insert(
-        (2, 5),
-        Feature {
-            feature_type: FeatureType::Port,
-            location_name: Some("Burnie".to_string()),
-            revenue: ([2, 2, 1, 1, 0, 0]),
-            additional_cost: 0,
-        },
-    );
-    m.insert(
-        (2, 6),
-        Feature {
-            feature_type: FeatureType::Town,
-            location_name: Some("Ulverstone".to_string()),
-            revenue: ([2, 2, 1, 1, 1, 1]),
-            additional_cost: 0,
-        },
-    );
-    m.insert(
-        (7, 3),
-        Feature {
-            feature_type: FeatureType::Port,
-            location_name: Some("Devonport".to_string()),
-            revenue: ([3, 3, 1, 1, 0, 0]),
-            additional_cost: 0,
-        },
-    );
-    m.insert(
-        (9, 4),
-        Feature {
-            feature_type: FeatureType::Port,
-            location_name: Some("Launceston".to_string()),
-            revenue: ([3, 3, 1, 1, 0, 0]),
-            additional_cost: 0,
-        },
-    );
-    m.insert(
-        (3, 5),
-        Feature {
-            feature_type: FeatureType::Town,
-            location_name: Some("Queenstown".to_string()),
-            revenue: ([2, 2, 2, 2, 2, 2]),
-            additional_cost: 0,
-        },
-    );
-    let water_features = vec![
-        (FeatureType::Water1, (8, 2)),
-        (FeatureType::Water1, (8, 3)),
-        (FeatureType::Water2, (8, 5)),
-        (FeatureType::Water1, (9, 6)),
-        (FeatureType::Water2, (3, 7)),
-        (FeatureType::Water1, (4, 7)),
-        (FeatureType::Water1, (6, 8)),
-        (FeatureType::Water1, (6, 9)),
-        (FeatureType::Water1, (10, 9)),
-        (FeatureType::Water2, (5, 11)),
-        (FeatureType::Water2, (9, 11)),
-        (FeatureType::Water1, (6, 11)),
-    ];
-
-    water_features
-        .into_iter()
-        .for_each(|(feature_type, (x, y))| {
-            let cost = match feature_type {
-                FeatureType::Water1 => WATER_1_COST,
-                FeatureType::Water2 => WATER_2_COST,
-                _ => unreachable!(),
-            };
-            m.insert(
-                (x, y),
-                Feature {
-                    feature_type,
-                    location_name: None,
-                    revenue: [0, 0, 0, 0, 0, 0],
-                    additional_cost: cost,
-                },
-            );
-        });
-    m
-});
-
 const INITIAL_TRACK: [Track; 4] = [
     Track {
         location: (9, 4),
@@ -675,13 +723,6 @@ const INITIAL_TRACK: [Track; 4] = [
         track_type: TrackType::Narrow,
     },
 ];
-const NARROW_GAUGE_INITIAL: usize = 12;
-const MAX_BUILDS: u8 = 3;
-const NARROW_TRACK_COST: usize = 2;
-const TAKE_RESOURCE_COST: usize = 3;
-const TAKE_DIVIDEND: usize = 1;
-const TAKE_TOWN_DELIVER_DIVIDEND: usize = 1;
-const TAKE_PORT_DELIVER_DIVIDEND: usize = 1;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum EBRAction {
@@ -863,9 +904,7 @@ impl EBRAction {
             ChoosableAction::BuildTrack => state.stage = Stage::ChooseBuildCompany,
             ChoosableAction::IssueBond => state.stage = Stage::ChooseBondCompany,
             ChoosableAction::Merge => state.stage = Stage::ChooseMerge,
-            ChoosableAction::TakeResources => {
-                state.stage = Stage::ChooseTakeResourcesCompany
-            }
+            ChoosableAction::TakeResources => state.stage = Stage::ChooseTakeResourcesCompany,
             _ => {} //warn!("Not implemented yet"),
         }
         state
@@ -974,15 +1013,16 @@ impl EBRAction {
             let Actor::Player(next_actor) = state.next_actor else {
                 unreachable!()
             };
-            if completed_builds < MAX_BUILDS && state.can_build(company, next_actor) {
+            if completed_builds < state.hyperparams.max_builds
+                && state.can_build(company, next_actor)
+            {
                 state.stage = Stage::BuildTrack {
                     company,
                     completed_builds: completed_builds + 1,
                 }
             } else {
                 state.stage = Stage::ChooseAction;
-                state.next_actor =
-                    Actor::Player((state.active_player + 1) % state.player_count);
+                state.next_actor = Actor::Player((state.active_player + 1) % state.player_count);
             }
             state
         } else {
@@ -1097,16 +1137,16 @@ impl EBRAction {
                         companies.iter().for_each(|c| {
                             if *c == company {
                                 *new_cash.get_mut(&player).unwrap() +=
-                                    TAKE_DIVIDEND as isize;
+                                    state.hyperparams.take_dividend as isize;
                             }
 
                             if *c == delivery_company {
                                 if state.has_port(delivery_company) {
                                     *new_cash.get_mut(&player).unwrap() +=
-                                        TAKE_PORT_DELIVER_DIVIDEND as isize;
+                                        state.hyperparams.take_port_deliver_dividend as isize;
                                 } else if state.has_town(delivery_company) {
                                     *new_cash.get_mut(&player).unwrap() +=
-                                        TAKE_TOWN_DELIVER_DIVIDEND as isize;
+                                        state.hyperparams.take_town_deliver_dividend as isize;
                                 }
                             }
                         })
@@ -1157,12 +1197,9 @@ impl Action for EBRAction {
             }
             EBRAction::IssueBond(company, bond) => self.execute_issue_bond(state, company, bond),
             EBRAction::Merge(private, company) => self.execute_merge(state, private, company),
-            EBRAction::ChooseTakeResourcesCompany(company, delivery_company) => self
-                .execute_choose_take_resources_company(
-                    state,
-                    company,
-                    delivery_company,
-                ),
+            EBRAction::ChooseTakeResourcesCompany(company, delivery_company) => {
+                self.execute_choose_take_resources_company(state, company, delivery_company)
+            }
             EBRAction::TakeResources(coordinate) => self.execute_take_resources(state, coordinate),
             EBRAction::PassTakeResources => self.execute_pass_take_resources(state),
         }
@@ -1231,7 +1268,7 @@ pub struct EBRState {
     narrow_gauge_remaining: usize,
     terrain_attributes: HashMap<Terrain, CommonAttributes>,
     company_fixed_details: HashMap<Company, CompanyFixedDetailsParams>,
-    hyperparams: EBRHyperparams,
+    hyperparams: Arc<EBRHyperparams>,
 }
 
 impl EBRState {
@@ -1334,7 +1371,7 @@ impl EBRState {
             .collect::<BTreeSet<(Company, Company)>>()
             .iter()
             .filter(|(_private_co, public_co)| {
-                (self.company_details[public_co].shares_remaining > 0 || 
+                (self.company_details[public_co].shares_remaining > 0 ||
                                 //TODO: Make the EBRC here data somewhere
                                 *public_co == Company::EBRC)
             })
@@ -1512,7 +1549,7 @@ impl EBRState {
     }
 
     fn narrow_cost(&self, _t: Coordinate) -> usize {
-        return NARROW_TRACK_COST;
+        return self.hyperparams.narrow_track_cost;
     }
 
     fn can_build(&self, company: Company, player: PlayerID) -> bool {
@@ -1549,7 +1586,7 @@ impl EBRState {
     }
 
     fn can_take(&self, company: Company) -> bool {
-        (self.company_details[&company].cash > TAKE_RESOURCE_COST as isize)
+        (self.company_details[&company].cash > self.hyperparams.take_resource_cost as isize)
             && self.company_accessible_resources(company).len() > 0
     }
 
@@ -1586,7 +1623,10 @@ impl EBRState {
             .filter(|t| t.track_type == TrackType::CompanyOwned(company.clone()));
         let track_terrain_revenue = company_track
             .clone()
-            .map(|t| self.terrain_attributes[&TERRAIN[t.location.1][t.location.0]].revenue[self.dividends_paid])
+            .map(|t| {
+                self.terrain_attributes[&TERRAIN[t.location.1][t.location.0]].revenue
+                    [self.dividends_paid]
+            })
             .sum::<isize>();
         let track_feature_revenue = company_track
             .clone()
@@ -1784,9 +1824,7 @@ impl State for EBRState {
             mlm_connected_to_hobart: is_connected(&Company::MLM, hobart),
             completed_dividend_rounds: self.dividends_paid,
             gt_merged: self.company_details[&Company::GT].merged.unwrap_or(false),
-            nmft_merged: self.company_details[&Company::NMFT]
-                .merged
-                .unwrap_or(false),
+            nmft_merged: self.company_details[&Company::NMFT].merged.unwrap_or(false),
             ned_merged: self.company_details[&Company::NED].merged.unwrap_or(false),
             mlm_merged: self.company_details[&Company::MLM].merged.unwrap_or(false),
         }
@@ -1893,7 +1931,8 @@ impl State for EBRState {
                 })
                 .map(|location| EBRAction::StartPrivateAt(*company, *location))
                 .collect(),
-            Stage::ChooseBuildCompany => self.company_fixed_details
+            Stage::ChooseBuildCompany => self
+                .company_fixed_details
                 .iter()
                 .filter(|c| self.can_build(c.0.clone(), next_actor))
                 .map(|c| EBRAction::ChooseBuildCompany(c.0.clone()))
@@ -1930,7 +1969,8 @@ impl State for EBRState {
                     actions
                 }
             }
-            Stage::ChooseBondCompany => self.company_fixed_details
+            Stage::ChooseBondCompany => self
+                .company_fixed_details
                 .iter()
                 .filter(|c| self.can_issue(c.0.clone()))
                 .map(|c| EBRAction::ChooseBondCompany(c.0.clone()))
@@ -1945,7 +1985,8 @@ impl State for EBRState {
                 .iter()
                 .map(|(private, company)| EBRAction::Merge(*private, *company))
                 .collect(),
-            Stage::ChooseTakeResourcesCompany => self.company_fixed_details
+            Stage::ChooseTakeResourcesCompany => self
+                .company_fixed_details
                 .iter()
                 .filter(|c| self.can_take(c.0.clone()))
                 .flat_map(|c| {
@@ -2109,11 +2150,16 @@ impl Game for EBR {
                     )
                 })
                 .collect(),
-            unissued_bonds: hyperparams.bonds.iter().map(|b| b.clone()).collect::<Vec<Bond>>(),
+            unissued_bonds: hyperparams
+                .bonds
+                .iter()
+                .map(|b| b.clone())
+                .collect::<Vec<Bond>>(),
             resource_cubes: INITIAL_RESOURCE_CUBES.to_vec(),
-            narrow_gauge_remaining: NARROW_GAUGE_INITIAL,
+            narrow_gauge_remaining: hyperparams.narrow_gauge_initial,
             terrain_attributes,
             company_fixed_details,
+            hyperparams: Arc::new(hyperparams.clone()),
         }
     }
 
@@ -2232,11 +2278,12 @@ mod test {
         // Test will break if HQ of GT moved
         let mut game_state = init_game();
 
-
         // Check GT has its HQ initially
         assert!(
             game_state.reachable_narrow_track(Company::GT)
-                == vec![game_state.company_fixed_details[&Company::GT].starting.unwrap()]
+                == vec![game_state.company_fixed_details[&Company::GT]
+                    .starting
+                    .unwrap()]
         );
 
         // Check that nearby track not connected
@@ -2246,7 +2293,9 @@ mod test {
         });
         assert!(
             game_state.reachable_narrow_track(Company::GT)
-                == vec![game_state.company_fixed_details[&Company::GT].starting.unwrap()]
+                == vec![game_state.company_fixed_details[&Company::GT]
+                    .starting
+                    .unwrap()]
         );
 
         // Check that once connected, all three are there
@@ -2261,7 +2310,9 @@ mod test {
                 .map(|t| t.clone())
                 .collect::<HashSet<Coordinate>>()
                 == vec![
-                    game_state.company_fixed_details[&Company::GT].starting.unwrap(),
+                    game_state.company_fixed_details[&Company::GT]
+                        .starting
+                        .unwrap(),
                     (3, 4),
                     (4, 4)
                 ]
