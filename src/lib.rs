@@ -25,7 +25,7 @@ fn set_log_level(level: &str) -> PyResult<()> {
 
 #[pyfunction]
 #[pyo3(
-    signature = (game, iterations, thread_count, time_limit_secs = None, exploration_constant = None, hyperparams = None)
+    signature = (game, iterations, thread_count, time_limit_secs = None, exploration_constant = None, hyperparams = None, player_count = 2)
 )]
 fn explore(
     py: Python,
@@ -35,6 +35,7 @@ fn explore(
     time_limit_secs: Option<u64>,
     exploration_constant: Option<f64>,
     hyperparams: Option<Py<PyDict>>,
+    player_count: usize,
 ) -> PyResult<Vec<Py<PyAny>>> {
     let time_limit = time_limit_secs.map(std::time::Duration::from_secs);
 
@@ -72,7 +73,9 @@ fn explore(
             .collect::<PyResult<Vec<_>>>()?
         }
         Games::NT => {
-            let game = NT { player_count: 2 };
+            let game = NT {
+                player_count: player_count as u8,
+            };
             let hyperparams = ();
             let state = game.init_game(&hyperparams);
             explore_tree(
@@ -87,7 +90,9 @@ fn explore(
             .collect::<PyResult<Vec<_>>>()?
         }
         Games::CS => {
-            let game = CS { player_count: 2 };
+            let game = CS {
+                player_count: player_count as u8,
+            };
             let hyperparams = ();
             let state = game.init_game(&hyperparams);
             explore_tree(
@@ -102,7 +107,9 @@ fn explore(
             .collect::<PyResult<Vec<_>>>()?
         }
         Games::EBR => {
-            let game = EBR { player_count: 2 };
+            let game = EBR {
+                player_count: player_count as u8,
+            };
             let hyperparams = if let Some(pydict) = hyperparams {
                 EBRHyperparams::from_pydict(py, pydict.bind(py))?
             } else {
