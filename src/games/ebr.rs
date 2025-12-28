@@ -131,6 +131,7 @@ pub struct EBRHyperparams {
     pub take_dividend: u32,
     pub take_town_deliver_dividend: u32,
     pub take_port_deliver_dividend: u32,
+    pub initial_resource_cubes: Vec<Coordinate>,
     #[serde(skip)]
     all_features_cache: Arc<OnceLock<Arc<HashMap<(usize, usize), Feature>>>>,
 }
@@ -459,6 +460,7 @@ impl Default for EBRHyperparams {
             take_dividend: 1,
             take_town_deliver_dividend: 1,
             take_port_deliver_dividend: 1,
+            initial_resource_cubes: vec![(2, 4), (2, 3), (3, 4), (3, 4)],
             all_features_cache: Arc::new(OnceLock::new()),
         }
     }
@@ -596,9 +598,7 @@ static PRIVATE_ORDER: LazyLock<Vec<Company>> =
 
 type Coordinate = (usize, usize);
 
-// ANNOTATION: A hardcoded list of initial resource cube locations.
-// This differs from the rules, which describe a random setup process using cards.
-const INITIAL_RESOURCE_CUBES: [Coordinate; 4] = [(2, 4), (2, 3), (3, 4), (3, 4)];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CompanyDetails {
     shares_held: usize,
@@ -2192,7 +2192,7 @@ impl Game for EBR {
                 .iter()
                 .map(|b| b.clone())
                 .collect::<Vec<Bond>>(),
-            resource_cubes: INITIAL_RESOURCE_CUBES.to_vec(),
+            resource_cubes: hyperparams.initial_resource_cubes.to_vec(),
             narrow_gauge_remaining: hyperparams.narrow_gauge_initial,
             terrain_attributes,
             company_fixed_details,
