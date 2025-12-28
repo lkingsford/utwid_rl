@@ -2,8 +2,8 @@ use crate::hyper::{GameHyperrewardTrait, Hyperparams, ParamMeta};
 use log::warn;
 use serde::{de, Deserializer, Serialize, Serializer};
 use serde_json;
-use std::cmp::{max, min};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::cmp::max;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::{Arc, LazyLock};
 
@@ -752,7 +752,7 @@ impl EBRAction {
                     unreachable!()
                 };
                 let mut next_actor = (&actor + 1) % state.player_count;
-                while (passed.contains(&next_actor)) {
+                while passed.contains(&next_actor) {
                     next_actor = (&next_actor + 1) % state.player_count;
                 }
                 state.stage = Stage::Auction {
@@ -787,7 +787,7 @@ impl EBRAction {
                         unreachable!()
                     };
                     passed.insert(next_actor as u8);
-                    while (passed.contains(&next_actor)) {
+                    while passed.contains(&next_actor) {
                         next_actor = (&next_actor + 1) % state.player_count;
                     }
                     state.next_actor = Actor::Player(winning_bidder.unwrap());
@@ -1262,7 +1262,7 @@ impl EBRState {
     fn min_bid(&self, company: Company) -> isize {
         let rev = self.net_revenue(company.clone());
         let owned_shares = self.company_details[&company].shares_held;
-        return max(1, div_ceil(rev, (owned_shares as isize + 1)));
+        return max(1, div_ceil(rev, owned_shares as isize + 1));
     }
 
     fn can_auction_any(&self) -> bool {
@@ -1358,9 +1358,9 @@ impl EBRState {
             .collect::<BTreeSet<(Company, Company)>>()
             .iter()
             .filter(|(_private_co, public_co)| {
-                (self.company_details[public_co].shares_remaining > 0 ||
+                self.company_details[public_co].shares_remaining > 0 ||
                                 //TODO: Make the EBRC here data somewhere
-                                *public_co == Company::EBRC)
+                                *public_co == Company::EBRC
             })
             .map(|c| c.clone())
             .filter(
@@ -1457,7 +1457,7 @@ impl EBRState {
                 }
                 // Make sure co can pay
                 let cost = self.owned_cost(*t, Some(other_track_in_location));
-                if (company_details.cash >= cost as isize) {
+                if company_details.cash >= cost as isize {
                     Some(*t)
                 } else {
                     None
@@ -2208,7 +2208,7 @@ fn get_neighbors(coord: Coordinate) -> Vec<Coordinate> {
 }
 
 mod test {
-    use std::collections::hash_set;
+    
 
     use super::*;
 
