@@ -136,20 +136,16 @@ pub struct EBRHyperparams {
     all_features_cache: Arc<OnceLock<Arc<HashMap<(usize, usize), Feature>>>>,
 }
 
-
-
 impl EBRHyperparams {
     fn all_features(&self) -> Arc<HashMap<(usize, usize), Feature>> {
-        self.all_features_cache.get_or_init(|| {
-            Arc::new(
-                self.features
-                    .clone()
-                    .into_iter()
-                    .chain(
-                        self.water_features
-                            .clone()
-                            .into_iter()
-                            .map(|((x, y), feature_type)| {
+        self.all_features_cache
+            .get_or_init(|| {
+                Arc::new(
+                    self.features
+                        .clone()
+                        .into_iter()
+                        .chain(self.water_features.clone().into_iter().map(
+                            |((x, y), feature_type)| {
                                 let cost = match feature_type {
                                     FeatureType::Water1 => self.water_1_cost,
                                     FeatureType::Water2 => self.water_2_cost,
@@ -164,13 +160,13 @@ impl EBRHyperparams {
                                         additional_cost: cost,
                                     },
                                 )
-                            }),
-                    )
-                    .collect(),
-            )
-        }).clone()
+                            },
+                        ))
+                        .collect(),
+                )
+            })
+            .clone()
     }
-
 
     fn default_terrain_attributes() -> HashMap<Terrain, TerrainAttributeParams> {
         let mut terrain_attributes = HashMap::new();
@@ -472,7 +468,6 @@ impl Hyperparams for EBRHyperparams {
     }
 }
 
-
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ChoosableAction {
     BuildTrack,
@@ -597,7 +592,6 @@ static PRIVATE_ORDER: LazyLock<Vec<Company>> =
     LazyLock::new(|| vec![Company::GT, Company::NMFT, Company::NED, Company::MLM]);
 
 type Coordinate = (usize, usize);
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CompanyDetails {
@@ -816,13 +810,8 @@ impl EBRAction {
             };
             // Everybody has passed.
             let winner = winning_bidder.unwrap();
-            state
-                .holdings
-                .get_mut(&winner)
-                .unwrap()
-                .push(lot);
-            *state.player_cash.get_mut(&winner).unwrap() -=
-                current_bid.unwrap_or(0) as isize;
+            state.holdings.get_mut(&winner).unwrap().push(lot);
+            *state.player_cash.get_mut(&winner).unwrap() -= current_bid.unwrap_or(0) as isize;
             {
                 let company_details = state.company_details.get_mut(&lot).unwrap();
                 company_details.shares_held += 1;
@@ -864,8 +853,7 @@ impl EBRAction {
                 }
             } else {
                 state.stage = Stage::ChooseAction;
-                state.next_actor =
-                    Actor::Player((state.active_player + 1) % state.player_count);
+                state.next_actor = Actor::Player((state.active_player + 1) % state.player_count);
             }
         } else {
             unreachable!()
@@ -1818,16 +1806,13 @@ impl State for EBRState {
         sorted_cash.sort_by(|a, b| b.1.cmp(&a.1));
 
         let (winning_player_id, winning_player_score) = if self.terminal {
-            (
-                Some(sorted_cash[0].0 as usize),
-                Some(sorted_cash[0].1),
-            )
+            (Some(sorted_cash[0].0 as usize), Some(sorted_cash[0].1))
         } else {
             (None, None)
         };
 
         EBRHyperrewards {
-            total_bonds_issued: 7 - self.unissued_bonds.len(),
+            total_bonds_issued: self.hyperparams.bonds.len() - self.unissued_bonds.len(),
             end_game_reason: self.end_game_reason,
             remaining_resource_cubes: self.resource_cubes.len(),
             ebrc_connected_to_devonport: is_connected(&Company::EBRC, devonport),
@@ -1856,10 +1841,22 @@ impl State for EBRState {
             nmft_merged: self.company_details[&Company::NMFT].merged.unwrap_or(false),
             ned_merged: self.company_details[&Company::NED].merged.unwrap_or(false),
             mlm_merged: self.company_details[&Company::MLM].merged.unwrap_or(false),
-            lw_auction_winner: self.initial_auction_winners.get(&Company::LW).map(|id| *id as usize),
-            tmlc_auction_winner: self.initial_auction_winners.get(&Company::TMLC).map(|id| *id as usize),
-            ebrc_auction_winner: self.initial_auction_winners.get(&Company::EBRC).map(|id| *id as usize),
-            gt_auction_winner: self.initial_auction_winners.get(&Company::GT).map(|id| *id as usize),
+            lw_auction_winner: self
+                .initial_auction_winners
+                .get(&Company::LW)
+                .map(|id| *id as usize),
+            tmlc_auction_winner: self
+                .initial_auction_winners
+                .get(&Company::TMLC)
+                .map(|id| *id as usize),
+            ebrc_auction_winner: self
+                .initial_auction_winners
+                .get(&Company::EBRC)
+                .map(|id| *id as usize),
+            gt_auction_winner: self
+                .initial_auction_winners
+                .get(&Company::GT)
+                .map(|id| *id as usize),
             winning_player_id,
             winning_player_score,
             player_scores: sorted_cash.iter().map(|s| s.1).collect(),
