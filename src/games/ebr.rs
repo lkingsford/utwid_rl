@@ -5,7 +5,7 @@ use serde_json;
 use std::cmp::max;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::Hash;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 
 use crate::game::Game;
 use crate::mcts::game_trait::{Action, Actor, State};
@@ -124,9 +124,46 @@ pub struct EBRHyperparams {
     pub take_dividend: u32,
     pub take_town_deliver_dividend: u32,
     pub take_port_deliver_dividend: u32,
+    #[serde(skip)]
+    all_features_cache: Arc<OnceLock<Arc<HashMap<(usize, usize), Feature>>>>,
 }
 
+
+
 impl EBRHyperparams {
+    fn all_features(&self) -> Arc<HashMap<(usize, usize), Feature>> {
+        self.all_features_cache.get_or_init(|| {
+            Arc::new(
+                self.features
+                    .clone()
+                    .into_iter()
+                    .chain(
+                        self.water_features
+                            .clone()
+                            .into_iter()
+                            .map(|((x, y), feature_type)| {
+                                let cost = match feature_type {
+                                    FeatureType::Water1 => self.water_1_cost,
+                                    FeatureType::Water2 => self.water_2_cost,
+                                    _ => unreachable!(),
+                                };
+                                (
+                                    (x, y),
+                                    Feature {
+                                        feature_type,
+                                        location_name: None,
+                                        revenue: [0, 0, 0, 0, 0, 0],
+                                        additional_cost: cost,
+                                    },
+                                )
+                            }),
+                    )
+                    .collect(),
+            )
+        }).clone()
+    }
+
+
     fn default_terrain_attributes() -> HashMap<Terrain, TerrainAttributeParams> {
         let mut terrain_attributes = HashMap::new();
         terrain_attributes.insert(
@@ -415,6 +452,7 @@ impl Default for EBRHyperparams {
             take_dividend: 1,
             take_town_deliver_dividend: 1,
             take_port_deliver_dividend: 1,
+            all_features_cache: Arc::new(OnceLock::new()),
         }
     }
 }
@@ -425,36 +463,6 @@ impl Hyperparams for EBRHyperparams {
     }
 }
 
-impl EBRHyperparams {
-    fn all_features(&self) -> HashMap<(usize, usize), Feature> {
-        // This should be cached
-        self.features
-            .clone()
-            .into_iter()
-            .chain(
-                self.water_features
-                    .clone()
-                    .into_iter()
-                    .map(|((x, y), feature_type)| {
-                        let cost = match feature_type {
-                            FeatureType::Water1 => self.water_1_cost,
-                            FeatureType::Water2 => self.water_2_cost,
-                            _ => unreachable!(),
-                        };
-                        (
-                            (x, y),
-                            Feature {
-                                feature_type,
-                                location_name: None,
-                                revenue: [0, 0, 0, 0, 0, 0],
-                                additional_cost: cost,
-                            },
-                        )
-                    }),
-            )
-            .collect()
-    }
-}
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ChoosableAction {
@@ -503,7 +511,7 @@ struct BondDetails {
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
-struct Feature {
+pub struct Feature {
     feature_type: FeatureType,
     location_name: Option<String>,
     revenue: [isize; 6],
@@ -511,7 +519,7 @@ struct Feature {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
-enum FeatureType {
+pub enum FeatureType {
     Port,
     Town,
     Water1,
@@ -2212,7 +2220,6 @@ fn get_neighbors(coord: Coordinate) -> Vec<Coordinate> {
 }
 
 mod test {
-    
 
     use super::*;
 
