@@ -128,7 +128,11 @@ Experimental analysis shows:
 
 # Optimizer
 
- ** No optimizer is implemented yet **
+Currently experimenting with using Optuna.
+
+I need further education to using the trust variable effectively. Currently, I sort results by τ, and only use the top stddev worth of results for the figures.
+
+I'm needing more stats guidance to best use those hyperrewards (for instance - to quantify a number of booleans with different τ into 'targetting that X% of iterations are true'.
 
 
 # Possible Additional Steps
