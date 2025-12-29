@@ -1,13 +1,13 @@
 use crate::game::Game;
 use crate::hyper::{
-    GameHyperrewardTrait, Hyperparams, ParamMeta, ParamValue,
+    GameHyperrewardTrait, Hyperparams,
 };
 use crate::mcts::game_trait::{Action, Actor, State};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct C4Hyperparams {
     pub board_width: usize,
     pub board_height: usize,
@@ -22,26 +22,7 @@ impl Default for C4Hyperparams {
     }
 }
 
-impl Hyperparams for C4Hyperparams {
-    fn metadata() -> std::collections::HashMap<String, crate::hyper::ParamMeta> {
-        HashMap::from([
-            (
-                String::from("board_width"),
-                ParamMeta {
-                    default: ParamValue::Uint(7),
-                    range: Option::None,
-                },
-            ),
-            (
-                String::from("board_height"),
-                ParamMeta {
-                    default: ParamValue::Uint(6),
-                    range: Option::None,
-                },
-            ),
-        ])
-    }
-}
+impl Hyperparams for C4Hyperparams {}
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub enum HyperrewardStatus {

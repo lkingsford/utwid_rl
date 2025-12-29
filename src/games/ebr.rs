@@ -1,4 +1,4 @@
-use crate::hyper::{GameHyperrewardTrait, Hyperparams, ParamMeta, ParamRange, ParamValue};
+use crate::hyper::{GameHyperrewardTrait, Hyperparams};
 use log::warn;
 use serde::{de, Deserializer, Serialize, Serializer};
 use serde_json;
@@ -120,10 +120,38 @@ pub struct CompanyFixedDetailsParams {
     pub initial_interest: usize,
 }
 
+mod tuple_map_as_vec {
+    use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
+    use std::collections::HashMap;
+    use std::hash::Hash;
+
+    pub fn serialize<S, K, V>(map: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        K: Serialize + Eq + Hash,
+        V: Serialize,
+    {
+        let vec: Vec<_> = map.iter().collect();
+        vec.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D, K, V>(deserializer: D) -> Result<HashMap<K, V>, D::Error>
+    where
+        D: Deserializer<'de>,
+        K: Deserialize<'de> + Eq + Hash,
+        V: Deserialize<'de>,
+    {
+        let vec: Vec<(K, V)> = Vec::deserialize(deserializer)?;
+        Ok(vec.into_iter().collect())
+    }
+}
+
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct EBRHyperparams {
     pub terrain_attributes: HashMap<Terrain, TerrainAttributeParams>,
+    #[serde(with = "tuple_map_as_vec")]
     pub features: HashMap<(usize, usize), Feature>,
+    #[serde(with = "tuple_map_as_vec")]
     pub water_features: HashMap<(usize, usize), FeatureType>,
     pub bonds: Vec<Bond>,
     pub initial_cash: HashMap<u8, u32>,
@@ -142,11 +170,7 @@ pub struct EBRHyperparams {
     all_features_cache: Arc<OnceLock<Arc<HashMap<(usize, usize), Feature>>>>,
 }
 
-impl Hyperparams for EBRHyperparams {
-    fn metadata() -> HashMap<String, ParamMeta> {
-        unimplemented!("Hyperparams metadata isn't implemented yet for EBR")
-    }
-}
+impl Hyperparams for EBRHyperparams {}
 
 impl EBRHyperparams {
     fn default_cached() -> &'static EBRHyperparams {

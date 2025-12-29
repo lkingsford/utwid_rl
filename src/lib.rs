@@ -143,19 +143,18 @@ fn get_hyperreward_meta(py: Python, game: Games) -> PyResult<Py<PyAny>> {
 }
 
 #[pyfunction]
-fn get_hyperparam_meta(py: Python, game: Games) -> PyResult<Py<PyAny>> {
-    let meta = match game {
-        Games::C4 => C4Hyperparams::metadata(),
-        Games::NT => <() as Hyperparams>::metadata(),
-        Games::CS => <() as Hyperparams>::metadata(),
-        Games::EBR => EBRHyperparams::metadata(),
+fn default_hyperparams(py: Python, game: Games) -> PyResult<Py<PyAny>> {
+    let json_str = match game {
+        Games::C4 => serde_json::to_string(&C4Hyperparams::default())
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
+        Games::EBR => serde_json::to_string(&EBRHyperparams::default())
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
+        Games::NT | Games::CS => return Ok(PyDict::new(py).into()),
     };
 
-    let json_str = serde_json::to_string(&meta)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     let json = PyModule::import(py, "json")?;
     let py_dict = json.call_method1("loads", (json_str,))?;
-    Ok(py_dict.unbind())
+    Ok(py_dict.into())
 }
 
 #[pymodule]
@@ -167,7 +166,7 @@ fn mon2y(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Games>()?;
     m.add_function(wrap_pyfunction!(explore, m)?)?;
     m.add_function(wrap_pyfunction!(get_hyperreward_meta, m)?)?;
-    m.add_function(wrap_pyfunction!(get_hyperparam_meta, m)?)?;
+    m.add_function(wrap_pyfunction!(default_hyperparams, m)?)?;
     m.add_function(wrap_pyfunction!(set_log_level, m)?)?;
     Ok(())
 }
