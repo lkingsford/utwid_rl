@@ -14,7 +14,9 @@ pub enum ParamValue {
     Uint(u64),
     Bool(bool),
     Enum(String),
-    // Stanza(HashMap<String, ParamMeta>),
+    Stanza(HashMap<String, ParamMeta>),
+    List(Vec<ParamValue>),
+    Coord((u8, u8)),
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -24,6 +26,8 @@ pub enum ParamRange {
     IntRange(i64, i64),
     UintRange(u64, u64),
     EnumOptions(Vec<String>),
+    CoordRange((u8, u8), (u8, u8)),
+    ListIntRange((usize, isize, isize)),
 }
 
 #[derive(Clone, Debug, Serialize)]

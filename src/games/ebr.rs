@@ -1,4 +1,4 @@
-use crate::hyper::{GameHyperrewardTrait, Hyperparams, ParamMeta};
+use crate::hyper::{GameHyperrewardTrait, Hyperparams, ParamMeta, ParamRange, ParamValue};
 use log::warn;
 use serde::{de, Deserializer, Serialize, Serializer};
 use serde_json;
@@ -99,9 +99,63 @@ impl GameHyperrewardTrait for EBRHyperrewards {
 }
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct WaterFeatureParams {
+    pub xy: (u8, u8),
+    pub feature_type: FeatureType,
+}
+
+impl WaterFeatureParams {
+    pub fn metadata() -> HashMap<String, ParamMeta> {
+        HashMap::from([
+            (
+                "xy".into(),
+                ParamMeta {
+                    default: ParamValue::Uint(0),
+                    range: Some(ParamRange::CoordRange(
+                        (0, WIDTH.try_into().unwrap()),
+                        (0, HEIGHT.try_into().unwrap()),
+                    )),
+                },
+            ),
+            (
+                "feature_type".into(),
+                ParamMeta {
+                    default: ParamValue::Enum("Water1".into()),
+                    range: Some(ParamRange::EnumOptions(vec![
+                        "Water1".into(),
+                        "Water2".into(),
+                    ])),
+                },
+            ),
+        ])
+    }
+}
+
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct TerrainAttributeParams {
     pub build_cost: u32,
     pub revenue: [isize; 6],
+}
+
+impl TerrainAttributeParams {
+    pub fn metadata() -> HashMap<String, ParamMeta> {
+        HashMap::from([
+            (
+                "build_cost".into(),
+                ParamMeta {
+                    default: ParamValue::Uint(0),
+                    range: Some(ParamRange::UintRange(0, 100)),
+                },
+            ),
+            (
+                "revenue".into(),
+                ParamMeta {
+                    default: ParamValue::List((0..6).map(|_| ParamValue::Int(0)).collect()),
+                    range: Some(ParamRange::IntRange(-20, 100)),
+                },
+            ),
+        ])
+    }
 }
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
@@ -137,6 +191,11 @@ pub struct EBRHyperparams {
 }
 
 impl EBRHyperparams {
+    fn default_cached() -> &'static EBRHyperparams {
+        static ONCE: OnceLock<EBRHyperparams> = OnceLock::new();
+        ONCE.get_or_init(EBRHyperparams::default)
+    }
+
     fn all_features(&self) -> Arc<HashMap<(usize, usize), Feature>> {
         self.all_features_cache
             .get_or_init(|| {
@@ -462,9 +521,126 @@ impl Default for EBRHyperparams {
     }
 }
 
-impl Hyperparams for EBRHyperparams {
-    fn metadata() -> HashMap<String, ParamMeta> {
-        HashMap::new()
+impl EBRHyperparams {
+    pub fn metadata() -> HashMap<String, ParamMeta> {
+        let d = Self::default_cached();
+
+        HashMap::from([
+            (
+                "terrain_attributes".into(),
+                ParamMeta {
+                    default: ParamValue::Stanza(TerrainAttributeParams::metadata()),
+                    range: None,
+                },
+            ),
+            (
+                "features".into(),
+                ParamMeta {
+                    default: ParamValue::Stanza(Feature::metadata()),
+                    range: None,
+                },
+            ),
+            (
+                "water_features".into(),
+                ParamMeta {
+                    default: ParamValue::List(WaterFeatureParams::metadata()),
+                    range: None,
+                },
+            ),
+            (
+                "bonds".into(),
+                ParamMeta {
+                    default: ParamValue::List(vec![
+                        ParamMeta {
+                            default: ParamValue::Uint(0),
+                            range: Some(ParamRange::UintRange(0, 500)),
+                        },
+                        ParamMeta {
+                            default: ParamValue::Uint(0),
+                            range: Some(ParamRange::UintRange(0, 20)),
+                        },
+                    ]),
+                    range: None,
+                },
+            ),
+            (
+                "initial_cash".into(),
+                ParamMeta {
+                    default: ParamValue::Stanza(HashMap::new()),
+                    range: None,
+                },
+            ),
+            (
+                "company_fixed_details".into(),
+                ParamMeta {
+                    default: ParamValue::Stanza(HashMap::new()),
+                    range: None,
+                },
+            ),
+            (
+                "water_1_cost".into(),
+                ParamMeta {
+                    default: ParamValue::Uint(d.water_1_cost as u64),
+                    range: Some(ParamRange::UintRange(0, 10)),
+                },
+            ),
+            (
+                "water_2_cost".into(),
+                ParamMeta {
+                    default: ParamValue::Uint(d.water_2_cost as u64),
+                    range: Some(ParamRange::UintRange(0, 10)),
+                },
+            ),
+            (
+                "narrow_gauge_initial".into(),
+                ParamMeta {
+                    default: ParamValue::Uint(d.narrow_gauge_initial as u64),
+                    range: Some(ParamRange::UintRange(0, 20)),
+                },
+            ),
+            (
+                "max_builds".into(),
+                ParamMeta {
+                    default: ParamValue::Uint(d.max_builds as u64),
+                    range: Some(ParamRange::UintRange(1, 10)),
+                },
+            ),
+            (
+                "narrow_track_cost".into(),
+                ParamMeta {
+                    default: ParamValue::Uint(d.narrow_track_cost as u64),
+                    range: Some(ParamRange::UintRange(0, 10)),
+                },
+            ),
+            (
+                "take_resource_cost".into(),
+                ParamMeta {
+                    default: ParamValue::Uint(d.take_resource_cost as u64),
+                    range: Some(ParamRange::UintRange(0, 10)),
+                },
+            ),
+            (
+                "take_dividend".into(),
+                ParamMeta {
+                    default: ParamValue::Uint(d.take_dividend as u64),
+                    range: Some(ParamRange::UintRange(0, 10)),
+                },
+            ),
+            (
+                "take_town_deliver_dividend".into(),
+                ParamMeta {
+                    default: ParamValue::Uint(d.take_town_deliver_dividend as u64),
+                    range: Some(ParamRange::UintRange(0, 10)),
+                },
+            ),
+            (
+                "take_port_deliver_dividend".into(),
+                ParamMeta {
+                    default: ParamValue::Uint(d.take_port_deliver_dividend as u64),
+                    range: Some(ParamRange::UintRange(0, 10)),
+                },
+            ),
+        ])
     }
 }
 
@@ -508,6 +684,7 @@ pub struct Bond {
     face_value: usize,
     coupon: usize,
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
 struct BondDetails {
     bond: Bond,
@@ -520,6 +697,53 @@ pub struct Feature {
     location_name: Option<String>,
     revenue: [isize; 6],
     additional_cost: usize,
+}
+
+impl Feature {
+    pub fn metadata() -> HashMap<String, ParamMeta> {
+        HashMap::from([
+            (
+                "feature_type".into(),
+                ParamMeta {
+                    default: ParamValue::Enum("Town".into()),
+                    range: Some(ParamRange::EnumOptions(vec![
+                        "Port".into(),
+                        "Town".into(),
+                        "Water1".into(),
+                        "Water2".into(),
+                    ])),
+                },
+            ),
+            (
+                "location_name".into(),
+                ParamMeta {
+                    default: ParamValue::Enum("None".into()),
+                    range: None,
+                },
+            ),
+            (
+                "revenue".into(),
+                ParamMeta {
+                    default: ParamValue::List(
+                        (0..6)
+                            .map(|_| ParamMeta {
+                                default: ParamValue::Int(0),
+                                range: Some(ParamRange::IntRange(-20, 20)),
+                            })
+                            .collect(),
+                    ),
+                    range: None,
+                },
+            ),
+            (
+                "additional_cost".into(),
+                ParamMeta {
+                    default: ParamValue::Uint(0),
+                    range: Some(ParamRange::UintRange(0, 10)),
+                },
+            ),
+        ])
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
