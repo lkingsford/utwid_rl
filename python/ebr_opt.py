@@ -32,6 +32,7 @@ logging.basicConfig(
 #####
 
 MAX_ITERATIONS = 100000
+MIN_ITERATIONS = 250
 TRIALS = 10000
 # Experimentation showed more than 12 threads has minimum benefit (probably) due to locking
 MAX_THREADS = 12
@@ -122,7 +123,11 @@ GOALS: Dict[str, Goal] = {
 
     "Bond Ratio Taken": Goal (
         2 / 3, 2 / 3, 1, lambda df, hyper: df["total_bonds_issued"].mean() / len(hyper["bonds"])
-    )
+    ),
+
+    "If all dividends paid, TMLC or LW connected to Hobart and Launceston": Goal (
+        1 / 2, 1 / 3, 2, lambda df, _: len(df.query("(lw_connected_to_launceston and lw_connected_to_hobart) or (tmlc_connected_to_launceston and tmlc_connected_to_hobart)")) / len(df)
+    ),
 }
 
 T = TypeVar("T")
@@ -515,6 +520,7 @@ def run_trial(
     explore_iterations = force_iterations or max_iterations * (
         1 - (math.log(max(1, trials - max(trial.number, 2))) / math.log(trials))
     )
+    explore_iterations = max(explore_iterations, MIN_ITERATIONS)
     logging.info(f"Iterations: {explore_iterations}")
 
     suggested_hyperparams = suggest_for_trial(trial)
@@ -549,7 +555,7 @@ def run_trial(
 
 
 def start_study():
-    objective = partial(run_trial, threads=4, trials=100, force_iterations=100)
+    objective = partial(run_trial, threads=4, trials=100)
     study = optuna.create_study(
         storage="sqlite:///db.sqlite3",  # Specify the storage URL here.
         #study_name="min_ebr_test_1",
