@@ -1,5 +1,5 @@
 from statistics import fmean
-from typing import List, TypedDict, NamedTuple, TypeVar, Generic
+from typing import List, TypedDict, NamedTuple, TypeVar, Generic, Tuple
 
 import optuna
 
@@ -226,6 +226,31 @@ def suggest_initial_cash (
     )
 
 
-def suggest_for_trial(study: optuna.Study) -> dict:
-    default = mon2y.default_hyperparams[mon2y.Games.EBR]
-    jl
+class EbrHyperparams(TypedDict):
+    terrain_attributes: dict[str, Terrain]
+    features: List[Tuple[List[int], Feature]]
+    water_features: List[Tuple[List[int], str]]
+    bonds: List[Bond]
+    initial_cash: dict[str, int]
+    company_fixed_details: dict[str, CompanyFixedDetail]
+    water_1_cost: int
+    water_2_cost: int
+    narrow_gauge_initial: int
+    max_builds: int
+    narrow_track_cost: int
+    take_resource_cost: int
+    take_dividend: int
+    take_town_deliver_dividend: int
+    take_port_deliver_dividend: int
+    initial_resource_cubes: List[List[int]]
+
+
+def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]:
+    hyperparams: EbrHyperparams = mon2y.default_hyperparams[mon2y.Games.EBR]
+    
+    terrain_diff_sum = 0
+    for terrain_type, terrain in hyperparams["terrain_attributes"].items():
+        suggested = suggest_modified_terrain(terrain, terrain_type, trial)
+        terrain_diff_sum += suggested.difference
+        hyperparams['terrain_attributes'][terrain_type] = suggested.suggestion
+    terrain_diff = terrain_diff_sum / len(hyperparams["terrain_attributes"])
