@@ -1,5 +1,4 @@
 from functools import partial
-from itertools import tee
 import logging
 import math
 import os
@@ -477,7 +476,8 @@ def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]
             0.5,
         )
     
-    diff_result, diff_weight = tee(diffs)
+    diff_result = [diff[0] for diff in diffs.values()]
+    diff_weight = [diff[1] for diff in diffs.values()]
     return ModifiedSuggestion(hyperparams, fmean(diff_result, diff_weight))
 
 
@@ -518,7 +518,7 @@ def run_trial(
         mon2y.Games.EBR,
         int(explore_iterations),
         threads or min([CPU_COUNT, MAX_THREADS]),
-        suggested_hyperparams.suggestion,
+        hyperparams = suggested_hyperparams.suggestion,
     )
     logging.info("Explore Done")
 
