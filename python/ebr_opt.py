@@ -1,8 +1,20 @@
+from functools import partial
+from itertools import tee
 import logging
 import math
 import os
 from statistics import fmean
-from typing import Dict, List, TypedDict, NamedTuple, TypeVar, Generic, Tuple, Optional, Callable
+from typing import (
+    Dict,
+    List,
+    TypedDict,
+    NamedTuple,
+    TypeVar,
+    Generic,
+    Tuple,
+    Optional,
+    Callable,
+)
 
 import numpy as np
 import optuna
@@ -11,9 +23,9 @@ import pandas as pd
 import mon2y
 
 logging.basicConfig(
-    format='%(asctime)s %(levelname)s %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    level=logging.INFO
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
 )
 
 #####
@@ -23,7 +35,7 @@ logging.basicConfig(
 MAX_ITERATIONS = 100000
 TRIALS = 10000
 # Experimentation showed more than 12 threads has minimum benefit (probably) due to locking
-MAX_THREADS = 12 
+MAX_THREADS = 12
 CPU_COUNT = os.cpu_count()
 
 #####
@@ -96,16 +108,19 @@ class Goal(NamedTuple):
     std_dev: float
     weight: float
     scalarize: Callable[[pd.DataFrame], float]
+
     def loss(self, result_mean: float) -> float:
         z = (self.mean - result_mean) / self.std_dev
         return (1.0 - math.exp(z * z / -2)) * self.weight
 
+
 DIFF_WEIGHT = 2
 
 GOALS: Dict[str, Goal] = {
-    "Bankruptcy": Goal(1/3, 1/6, 3, lambda df: len(df["end_game_reason"]=="Bankruptcy") / len(df))
-    
-    }
+    "Bankruptcy": Goal(
+        1 / 3, 1 / 6, 3, lambda df: len(df["end_game_reason"] == "Bankruptcy") / len(df)
+    )
+}
 
 T = TypeVar("T")
 
@@ -118,11 +133,10 @@ class ModifiedSuggestion(Generic[T], NamedTuple):
     """OK - difference here is really 'normalized value from 0-1' that I can use to try to use to tend towards the original values"""
 
 
-
-def calc_norm_diff(original, new, min, max) -> float:
-    max_diff = max(abs(original - min), abs(original - max))
+def calc_norm_diff(original, new, min_expected, max_expected) -> float:
+    max_diff = max(abs(original - min_expected), abs(original - max_expected))
     return abs(original - new) / max_diff
-    
+
 
 def suggest_revenue(feature: str, trial: optuna.Trial) -> List[int]:
     # Revenue goes for two rounds each time
@@ -132,8 +146,10 @@ def suggest_revenue(feature: str, trial: optuna.Trial) -> List[int]:
         for _ in (0, 1)
     ]
 
+
 def diff_revenue(original: List[int], new: List[int]) -> float:
     return fmean([calc_norm_diff(o, n, 0, MAX_REVENUE) for o, n in zip(original, new)])
+
 
 Terrain = TypedDict("Terrain", {"build_cost": int, "revenue": List[int]})
 
@@ -148,10 +164,17 @@ def suggest_modified_terrain(
         "revenue": suggest_revenue(terrain_type, trial),
     }
 
-    diff = (diff_revenue(terrain["revenue"], suggestion["revenue"]) + calc_norm_diff(terrain["build_cost"], suggestion["build_cost"], MIN_BUILD_COST, MAX_BUILD_COST))/2
+    diff = (
+        diff_revenue(terrain["revenue"], suggestion["revenue"])
+        + calc_norm_diff(
+            terrain["build_cost"],
+            suggestion["build_cost"],
+            MIN_BUILD_COST,
+            MAX_BUILD_COST,
+        )
+    ) / 2
 
     return ModifiedSuggestion(suggestion, diff)
-    
 
 
 Feature = TypedDict(
@@ -165,24 +188,38 @@ Feature = TypedDict(
 )
 
 
-def suggest_modified_feature(feature: Feature, trial: optuna.Trial) -> ModifiedSuggestion[Feature]:
+def suggest_modified_feature(
+    feature: Feature, trial: optuna.Trial
+) -> ModifiedSuggestion[Feature]:
     suggestion: Feature = {
         "feature_type": feature["feature_type"],
         "location_name": feature["location_name"],
         "revenue": suggest_revenue(feature["location_name"], trial),
         "additional_cost": trial.suggest_int(
-            f"{feature["location_name"]}_additional_cost", MIN_ADDITIONAL_COST, MAX_ADDITIONAL_COST
+            f"{feature["location_name"]}_additional_cost",
+            MIN_ADDITIONAL_COST,
+            MAX_ADDITIONAL_COST,
         ),
     }
-    diff = (diff_revenue(feature["revenue"], suggestion["revenue"]) +
-            calc_norm_diff(feature["additional_cost"], suggestion["additional_cost"], MIN_ADDITIONAL_COST, MAX_ADDITIONAL_COST))/2
+    diff = (
+        diff_revenue(feature["revenue"], suggestion["revenue"])
+        + calc_norm_diff(
+            feature["additional_cost"],
+            suggestion["additional_cost"],
+            MIN_ADDITIONAL_COST,
+            MAX_ADDITIONAL_COST,
+        )
+    ) / 2
 
     return ModifiedSuggestion(suggestion, diff)
+
 
 Bond = TypedDict("Bond", {"face_value": int, "coupon": int})
 
 
-def suggest_bonds(original: List[Bond], trial: optuna.Trial) -> ModifiedSuggestion[List[Bond]]:
+def suggest_bonds(
+    original: List[Bond], trial: optuna.Trial
+) -> ModifiedSuggestion[List[Bond]]:
     bond_count = trial.suggest_int("bond_count", MIN_BOND_COUNT, MAX_BOND_COUNT)
 
     suggested: List[Bond] = []
@@ -205,34 +242,41 @@ def suggest_bonds(original: List[Bond], trial: optuna.Trial) -> ModifiedSuggesti
     # - Difference in max of face (weight: 1/6)
     # - Difference in min of face (weight: 1/6)
     # - Difference in mean ratio between face/coupon (weight: 1/3)
-    count_diff = calc_norm_diff(len(original), bond_count, MIN_BOND_COUNT, MAX_BOND_COUNT)
+    count_diff = calc_norm_diff(
+        len(original), bond_count, MIN_BOND_COUNT, MAX_BOND_COUNT
+    )
 
     max_face_diff = calc_norm_diff(
-            max([bond["face_value"] for bond in original]),
-            max([bond["face_value"] for bond in suggested]),
-            0,
-            # TBD if this is the wise thing to do -
-            # - but I need a way to make sure it's normalized to max of 1. This means the
-            # ratio is different depending on bond_count, but I hope that's OK anyway.
-            MAX_BOND_FACE_STEP * max(bond_count, len(original))
+        max([bond["face_value"] for bond in original]),
+        max([bond["face_value"] for bond in suggested]),
+        0,
+        # TBD if this is the wise thing to do -
+        # - but I need a way to make sure it's normalized to max of 1. This means the
+        # ratio is different depending on bond_count, but I hope that's OK anyway.
+        MAX_BOND_FACE_STEP * max(bond_count, len(original)),
     )
 
     min_face_diff = calc_norm_diff(
-            min([bond["face_value"] for bond in original]),
-            min([bond["face_value"] for bond in suggested]),
-            0,
-            #... as above.
-            MIN_BOND_FACE_STEP * max(bond_count, len(original))
+        min([bond["face_value"] for bond in original]),
+        min([bond["face_value"] for bond in suggested]),
+        0,
+        # ... as above.
+        MIN_BOND_FACE_STEP * max(bond_count, len(original)),
     )
 
     ratio_diff = calc_norm_diff(
         fmean([bond["coupon"] / bond["face_value"] for bond in original]),
         fmean([bond["coupon"] / bond["face_value"] for bond in suggested]),
         0,
-        1
+        1,
     )
 
-    diff = count_diff * (1/3) + max_face_diff * (1/6) + min_face_diff * (1/6) + ratio_diff * (1/3)
+    diff = (
+        count_diff * (1 / 3)
+        + max_face_diff * (1 / 6)
+        + min_face_diff * (1 / 6)
+        + ratio_diff * (1 / 3)
+    )
 
     return ModifiedSuggestion(suggested, diff)
 
@@ -337,7 +381,9 @@ def suggest_initial_cash(
 
     return ModifiedSuggestion(
         modified,
-        calc_norm_diff(original_cash, suggested_cash, MIN_INITIAL_CASH, MAX_INITIAL_CASH),
+        calc_norm_diff(
+            original_cash, suggested_cash, MIN_INITIAL_CASH, MAX_INITIAL_CASH
+        ),
     )
 
 
@@ -361,16 +407,19 @@ class EbrHyperparams(TypedDict):
 
 
 def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]:
-    hyperparams: EbrHyperparams = mon2y.default_hyperparams[mon2y.Games.EBR]
+    hyperparams: EbrHyperparams = mon2y.default_hyperparams(mon2y.Games.EBR)
 
-    diffs = []
+    diffs = {}
 
     terrain_diff_sum = 0
     for terrain_type, terrain in hyperparams["terrain_attributes"].items():
         suggested = suggest_modified_terrain(terrain, terrain_type, trial)
         terrain_diff_sum += suggested.difference
         hyperparams["terrain_attributes"][terrain_type] = suggested.suggestion
-    diffs.append((terrain_diff_sum / len(hyperparams["terrain_attributes"]), 1))
+    diffs["terrain_diff"] = (
+        terrain_diff_sum / len(hyperparams["terrain_attributes"]),
+        1,
+    )
 
     feature_diff_sum = 0
     # A feature is a tuple of (coords, feature_details)
@@ -378,22 +427,27 @@ def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]
         suggested = suggest_modified_feature(feature, trial)
         feature_diff_sum += suggested.difference
         hyperparams["features"][i] = (coords, suggested.suggestion)
-    diffs.append((feature_diff_sum / len(hyperparams["features"]), 1))
+    diffs["feature_diff"] = (feature_diff_sum / len(hyperparams["features"]), 1)
 
     company_diff_sum = 0
     for company_id, details in hyperparams["company_fixed_details"].items():
         suggested = suggest_modified_company_fixed_detail(company_id, details, trial)
         company_diff_sum += suggested.difference
         hyperparams["company_fixed_details"][company_id] = suggested.suggestion
-    diffs.append((company_diff_sum / len(hyperparams["company_fixed_details"])), 1)
+    diffs["company_diff"] = (
+        (company_diff_sum / len(hyperparams["company_fixed_details"])),
+        1,
+    )
 
     suggested_bonds = suggest_bonds(hyperparams["bonds"], trial)
     hyperparams["bonds"] = suggested_bonds.suggestion
-    diffs.append((suggested_bonds.difference, 1))
+    diffs["suggested_bonds_diff"] = (suggested_bonds.difference, 1)
 
-    initial_cash = suggest_initial_cash(PLAYER_COUNT, hyperparams["initial_cash"], trial)
+    initial_cash = suggest_initial_cash(
+        PLAYER_COUNT, hyperparams["initial_cash"], trial
+    )
     hyperparams["initial_cash"] = initial_cash.suggestion
-    diffs.append((initial_cash.difference, 1))
+    diffs["initial_cash_diff"] = (initial_cash.difference, 1)
 
     # Integer hyperparameters
     for key, min_const, max_const in [
@@ -404,15 +458,28 @@ def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]
         ("narrow_track_cost", MIN_NARROW_TRACK_COST, MAX_NARROW_TRACK_COST),
         ("take_resource_cost", MIN_TAKE_RESOURCE_COST, MAX_TAKE_RESOURCE_COST),
         ("take_dividend", MIN_TAKE_DIVIDEND, MAX_TAKE_DIVIDEND),
-        ("take_town_deliver_dividend", MIN_TAKE_TOWN_DELIVER_DIVIDEND, MAX_TAKE_TOWN_DELIVER_DIVIDEND),
-        ("take_port_deliver_dividend", MIN_TAKE_PORT_DELIVER_DIVIDEND, MAX_TAKE_PORT_DELIVER_DIVIDEND),
+        (
+            "take_town_deliver_dividend",
+            MIN_TAKE_TOWN_DELIVER_DIVIDEND,
+            MAX_TAKE_TOWN_DELIVER_DIVIDEND,
+        ),
+        (
+            "take_port_deliver_dividend",
+            MIN_TAKE_PORT_DELIVER_DIVIDEND,
+            MAX_TAKE_PORT_DELIVER_DIVIDEND,
+        ),
     ]:
         original_value = hyperparams[key]
         suggested_value = trial.suggest_int(key, min_const, max_const)
         hyperparams[key] = suggested_value
-        diffs.append((calc_norm_diff(original_value, suggested_value, min_const, max_const), .5))
+        diffs[f"{key}_diff"] = (
+            calc_norm_diff(original_value, suggested_value, min_const, max_const),
+            0.5,
+        )
+    
+    diff_result, diff_weight = tee(diffs)
+    return ModifiedSuggestion(hyperparams, fmean(diff_result, diff_weight))
 
-    return ModifiedSuggestion(hyperparams, fmean(diffs))
 
 def most_trusted_hyperrewards(df: pd.DataFrame) -> pd.DataFrame:
     df["ratio"] = (df["turns"] - df["rwalk"]) / df["turns"]
@@ -432,7 +499,12 @@ def most_trusted_hyperrewards(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(df[df["norm_trust"] >= trust_mu + trust_sigma])
 
 
-def objective(trial: optuna.Trial, threads: Optional[int] = None, trials: Optional[int] = None, max_iterations: Optional[int] = None):
+def run_trial(
+    trial: optuna.Trial,
+    threads: Optional[int] = None,
+    trials: Optional[int] = None,
+    max_iterations: Optional[int] = None,
+):
     trials = trials or TRIALS
     max_iterations = max_iterations or MAX_ITERATIONS
     explore_iterations = max_iterations * (
@@ -446,7 +518,8 @@ def objective(trial: optuna.Trial, threads: Optional[int] = None, trials: Option
         mon2y.Games.EBR,
         int(explore_iterations),
         threads or min([CPU_COUNT, MAX_THREADS]),
-        suggested_hyperparams.suggestion)
+        suggested_hyperparams.suggestion,
+    )
     logging.info("Explore Done")
 
     df = pd.DataFrame(raw_results)
@@ -457,10 +530,28 @@ def objective(trial: optuna.Trial, threads: Optional[int] = None, trials: Option
     trusted = most_trusted_hyperrewards(df)
 
     # Scalars is separate so they can be stored without recalculating
-    goals_scalars = {goal_name: goal.scalarize(trusted) for goal_name, goal in GOALS.items()}
-    for goal_name, scalar in goals_scalars.items():
-        trial.set_user_attr(goal_name, scalar)
-    goals_loss = {goal_name: goal.loss(goals_scalars[goal_name]) for goal_name, goal in GOALS.items()}
+    goals_scalars = {
+        goal_name: goal.scalarize(trusted) for goal_name, goal in GOALS.items()
+    }
+    trial.set_user_attr("goal_scalars", goals_scalars)
+    goals_loss = {
+        goal_name: goal.loss(goals_scalars[goal_name])
+        for goal_name, goal in GOALS.items()
+    }
 
     return [suggested_hyperparams.difference * DIFF_WEIGHT] + list(goals_loss.values())
 
+
+def start_study():
+    objective = partial(run_trial, threads=4, trials=100, max_iterations=100)
+    study = optuna.create_study(
+        storage="sqlite:///db.sqlite3",  # Specify the storage URL here.
+        #study_name="min_ebr_test_1",
+        directions=["minimize"] * (1 + len(GOALS)),
+    )
+    study.optimize(objective, n_trials=100)
+    print(f"Best value: {study.best_value} (params: {study.best_params})")
+
+
+if __name__ == "__main__":
+    start_study()
