@@ -106,7 +106,7 @@ class Goal(NamedTuple):
     mean: float
     std_dev: float
     weight: float
-    scalarize: Callable[[pd.DataFrame], float]
+    scalarize: Callable[[pd.DataFrame, EbrHyperparams], float]
 
     def loss(self, result_mean: float) -> float:
         z = (self.mean - result_mean) / self.std_dev
@@ -117,7 +117,11 @@ DIFF_WEIGHT = 2
 
 GOALS: Dict[str, Goal] = {
     "Bankruptcy": Goal(
-        1 / 3, 1 / 6, 3, lambda df: len(df["end_game_reason"] == "Bankruptcy") / len(df)
+        1 / 3, 1 / 6, 3, lambda df, _: len(df["end_game_reason"] == "Bankruptcy") / len(df)
+    ),
+
+    "Bond Ratio Taken": Goal (
+        2 / 3, 2 / 3, 1, lambda df, hyper: df["total_bonds_issued"].mean() / len(hyper["bonds"])
     )
 }
 
@@ -226,7 +230,7 @@ def suggest_bonds(
     coupon = 0
     for i in range(bond_count):
         face = trial.suggest_int(
-            f"bond_face_{i}", face + MIN_BOND_FACE_STEP, face + MAX_BOND_FACE_STEP
+            f"bond_face_{i}", max(1, face + MIN_BOND_FACE_STEP), face + MAX_BOND_FACE_STEP
         )
         coupon = trial.suggest_int(
             f"bond_coupon_{i}",
@@ -533,7 +537,7 @@ def run_trial(
     # Scalars is separate so they can be stored without recalculating
     logging.info("Trusted entries %s", (len(trusted),))
     goals_scalars = {
-        goal_name: goal.scalarize(trusted) for goal_name, goal in GOALS.items()
+        goal_name: goal.scalarize(trusted, suggested_hyperparams.suggestion) for goal_name, goal in GOALS.items()
     }
     trial.set_user_attr("goal_scalars", goals_scalars)
     goals_loss = {
