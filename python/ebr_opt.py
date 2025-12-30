@@ -29,6 +29,9 @@ MAX_STOCK_AVAILABLE = 6
 MIN_TRACK_AVAILABLE = 1
 MAX_TRACK_AVAILABLE = 15
 
+MIN_INITIAL_CASH = 1
+MAX_INITIAL_CASH = 60
+
 T = TypeVar("T")
 
 class ModifiedSuggestion(Generic[T], NamedTuple):
@@ -205,6 +208,24 @@ def suggest_modified_company_fixed_detail(
         ),
     }
 
+def suggest_initial_cash (
+    players: int,
+    original: dict[str, int],
+    trial: optuna.Trial
+) -> ModifiedSuggestion[dict[str,int]]:
+    # Diff wise, we're only changing (and caring about) the one for the current
+    # amount of players.
+    original_cash = original[str(players)]
+    suggested_cash  = trial.suggest_int(f"initial_cash_{players}p", MIN_INITIAL_CASH, MAX_INITIAL_CASH)
+    modified = original.copy()
+    modified[str(players)] = suggested_cash
 
-def create_trial(trial):
-    pass
+    return ModifiedSuggestion(
+        modified,
+        calc_norm_diff(original_cash, suggested_cash, MIN_INITIAL_CASH, MAX_INITIAL_CASH)
+    )
+
+
+def suggest_for_trial(study: optuna.Study) -> dict:
+    default = mon2y.default_hyperparams[mon2y.Games.EBR]
+    jl
