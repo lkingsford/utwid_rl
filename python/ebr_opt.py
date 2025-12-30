@@ -504,10 +504,11 @@ def run_trial(
     threads: Optional[int] = None,
     trials: Optional[int] = None,
     max_iterations: Optional[int] = None,
+    force_iterations: Optional[int] = None
 ):
     trials = trials or TRIALS
     max_iterations = max_iterations or MAX_ITERATIONS
-    explore_iterations = max_iterations * (
+    explore_iterations = force_iterations or max_iterations * (
         1 - (math.log(max(1, trials - max(trial.number, 2))) / math.log(trials))
     )
     logging.info(f"Iterations: {explore_iterations}")
@@ -520,16 +521,17 @@ def run_trial(
         threads or min([CPU_COUNT, MAX_THREADS]),
         hyperparams = suggested_hyperparams.suggestion,
     )
-    logging.info("Explore Done")
+    logging.info("Explore Done - %s results", (len(raw_results),))
 
     df = pd.DataFrame(raw_results)
-    logging.info("Dataframe Converted")
+    logging.info("Dataframe Converted - %s items", (len(df),))
 
     # Currently using the top std-dev of trusted results for calculations
     # Desired improvement is to weight each result by trust instead
     trusted = most_trusted_hyperrewards(df)
 
     # Scalars is separate so they can be stored without recalculating
+    logging.info("Trusted entries %s", (len(trusted),))
     goals_scalars = {
         goal_name: goal.scalarize(trusted) for goal_name, goal in GOALS.items()
     }
@@ -543,7 +545,7 @@ def run_trial(
 
 
 def start_study():
-    objective = partial(run_trial, threads=4, trials=100, max_iterations=100)
+    objective = partial(run_trial, threads=4, trials=100, force_iterations=100)
     study = optuna.create_study(
         storage="sqlite:///db.sqlite3",  # Specify the storage URL here.
         #study_name="min_ebr_test_1",
