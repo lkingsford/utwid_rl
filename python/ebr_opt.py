@@ -32,6 +32,9 @@ MAX_TRACK_AVAILABLE = 15
 MIN_INITIAL_CASH = 1
 MAX_INITIAL_CASH = 60
 
+# Fixing player count, initially
+PLAYER_COUNT = 3
+
 T = TypeVar("T")
 
 class ModifiedSuggestion(Generic[T], NamedTuple):
@@ -176,8 +179,8 @@ CompanyFixedDetail = TypedDict(
 
 def suggest_modified_company_fixed_detail(
     company_id: str, company_detail: CompanyFixedDetail, trial: optuna.Trial
-) -> CompanyFixedDetail:
-    return {
+) -> ModifiedSuggestion[CompanyFixedDetail]:
+    suggestion: CompanyFixedDetail = {
         "private": company_detail["private"],
         "starting": company_detail["starting"],
         "initial_treasury": (
@@ -208,21 +211,60 @@ def suggest_modified_company_fixed_detail(
         ),
     }
 
-def suggest_initial_cash (
-    players: int,
-    original: dict[str, int],
-    trial: optuna.Trial
-) -> ModifiedSuggestion[dict[str,int]]:
+    diffs = []
+    if company_detail["private"]:
+        diffs.append(
+            calc_norm_diff(
+                company_detail["initial_treasury"],
+                suggestion["initial_treasury"],
+                MIN_PRIVATE_INITIAL_TREASURY,
+                MAX_PRIVATE_INITIAL_TREASURY,
+            )
+        )
+    diffs.append(
+        calc_norm_diff(
+            company_detail["initial_interest"],
+            suggestion["initial_interest"],
+            MIN_PRIVATE_INITIAL_COUPON,
+            MAX_PRIVATE_INITIAL_COUPON,
+        )
+    )
+    if not company_detail["private"]:
+        diffs.append(
+            calc_norm_diff(
+                company_detail["stock_available"],
+                suggestion["stock_available"],
+                MIN_STOCK_AVAILABLE,
+                MAX_STOCK_AVAILABLE,
+            )
+        )
+
+    diffs.append(
+        calc_norm_diff(
+            company_detail["track_available"],
+            suggestion["track_available"],
+            MIN_TRACK_AVAILABLE,
+            MAX_TRACK_AVAILABLE,
+        )
+    )
+    return ModifiedSuggestion(suggestion, fmean(diffs) if diffs else 0)
+
+
+def suggest_initial_cash(
+    players: int, original: dict[str, int], trial: optuna.Trial
+) -> ModifiedSuggestion[dict[str, int]]:
     # Diff wise, we're only changing (and caring about) the one for the current
     # amount of players.
     original_cash = original[str(players)]
-    suggested_cash  = trial.suggest_int(f"initial_cash_{players}p", MIN_INITIAL_CASH, MAX_INITIAL_CASH)
+    suggested_cash = trial.suggest_int(
+        f"initial_cash_{players}p", MIN_INITIAL_CASH, MAX_INITIAL_CASH
+    )
     modified = original.copy()
     modified[str(players)] = suggested_cash
 
     return ModifiedSuggestion(
         modified,
-        calc_norm_diff(original_cash, suggested_cash, MIN_INITIAL_CASH, MAX_INITIAL_CASH)
+        calc_norm_diff(original_cash, suggested_cash, MIN_INITIAL_CASH, MAX_INITIAL_CASH),
     )
 
 
@@ -247,10 +289,37 @@ class EbrHyperparams(TypedDict):
 
 def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]:
     hyperparams: EbrHyperparams = mon2y.default_hyperparams[mon2y.Games.EBR]
-    
+
+    diffs = []
+
     terrain_diff_sum = 0
     for terrain_type, terrain in hyperparams["terrain_attributes"].items():
         suggested = suggest_modified_terrain(terrain, terrain_type, trial)
         terrain_diff_sum += suggested.difference
-        hyperparams['terrain_attributes'][terrain_type] = suggested.suggestion
-    terrain_diff = terrain_diff_sum / len(hyperparams["terrain_attributes"])
+        hyperparams["terrain_attributes"][terrain_type] = suggested.suggestion
+    diffs.append((terrain_diff_sum / len(hyperparams["terrain_attributes"]), 1))
+
+    feature_diff_sum = 0
+    # A feature is a tuple of (coords, feature_details)
+    for i, (coords, feature) in enumerate(hyperparams["features"]):
+        suggested = suggest_modified_feature(feature, trial)
+        feature_diff_sum += suggested.difference
+        hyperparams["features"][i] = (coords, suggested.suggestion)
+    diffs.append((feature_diff_sum / len(hyperparams["features"]), 1))
+
+    company_diff_sum = 0
+    for company_id, details in hyperparams["company_fixed_details"].items():
+        suggested = suggest_modified_company_fixed_detail(company_id, details, trial)
+        company_diff_sum += suggested.difference
+        hyperparams["company_fixed_details"][company_id] = suggested.suggestion
+    diffs.append((company_diff_sum / len(hyperparams["company_fixed_details"])), 1)
+
+    suggested_bonds = suggest_bonds(hyperparams["bonds"], trial)
+    hyperparams["bonds"] = suggested_bonds.suggestion
+    diffs.append((suggested_bonds.difference, 1))
+
+    initial_cash = suggest_initial_cash(PLAYER_COUNT, hyperparams["initial_cash"], trial)
+    hyperparams["initial_cash"] = initial_cash.suggestion
+    diffs.append((initial_cash.difference, 1))
+
+    return ModifiedSuggestion(hyperparams, fmean(diffs))
