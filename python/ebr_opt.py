@@ -1,3 +1,4 @@
+from statistics import fmean
 from typing import List, TypedDict, NamedTuple, TypeVar, Generic
 
 import optuna
@@ -12,6 +13,7 @@ MAX_BUILD_COST = 20
 MIN_ADDITIONAL_COST = 0
 MAX_ADDITIONAL_COST = 20
 
+MIN_BOND_COUNT = 1
 MAX_BOND_COUNT = 50
 MIN_BOND_FACE_STEP = 0
 MAX_BOND_FACE_STEP = 10
@@ -29,11 +31,19 @@ MAX_TRACK_AVAILABLE = 15
 
 T = TypeVar("T")
 
-
 class ModifiedSuggestion(Generic[T], NamedTuple):
     suggestion: T
-    difference: float
+    """Suggested result"""
 
+    difference: float
+    """OK - difference here is really 'normalized value from 0-1' that I can use to try to use to tend towards the original values"""
+
+
+
+def calc_norm_diff(original, new, min, max) -> float:
+    max_diff = max(abs(original - min), abs(original - max))
+    return abs(original - new) / max_diff
+    
 
 def suggest_revenue(feature: str, trial: optuna.Trial) -> List[int]:
     # Revenue goes for two rounds each time
@@ -43,19 +53,26 @@ def suggest_revenue(feature: str, trial: optuna.Trial) -> List[int]:
         for _ in (0, 1)
     ]
 
+def diff_revenue(original: List[int], new: List[int]) -> float:
+    return fmean([calc_norm_diff(o, n, 0, MAX_REVENUE) for o, n in zip(original, new)])
 
 Terrain = TypedDict("Terrain", {"build_cost": int, "revenue": List[int]})
 
 
 def suggest_modified_terrain(
     terrain: Terrain, terrain_type: str, trial: optuna.Trial
-) -> Terrain:
-    return {
+) -> ModifiedSuggestion[Terrain]:
+    suggestion: Terrain = {
         "build_cost": trial.suggest_int(
             f"{terrain_type}_build_cost", MIN_BUILD_COST, MAX_BUILD_COST
         ),
         "revenue": suggest_revenue(terrain_type, trial),
     }
+
+    diff = (diff_revenue(terrain["revenue"], suggestion["revenue"]) + calc_norm_diff(terrain["build_cost"], suggestion["build_cost"], MIN_BUILD_COST, MAX_BUILD_COST))/2
+
+    return ModifiedSuggestion(suggestion, diff)
+    
 
 
 Feature = TypedDict(
@@ -69,24 +86,27 @@ Feature = TypedDict(
 )
 
 
-def suggest_modified_feature(feature: Feature, trial: optuna.Trial) -> Feature:
-    return {
+def suggest_modified_feature(feature: Feature, trial: optuna.Trial) -> ModifiedSuggestion[Feature]:
+    suggestion: Feature = {
         "feature_type": feature["feature_type"],
         "location_name": feature["location_name"],
         "revenue": suggest_revenue(feature["location_name"], trial),
         "additional_cost": trial.suggest_int(
-            f"{feature}_additional_cost", MIN_ADDITIONAL_COST, MAX_ADDITIONAL_COST
+            f"{feature["location_name"]}_additional_cost", MIN_ADDITIONAL_COST, MAX_ADDITIONAL_COST
         ),
     }
+    diff = (diff_revenue(feature["revenue"], suggestion["revenue"]) +
+            calc_norm_diff(feature["additional_cost"], suggestion["additional_cost"], MIN_ADDITIONAL_COST, MAX_ADDITIONAL_COST))/2
 
+    return ModifiedSuggestion(suggestion, diff)
 
 Bond = TypedDict("Bond", {"face_value": int, "coupon": int})
 
 
-def suggest_bonds(trial: optuna.Trial) -> List[Bond]:
-    bond_count = trial.suggest_int("bond_count", 1, 50)
+def suggest_bonds(original: List[Bond], trial: optuna.Trial) -> ModifiedSuggestion[List[Bond]]:
+    bond_count = trial.suggest_int("bond_count", MIN_BOND_COUNT, MAX_BOND_COUNT)
 
-    bonds: List[Bond] = []
+    suggested: List[Bond] = []
     face = 0
     coupon = 0
     for i in range(bond_count):
@@ -98,9 +118,44 @@ def suggest_bonds(trial: optuna.Trial) -> List[Bond]:
             coupon + MIN_BOND_COUPON_STEP,
             coupon + MAX_BOND_COUPON_STEP,
         )
-        bonds.append({"face_value": face, "coupon": coupon})
+        suggested.append({"face_value": face, "coupon": coupon})
 
-    return bonds
+    # Difference is a bit less clear (because amount of bonds might be different)
+    # So - we're a few values:
+    # - Bond count (weight: 1/3)
+    # - Difference in max of face (weight: 1/6)
+    # - Difference in min of face (weight: 1/6)
+    # - Difference in mean ratio between face/coupon (weight: 1/3)
+    count_diff = calc_norm_diff(len(original), bond_count, MIN_BOND_COUNT, MAX_BOND_COUNT)
+
+    max_face_diff = calc_norm_diff(
+            max([bond["face_value"] for bond in original]),
+            max([bond["face_value"] for bond in suggested]),
+            0,
+            # TBD if this is the wise thing to do -
+            # - but I need a way to make sure it's normalized to max of 1. This means the
+            # ratio is different depending on bond_count, but I hope that's OK anyway.
+            MAX_BOND_FACE_STEP * max(bond_count, len(original))
+    )
+
+    min_face_diff = calc_norm_diff(
+            min([bond["face_value"] for bond in original]),
+            min([bond["face_value"] for bond in suggested]),
+            0,
+            #... as above.
+            MIN_BOND_FACE_STEP * max(bond_count, len(original))
+    )
+
+    ratio_diff = calc_norm_diff(
+        fmean([bond["coupon"] / bond["face_value"] for bond in original]),
+        fmean([bond["coupon"] / bond["face_value"] for bond in suggested]),
+        0,
+        1
+    )
+
+    diff = count_diff * (1/3) + max_face_diff * (1/6) + min_face_diff * (1/6) + ratio_diff * (1/3)
+
+    return ModifiedSuggestion(suggested, diff)
 
 
 CompanyFixedDetail = TypedDict(
