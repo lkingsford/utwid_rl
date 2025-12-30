@@ -1,9 +1,34 @@
+import logging
+import math
+import os
 from statistics import fmean
-from typing import List, TypedDict, NamedTuple, TypeVar, Generic, Tuple
+from typing import Dict, List, TypedDict, NamedTuple, TypeVar, Generic, Tuple, Optional, Callable
 
+import numpy as np
 import optuna
+import pandas as pd
 
 import mon2y
+
+logging.basicConfig(
+    format='%(asctime)s %(levelname)s %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    level=logging.INFO
+)
+
+#####
+# Optimization related consts
+#####
+
+MAX_ITERATIONS = 100000
+TRIALS = 10000
+# Experimentation showed more than 12 threads has minimum benefit (probably) due to locking
+MAX_THREADS = 12 
+CPU_COUNT = os.cpu_count()
+
+#####
+# Rules related consts
+#####
 
 MAX_REVENUE = 50
 
@@ -32,10 +57,58 @@ MAX_TRACK_AVAILABLE = 15
 MIN_INITIAL_CASH = 1
 MAX_INITIAL_CASH = 60
 
+MIN_WATER_COST = 0
+MAX_WATER_COST = 40
+
+MIN_NARROW_GAUGE_INITIAL = 1
+MAX_NARROW_GAUGE_INITIAL = 40
+
+MIN_MAX_BUILDS = 1
+# Haw haw
+MAX_MAX_BUILDS = 20
+
+MIN_NARROW_TRACK_COST = 0
+MAX_NARROW_TRACK_COST = 20
+
+MIN_TAKE_RESOURCE_COST = 0
+MAX_TAKE_RESOURCE_COST = 20
+
+MIN_TAKE_DIVIDEND = 0
+MAX_TAKE_DIVIDEND = 10
+
+MIN_TAKE_TOWN_DELIVER_DIVIDEND = 0
+MAX_TAKE_TOWN_DELIVER_DIVIDEND = 10
+
+MIN_TAKE_PORT_DELIVER_DIVIDEND = 0
+MAX_TAKE_PORT_DELIVER_DIVIDEND = 10
+
 # Fixing player count, initially
 PLAYER_COUNT = 3
 
+
+#####
+# Optimization Goal Related Consts/Types
+#####
+
+
+class Goal(NamedTuple):
+    mean: float
+    std_dev: float
+    weight: float
+    scalarize: Callable[[pd.DataFrame], float]
+    def loss(self, result_mean: float) -> float:
+        z = (self.mean - result_mean) / self.std_dev
+        return (1.0 - math.exp(z * z / -2)) * self.weight
+
+DIFF_WEIGHT = 2
+
+GOALS: Dict[str, Goal] = {
+    "Bankruptcy": Goal(1/3, 1/6, 3, lambda df: len(df["end_game_reason"]=="Bankruptcy") / len(df))
+    
+    }
+
 T = TypeVar("T")
+
 
 class ModifiedSuggestion(Generic[T], NamedTuple):
     suggestion: T
@@ -322,4 +395,72 @@ def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]
     hyperparams["initial_cash"] = initial_cash.suggestion
     diffs.append((initial_cash.difference, 1))
 
+    # Integer hyperparameters
+    for key, min_const, max_const in [
+        ("water_1_cost", MIN_WATER_COST, MAX_WATER_COST),
+        ("water_2_cost", MIN_WATER_COST, MAX_WATER_COST),
+        ("narrow_gauge_initial", MIN_NARROW_GAUGE_INITIAL, MAX_NARROW_GAUGE_INITIAL),
+        ("max_builds", MIN_MAX_BUILDS, MAX_MAX_BUILDS),
+        ("narrow_track_cost", MIN_NARROW_TRACK_COST, MAX_NARROW_TRACK_COST),
+        ("take_resource_cost", MIN_TAKE_RESOURCE_COST, MAX_TAKE_RESOURCE_COST),
+        ("take_dividend", MIN_TAKE_DIVIDEND, MAX_TAKE_DIVIDEND),
+        ("take_town_deliver_dividend", MIN_TAKE_TOWN_DELIVER_DIVIDEND, MAX_TAKE_TOWN_DELIVER_DIVIDEND),
+        ("take_port_deliver_dividend", MIN_TAKE_PORT_DELIVER_DIVIDEND, MAX_TAKE_PORT_DELIVER_DIVIDEND),
+    ]:
+        original_value = hyperparams[key]
+        suggested_value = trial.suggest_int(key, min_const, max_const)
+        hyperparams[key] = suggested_value
+        diffs.append((calc_norm_diff(original_value, suggested_value, min_const, max_const), .5))
+
     return ModifiedSuggestion(hyperparams, fmean(diffs))
+
+def most_trusted_hyperrewards(df: pd.DataFrame) -> pd.DataFrame:
+    df["ratio"] = (df["turns"] - df["rwalk"]) / df["turns"]
+
+    s = df["sum_diff_est_reward"]
+    df["norm_sum_diff_est_reward"] = (s - s.min()) / (s.max() - s.min())
+
+    df["trust"] = df["ratio"] * df["norm_sum_diff_est_reward"]
+
+    t = df["trust"]
+    df["norm_trust"] = (t - t.min()) / (t.max() - t.min())
+
+    # Keep only top 1 std-dev of trust
+    trust_mu = df["norm_trust"].mean()
+    trust_sigma = df["norm_trust"].std()
+
+    return pd.DataFrame(df[df["norm_trust"] >= trust_mu + trust_sigma])
+
+
+def objective(trial: optuna.Trial, threads: Optional[int] = None, trials: Optional[int] = None, max_iterations: Optional[int] = None):
+    trials = trials or TRIALS
+    max_iterations = max_iterations or MAX_ITERATIONS
+    explore_iterations = max_iterations * (
+        1 - (math.log(max(1, trials - max(trial.number, 2))) / math.log(trials))
+    )
+    logging.info(f"Iterations: {explore_iterations}")
+
+    suggested_hyperparams = suggest_for_trial(trial)
+
+    raw_results = mon2y.explore(
+        mon2y.Games.EBR,
+        int(explore_iterations),
+        threads or min([CPU_COUNT, MAX_THREADS]),
+        suggested_hyperparams.suggestion)
+    logging.info("Explore Done")
+
+    df = pd.DataFrame(raw_results)
+    logging.info("Dataframe Converted")
+
+    # Currently using the top std-dev of trusted results for calculations
+    # Desired improvement is to weight each result by trust instead
+    trusted = most_trusted_hyperrewards(df)
+
+    # Scalars is separate so they can be stored without recalculating
+    goals_scalars = {goal_name: goal.scalarize(trusted) for goal_name, goal in GOALS.items()}
+    for goal_name, scalar in goals_scalars.items():
+        trial.set_user_attr(goal_name, scalar)
+    goals_loss = {goal_name: goal.loss(goals_scalars[goal_name]) for goal_name, goal in GOALS.items()}
+
+    return [suggested_hyperparams.difference * DIFF_WEIGHT] + list(goals_loss.values())
+
