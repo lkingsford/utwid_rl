@@ -31,8 +31,8 @@ logging.basicConfig(
 # Optimization related consts
 #####
 
-MAX_ITERATIONS = 100000
-MIN_ITERATIONS = 250
+MAX_ITERATIONS = 1000000
+MIN_ITERATIONS = 1000
 TRIALS = 10000
 # Experimentation showed more than 12 threads has minimum benefit (probably) due to locking
 MAX_THREADS = 12
@@ -103,7 +103,7 @@ PLAYER_COUNT = 3
 #####
 
 
-class Goal(NamedTuple):
+class GoalAspect(NamedTuple):
     mean: float
     std_dev: float
     weight: float
@@ -113,21 +113,74 @@ class Goal(NamedTuple):
         z = (self.mean - result_mean) / self.std_dev
         return (1.0 - math.exp(z * z / -2)) * self.weight
 
-
 DIFF_WEIGHT = 2
 
-GOALS: Dict[str, Goal] = {
-    "Bankruptcy": Goal(
-        1 / 3, 1 / 6, 3, lambda df, _: len(df["end_game_reason"] == "Bankruptcy") / len(df)
-    ),
-
-    "Bond Ratio Taken": Goal (
-        2 / 3, 2 / 3, 1, lambda df, hyper: df["total_bonds_issued"].mean() / len(hyper["bonds"])
-    ),
-
-    "If all dividends paid, TMLC or LW connected to Hobart and Launceston": Goal (
-        1 / 2, 1 / 3, 2, lambda df, _: len(df.query("(lw_connected_to_launceston and lw_connected_to_hobart) or (tmlc_connected_to_launceston and tmlc_connected_to_hobart)")) / len(df)
-    ),
+GOALS: Dict[str, Dict[str, GoalAspect]] = {
+    "Game End Reasons": {
+        "Bankruptcy": GoalAspect(
+            1 / 3,
+            1 / 6,
+            3,
+            lambda df, _: len(df["end_game_reason"] == "Bankruptcy") / len(df),
+        ),
+        "Dividends": GoalAspect(
+            1 / 3,
+            1 / 6,
+            1,
+            lambda df, _: len(df["end_game_reason"] == "Dividends") / len(df),
+        ),
+        "Shares": GoalAspect(
+            1 / 6,
+            1 / 6,
+            1,
+            lambda df, _: len(df["end_game_reason"] == "Shares") / len(df),
+        ),
+        "Bonds": GoalAspect(
+            1 / 5 / 3,
+            1 / 6,
+            1,
+            lambda df, _: len(df["end_game_reason"] == "Bonds") / len(df),
+        ),
+        "Track": GoalAspect(
+            1 / 5 / 3,
+            1 / 6,
+            1,
+            lambda df, _: len(df["end_game_reason"] == "Track") / len(df),
+        ),
+        "Resources": GoalAspect(
+            1 / 5 / 3,
+            1 / 6,
+            1,
+            lambda df, _: len(df["end_game_reason"] == "Resources") / len(df),
+        ),
+        "Stalemate": GoalAspect(
+            1 / 5 / 3,
+            1 / 6,
+            1,
+            lambda df, _: len(df["end_game_reason"] == "Stalemate") / len(df),
+        ),
+    },
+    "Utilization": {
+        "Bond Ratio Taken": GoalAspect(
+            2 / 3,
+            2 / 3,
+            1,
+            lambda df, hyper: df.query("completed_dividend_rounds == 6")["total_bonds_issued"].mean() / len(hyper["bonds"]),
+        ),
+    },
+    "Desired Map Shape": {
+        "If all dividends paid, TMLC or LW connected to Hobart and Launceston": GoalAspect (
+            1 / 2,
+            1 / 3,
+            2,
+            lambda df, _: len(
+                df.query(
+                    "completed_dividend_rounds == 6 and ((lw_connected_to_launceston and lw_connected_to_hobart) or (tmlc_connected_to_launceston and tmlc_connected_to_hobart))"
+                )
+            )
+            / max(0.1, len(df.query("completed_dividend_rounds == 6"))),
+        ),
+    },
 }
 
 T = TypeVar("T")
@@ -235,7 +288,9 @@ def suggest_bonds(
     coupon = 0
     for i in range(bond_count):
         face = trial.suggest_int(
-            f"bond_face_{i}", max(1, face + MIN_BOND_FACE_STEP), face + MAX_BOND_FACE_STEP
+            f"bond_face_{i}",
+            max(1, face + MIN_BOND_FACE_STEP),
+            face + MAX_BOND_FACE_STEP,
         )
         coupon = trial.suggest_int(
             f"bond_coupon_{i}",
@@ -484,7 +539,7 @@ def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]
             calc_norm_diff(original_value, suggested_value, min_const, max_const),
             0.5,
         )
-    
+
     diff_result = [diff[0] for diff in diffs.values()]
     diff_weight = [diff[1] for diff in diffs.values()]
     return ModifiedSuggestion(hyperparams, fmean(diff_result, diff_weight))
@@ -513,7 +568,7 @@ def run_trial(
     threads: Optional[int] = None,
     trials: Optional[int] = None,
     max_iterations: Optional[int] = None,
-    force_iterations: Optional[int] = None
+    force_iterations: Optional[int] = None,
 ):
     trials = trials or TRIALS
     max_iterations = max_iterations or MAX_ITERATIONS
@@ -529,7 +584,7 @@ def run_trial(
         mon2y.Games.EBR,
         int(explore_iterations),
         threads or min([CPU_COUNT, MAX_THREADS]),
-        hyperparams = suggested_hyperparams.suggestion,
+        hyperparams=suggested_hyperparams.suggestion,
     )
     logging.info("Explore Done - %s results", (len(raw_results),))
 
@@ -542,26 +597,35 @@ def run_trial(
 
     # Scalars is separate so they can be stored without recalculating
     logging.info("Trusted entries %s", (len(trusted),))
-    goals_scalars = {
-        goal_name: goal.scalarize(trusted, suggested_hyperparams.suggestion) for goal_name, goal in GOALS.items()
-    }
-    trial.set_user_attr("goal_scalars", goals_scalars)
-    goals_loss = {
-        goal_name: goal.loss(goals_scalars[goal_name])
-        for goal_name, goal in GOALS.items()
-    }
 
-    return [suggested_hyperparams.difference * DIFF_WEIGHT] + list(goals_loss.values())
+    losses = [suggested_hyperparams.difference * DIFF_WEIGHT]
+
+    for goal in GOALS.values():
+        goal_scalars = {
+            goal_name: goal.scalarize(trusted, suggested_hyperparams.suggestion)
+            for goal_name, goal in goal.items()
+        }
+        for goal_name, scalar in goal_scalars.items():
+            trial.set_user_attr(f"{goal_name}", scalar)
+        goals_loss = {
+            goal_name: goal.loss(goal_scalars[goal_name])
+            for goal_name, goal in goal.items()
+        }
+
+        losses.append(sum(goals_loss.values()))
+
+    return losses
 
 
 def start_study():
-    objective = partial(run_trial, threads=4, trials=100)
+    objective = partial(run_trial, force_iterations=1000)
     study = optuna.create_study(
         storage="sqlite:///db.sqlite3",  # Specify the storage URL here.
-        #study_name="min_ebr_test_1",
+        study_name="min_ebr_test_2",
         directions=["minimize"] * (1 + len(GOALS)),
+        load_if_exists=True,
     )
-    study.optimize(objective, n_trials=100)
+    study.optimize(objective, n_trials=20)
     print(f"Best value: {study.best_value} (params: {study.best_params})")
 
 
