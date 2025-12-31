@@ -181,6 +181,33 @@ GOALS: Dict[str, Dict[str, GoalAspect]] = {
             / max(0.1, len(df.query("completed_dividend_rounds == 6"))),
         ),
     },
+    "Bias" : {
+        "IPO EBRC Winner Bias": GoalAspect (
+            1 / 4,
+            1 / 2,
+            1,
+            lambda df, _: len( df.query( "ebrc_auction_winner == winning_player_id" )) / len(df)
+        ),
+        "IPO LW Winner Bias": GoalAspect (
+            1 / 4,
+            1 / 2,
+            1,
+            lambda df, _: len( df.query( "lw_auction_winner == winning_player_id" )) / len(df)
+        ),
+        "IPO TMLC Winner Bias": GoalAspect (
+            1 / 4,
+            1 / 2,
+            1,
+            lambda df, _: len( df.query( "tmlc_auction_winner == winning_player_id" )) / len(df)
+        ),
+        "IPO GT Winner Bias": GoalAspect (
+            1 / 4,
+            1 / 2,
+            1,
+            lambda df, _: len( df.query( "gt_auction_winner == winning_player_id" )) / len(df)
+        ),
+    
+    }
 }
 
 T = TypeVar("T")
@@ -618,15 +645,15 @@ def run_trial(
 
 
 def start_study():
-    objective = partial(run_trial, force_iterations=1000)
+    objective = partial(run_trial, force_iterations=10000)
     study = optuna.create_study(
         storage="sqlite:///db.sqlite3",  # Specify the storage URL here.
-        study_name="min_ebr_test_2",
+        study_name="min_ebr_test_3",
         directions=["minimize"] * (1 + len(GOALS)),
         load_if_exists=True,
     )
-    study.optimize(objective, n_trials=20)
-    print(f"Best value: {study.best_value} (params: {study.best_params})")
+    study.optimize(objective, n_trials=1000)
+    print(f"Best trials: {study.best_trials}")
 
 
 if __name__ == "__main__":

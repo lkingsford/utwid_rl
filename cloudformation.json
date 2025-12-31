@@ -1,0 +1,221 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "CloudFormation template to create a PostgreSQL RDS instance, an IAM user, and a fleet of spot EC2 instances to run a job.",
+  "Parameters": {
+    "DBPassword": {
+      "NoEcho": true,
+      "Type": "String",
+      "Description": "The database admin account password.",
+      "MinLength": "8"
+    },
+    "NumberOfInstances": {
+      "Type": "Number",
+      "Description": "Number of spot instances to launch.",
+      "Default": "1"
+    },
+    "PublicKey1": {
+      "Type": "String",
+      "Description": "Public key for the first key pair (e.g., LK-Macbook-1)."
+    },
+    "PublicKey2": {
+      "Type": "String",
+      "Description": "Public key for the second key pair (e.g., LK-Gigahorse)."
+    },
+    "LatestAmiId": {
+      "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
+      "Default": "/aws/service/ami-amazon-linux-latest/amzn2023-ami-kernel-default-x86_64"
+    }
+  },
+  "Resources": {
+    "RDSSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Allow access to RDS from EC2",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 5432,
+            "ToPort": 5432,
+            "SourceSecurityGroupId": { "Fn::GetAtt": ["EC2SecurityGroup", "GroupId"] }
+          }
+        ]
+      }
+    },
+    "EC2SecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Allow SSH and all outbound",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 22,
+            "ToPort": 22,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ]
+      }
+    },
+    "PostgresDBInstance": {
+      "Type": "AWS::RDS::DBInstance",
+      "Properties": {
+        "DBName": "optuna",
+        "MasterUsername": "optuna",
+        "MasterUserPassword": { "Ref": "DBPassword" },
+        "Engine": "postgres",
+        "DBInstanceClass": "db.t3.micro",
+        "AllocatedStorage": "20",
+        "IAMDatabaseAuthenticationEnabled": true,
+        "PubliclyAccessible": true,
+        "VPCSecurityGroups": [ { "Ref": "RDSSecurityGroup" } ]
+      }
+    },
+    "OptunaUser": {
+      "Type": "AWS::IAM::User",
+      "Properties": {
+        "UserName": "optuna-iam-user"
+      }
+    },
+    "OptunaUserPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyName": "OptunaRDSS3Access",
+        "Users": [ { "Ref": "OptunaUser" } ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": "rds-db:connect",
+              "Resource": { "Fn::Sub": "arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:${PostgresDBInstance}/optuna" }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "s3:PutObject",
+              "Resource": "arn:aws:s3:::mon2y/job.zst"
+            }
+          ]
+        }
+      }
+    },
+    "EC2InstanceRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [ { 
+            "Effect": "Allow",
+            "Principal": { "Service": [ "ec2.amazonaws.com" ] },
+            "Action": [ "sts:AssumeRole" ]
+          } ]
+        },
+        "Path": "/"
+      }
+    },
+    "EC2InstancePolicy": {
+        "Type": "AWS::IAM::Policy",
+        "Properties": {
+            "PolicyName": "EC2Policy",
+            "Roles": [{"Ref": "EC2InstanceRole"}],
+            "PolicyDocument": {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": "rds-db:connect",
+                        "Resource": { "Fn::Sub": "arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:${PostgresDBInstance}/optuna" }
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": "s3:GetObject",
+                        "Resource": "arn:aws:s3:::mon2y/job.zst"
+                    }
+                ]
+            }
+        }
+    },
+    "EC2InstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Path": "/",
+        "Roles": [ { "Ref": "EC2InstanceRole" } ]
+      }
+    },
+    "LaunchTemplate": {
+        "Type": "AWS::EC2::LaunchTemplate",
+        "Properties": {
+            "LaunchTemplateName": "Mon2yLaunchTemplate",
+            "LaunchTemplateData": {
+                "ImageId": { "Ref": "LatestAmiId" },
+                "InstanceType": "c8a.16xlarge",
+                "IamInstanceProfile": { "Arn": { "Fn::GetAtt": ["EC2InstanceProfile", "Arn"] } },
+                "SecurityGroupIds": [ { "Ref": "EC2SecurityGroup" } ],
+                "UserData": { "Fn::Base64": { "Fn::Join": ["", [
+                    "#!/bin/bash\n",
+                    "exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1\n",
+                    "set -ex\n",
+                    "mkdir -p /root/.ssh\n",
+                    "chmod 700 /root/.ssh\n",
+                    "touch /root/.ssh/authorized_keys\n",
+                    "chmod 600 /root/.ssh/authorized_keys\n",
+                    "echo '", { "Ref": "PublicKey1" }, "' >> /root/.ssh/authorized_keys\n",
+                    "echo '", { "Ref": "PublicKey2" }, "' >> /root/.ssh/authorized_keys\n",
+                    "export DB_HOST=", { "Fn::GetAtt": [ "PostgresDBInstance", "Endpoint.Address" ] }, " \n",
+                    "export DB_PORT=", { "Fn::GetAtt": [ "PostgresDBInstance", "Endpoint.Port" ] }, "\n",
+                    "export DB_NAME=optuna\n",
+                    "export DB_USER=optuna\n",
+                    "dnf install -y git gcc openssl-devel bzip2-devel libffi-devel zlib-devel wget tar make gzip xz-devel zstd unzip shadow-utils\n",
+                    "git clone https://github.com/pyenv/pyenv.git /usr/local/pyenv\n",
+                    "export PYENV_ROOT=/usr/local/pyenv\n",
+                    "export PATH=$PYENV_ROOT/bin:$PATH\n",
+                    "pyenv install 3.14.0-alpha.2\n",
+                    "pyenv global 3.14.0-alpha.2\n",
+                    "pip install --upgrade pip\n",
+                    "curl 'https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip' -o 'awscliv2.zip'\n",
+                    "unzip awscliv2.zip\n",
+                    "./aws/install\n",
+                    "rm -rf awscliv2.zip aws\n",
+                    "cd /root\n",
+                    "aws s3 cp s3://mon2y/job.zst .\n",
+                    "unzstd -c job.zst | tar -xvf -\n",
+                    "python job.py\n"
+                ] ] } } 
+            }
+        }
+    },
+    "AutoScalingGroup": {
+        "Type": "AWS::AutoScaling::AutoScalingGroup",
+        "Properties": {
+            "DesiredCapacity": { "Ref": "NumberOfInstances" },
+            "MinSize": "0",
+            "MaxSize": { "Ref": "NumberOfInstances" },
+            "MixedInstancesPolicy": {
+                "LaunchTemplate": {
+                    "LaunchTemplateSpecification": {
+                        "LaunchTemplateId": { "Ref": "LaunchTemplate" },
+                        "Version": { "Fn::GetAtt": [ "LaunchTemplate", "LatestVersionNumber" ] }
+                    }
+                },
+                "InstancesDistribution": {
+                    "OnDemandBaseCapacity": 0,
+                    "OnDemandPercentageAboveBaseCapacity": 0,
+                    "SpotAllocationStrategy": "price-capacity-optimized"
+                }
+            }
+        }
+    }
+  },
+  "Outputs": {
+    "DBEndpoint": {
+      "Description": "The connection endpoint for the database",
+      "Value": { "Fn::GetAtt": [ "PostgresDBInstance", "Endpoint.Address" ] }
+    },
+    "DBPort": {
+        "Description": "The port for the database",
+        "Value": { "Fn::GetAtt": [ "PostgresDBInstance", "Endpoint.Port" ] }
+    },
+    "IAMUser": {
+        "Description": "The IAM user created",
+        "Value": { "Ref": "OptunaUser" }
+    }
+  }
+}

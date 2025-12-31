@@ -138,7 +138,7 @@ fn get_hyperreward_meta(py: Python, game: Games) -> PyResult<Py<PyAny>> {
         Games::C4 => hyper::Hyperrewards::<games::c4::C4Hyperrewards>::py_meta(py),
         Games::NT => hyper::Hyperrewards::<()>::py_meta(py),
         Games::CS => hyper::Hyperrewards::<()>::py_meta(py),
-        Games::EBR => hyper::Hyperrewards::<()>::py_meta(py),
+        Games::EBR => hyper::Hyperrewards::<games::ebr::EBRHyperrewards>::py_meta(py),
     }
 }
 
