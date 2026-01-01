@@ -36,8 +36,8 @@ MAX_ITERATIONS = 1_000_000
 MIN_ITERATIONS = 10_000
 TRIALS = 10000
 # Experimentation showed more than 12 threads has minimum benefit (probably) due to locking
-MAX_THREADS = 12
-CPU_COUNT = os.cpu_count()
+MAX_THREADS = 4
+CPU_COUNT = os.cpu_count() or 8
 
 #####
 # Rules related consts
@@ -114,7 +114,8 @@ class GoalAspect(NamedTuple):
         z = (self.mean - result_mean) / self.std_dev
         return (1.0 - math.exp(z * z / -2)) * self.weight
 
-DIFF_WEIGHT = 2
+
+DIFF_WEIGHT = 10
 
 GOALS: Dict[str, Dict[str, GoalAspect]] = {
     "Game End Reasons": {
@@ -166,11 +167,14 @@ GOALS: Dict[str, Dict[str, GoalAspect]] = {
             2 / 3,
             2 / 3,
             1,
-            lambda df, hyper: df.query("completed_dividend_rounds == 6")["total_bonds_issued"].mean() / len(hyper["bonds"]),
+            lambda df, hyper: df.query("completed_dividend_rounds == 6")[
+                "total_bonds_issued"
+            ].mean()
+            / len(hyper["bonds"]),
         ),
     },
     "Desired Map Shape": {
-        "If all dividends paid, TMLC or LW connected to Hobart and Launceston": GoalAspect (
+        "If all dividends paid, TMLC or LW connected to Hobart and Launceston": GoalAspect(
             1 / 2,
             1 / 3,
             2,
@@ -182,33 +186,36 @@ GOALS: Dict[str, Dict[str, GoalAspect]] = {
             / max(0.1, len(df.query("completed_dividend_rounds == 6"))),
         ),
     },
-    "Bias" : {
-        "IPO EBRC Winner Bias": GoalAspect (
+    "Bias": {
+        "IPO EBRC Winner Bias": GoalAspect(
             1 / 4,
             1 / 2,
             1,
-            lambda df, _: len( df.query( "ebrc_auction_winner == winning_player_id" )) / len(df)
+            lambda df, _: len(df.query("ebrc_auction_winner == winning_player_id"))
+            / len(df),
         ),
-        "IPO LW Winner Bias": GoalAspect (
+        "IPO LW Winner Bias": GoalAspect(
             1 / 4,
             1 / 2,
             1,
-            lambda df, _: len( df.query( "lw_auction_winner == winning_player_id" )) / len(df)
+            lambda df, _: len(df.query("lw_auction_winner == winning_player_id"))
+            / len(df),
         ),
-        "IPO TMLC Winner Bias": GoalAspect (
+        "IPO TMLC Winner Bias": GoalAspect(
             1 / 4,
             1 / 2,
             1,
-            lambda df, _: len( df.query( "tmlc_auction_winner == winning_player_id" )) / len(df)
+            lambda df, _: len(df.query("tmlc_auction_winner == winning_player_id"))
+            / len(df),
         ),
-        "IPO GT Winner Bias": GoalAspect (
+        "IPO GT Winner Bias": GoalAspect(
             1 / 4,
             1 / 2,
             1,
-            lambda df, _: len( df.query( "gt_auction_winner == winning_player_id" )) / len(df)
+            lambda df, _: len(df.query("gt_auction_winner == winning_player_id"))
+            / len(df),
         ),
-    
-    }
+    },
 }
 
 T = TypeVar("T")
@@ -400,10 +407,14 @@ def suggest_modified_company_fixed_detail(
             if company_detail["private"]
             else 0
         ),
-        "initial_interest": trial.suggest_int(
-            f"{company_id}_initial_interest",
-            MIN_PRIVATE_INITIAL_COUPON,
-            MAX_PRIVATE_INITIAL_COUPON,
+        "initial_interest": (
+            trial.suggest_int(
+                f"{company_id}_initial_interest",
+                MIN_PRIVATE_INITIAL_COUPON,
+                MAX_PRIVATE_INITIAL_COUPON,
+            )
+            if company_detail["private"]
+            else 0
         ),
         "stock_available": (
             1
@@ -504,6 +515,8 @@ def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]
 
     terrain_diff_sum = 0
     for terrain_type, terrain in hyperparams["terrain_attributes"].items():
+        if terrain_type == "nothing":
+            continue
         suggested = suggest_modified_terrain(terrain, terrain_type, trial)
         terrain_diff_sum += suggested.difference
         hyperparams["terrain_attributes"][terrain_type] = suggested.suggestion
@@ -597,6 +610,7 @@ def run_trial(
     trials: Optional[int] = None,
     max_iterations: Optional[int] = None,
     force_iterations: Optional[int] = None,
+    single: bool = False,
 ):
     trials = trials or TRIALS
     max_iterations = max_iterations or MAX_ITERATIONS
@@ -643,10 +657,10 @@ def run_trial(
 
         losses.append(sum(goals_loss.values()))
 
-    return losses
+    return losses if not single else (sum(losses))
 
 
-def start_study(_):
+def start_multi_study(_):
     objective = partial(run_trial, threads=4)
     study = optuna.create_study(
         storage="sqlite:///db.sqlite3",  # Specify the storage URL here.
@@ -658,8 +672,18 @@ def start_study(_):
     print(f"Best trials: {study.best_trials}")
 
 
-if __name__ == "__main__":
-    
-    with Pool(processes=4) as pool:
-        pool.map(start_study, range(4))
+def start_single_study(_):
+    objective = partial(run_trial, threads=4, single=True)
+    study = optuna.create_study(
+        storage="sqlite:///db.sqlite3",  # Specify the storage URL here.
+        study_name="ebr_study_3",
+        load_if_exists=True,
+    )
+    study.optimize(objective, n_trials=2000)
+    print(f"Best trials: {study.best_trials}")
 
+
+if __name__ == "__main__":
+    processes = CPU_COUNT
+    with Pool(processes=processes) as pool:
+        pool.map(start_single_study, range(processes))
