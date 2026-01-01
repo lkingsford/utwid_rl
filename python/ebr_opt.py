@@ -1,4 +1,5 @@
 from functools import partial
+from multiprocessing import Pool
 import logging
 import math
 import os
@@ -31,8 +32,8 @@ logging.basicConfig(
 # Optimization related consts
 #####
 
-MAX_ITERATIONS = 1000000
-MIN_ITERATIONS = 1000
+MAX_ITERATIONS = 1_000_000
+MIN_ITERATIONS = 10_000
 TRIALS = 10000
 # Experimentation showed more than 12 threads has minimum benefit (probably) due to locking
 MAX_THREADS = 12
@@ -121,43 +122,43 @@ GOALS: Dict[str, Dict[str, GoalAspect]] = {
             1 / 3,
             1 / 6,
             3,
-            lambda df, _: len(df["end_game_reason"] == "Bankruptcy") / len(df),
+            lambda df, _: (df["end_game_reason"] == "Bankruptcy").sum() / len(df),
         ),
         "Dividends": GoalAspect(
             1 / 3,
             1 / 6,
             1,
-            lambda df, _: len(df["end_game_reason"] == "Dividends") / len(df),
+            lambda df, _: (df["end_game_reason"] == "Dividends").sum() / len(df),
         ),
         "Shares": GoalAspect(
             1 / 6,
             1 / 6,
             1,
-            lambda df, _: len(df["end_game_reason"] == "Shares") / len(df),
+            lambda df, _: (df["end_game_reason"] == "Shares").sum() / len(df),
         ),
         "Bonds": GoalAspect(
             1 / 5 / 3,
             1 / 6,
             1,
-            lambda df, _: len(df["end_game_reason"] == "Bonds") / len(df),
+            lambda df, _: (df["end_game_reason"] == "Bonds").sum() / len(df),
         ),
         "Track": GoalAspect(
             1 / 5 / 3,
             1 / 6,
             1,
-            lambda df, _: len(df["end_game_reason"] == "Track") / len(df),
+            lambda df, _: (df["end_game_reason"] == "Track").sum() / len(df),
         ),
         "Resources": GoalAspect(
             1 / 5 / 3,
             1 / 6,
             1,
-            lambda df, _: len(df["end_game_reason"] == "Resources") / len(df),
+            lambda df, _: (df["end_game_reason"] == "Resources").sum() / len(df),
         ),
         "Stalemate": GoalAspect(
             1 / 5 / 3,
             1 / 6,
             1,
-            lambda df, _: len(df["end_game_reason"] == "Stalemate") / len(df),
+            lambda df, _: (df["end_game_reason"] == "Stalemate").sum() / len(df),
         ),
     },
     "Utilization": {
@@ -614,6 +615,7 @@ def run_trial(
         hyperparams=suggested_hyperparams.suggestion,
     )
     logging.info("Explore Done - %s results", (len(raw_results),))
+    trial.set_user_attr(f"iterations", len(raw_results))
 
     df = pd.DataFrame(raw_results)
     logging.info("Dataframe Converted - %s items", (len(df),))
@@ -644,11 +646,11 @@ def run_trial(
     return losses
 
 
-def start_study():
-    objective = partial(run_trial, force_iterations=10000)
+def start_study(_):
+    objective = partial(run_trial, threads=4)
     study = optuna.create_study(
         storage="sqlite:///db.sqlite3",  # Specify the storage URL here.
-        study_name="min_ebr_test_3",
+        study_name="ebr_study_1_a",
         directions=["minimize"] * (1 + len(GOALS)),
         load_if_exists=True,
     )
@@ -657,4 +659,7 @@ def start_study():
 
 
 if __name__ == "__main__":
-    start_study()
+    
+    with Pool(processes=4) as pool:
+        pool.map(start_study, range(4))
+
