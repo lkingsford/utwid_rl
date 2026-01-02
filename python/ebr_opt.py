@@ -96,8 +96,6 @@ MAX_TAKE_TOWN_DELIVER_DIVIDEND = 10
 MIN_TAKE_PORT_DELIVER_DIVIDEND = 0
 MAX_TAKE_PORT_DELIVER_DIVIDEND = 10
 
-# Fixing player count, initially
-PLAYER_COUNT = 3
 
 
 #####
@@ -173,6 +171,16 @@ GOALS: Dict[str, Dict[str, GoalAspect]] = {
                 "total_bonds_issued"
             ].mean()
             / len(hyper["bonds"]),
+        ),
+        "Resources Remaining": GoalAspect(
+            2,
+            1,
+            1,
+            lambda df, _: (
+                subset["remaining_resource_cubes"].median()
+                if not (subset := df.query("completed_dividend_rounds == 6")).empty
+                else 0.0
+            ),
         ),
     },
     "Desired Map Shape": {
@@ -668,7 +676,7 @@ SMALL_LOSS_NORMALIZATION_FACTOR = 31.0
 
 
 def suggest_for_trial(
-    trial: optuna.Trial, use_defaults: bool = False
+    trial: optuna.Trial, use_defaults: bool = False, player_count: int = 3
 ) -> ModifiedSuggestion[EbrHyperparams]:
     hyperparams: EbrHyperparams = mon2y.default_hyperparams(mon2y.Games.EBR)
     s_int = partial(suggest_fixed, trial) if use_defaults else trial.suggest_int
@@ -731,7 +739,7 @@ def suggest_for_trial(
     small_losses.append(suggested_bonds.small_loss)
 
     initial_cash = suggest_initial_cash(
-        PLAYER_COUNT, hyperparams["initial_cash"], trial, use_defaults
+        player_count, hyperparams["initial_cash"], trial, use_defaults
     )
     hyperparams["initial_cash"] = initial_cash.suggestion
     diffs["initial_cash_diff"] = (initial_cash.difference, 1)
@@ -809,6 +817,7 @@ def run_trial(
     force_iterations: Optional[int] = None,
     single: bool = False,
     use_defaults: bool = False,
+    player_count: int = 3,
 ):
     trials = trials or TRIALS
     max_iterations = max_iterations or MAX_ITERATIONS
@@ -818,13 +827,16 @@ def run_trial(
     explore_iterations = max(explore_iterations, MIN_ITERATIONS)
     logging.info(f"Iterations: {explore_iterations}")
 
-    suggested_hyperparams = suggest_for_trial(trial, use_defaults=use_defaults)
+    suggested_hyperparams = suggest_for_trial(
+        trial, use_defaults=use_defaults, player_count=player_count
+    )
 
     raw_results = mon2y.explore(
         mon2y.Games.EBR,
         int(explore_iterations),
         threads or min([CPU_COUNT, MAX_THREADS]),
         hyperparams=suggested_hyperparams.suggestion,
+        player_count=player_count,
     )
     logging.info("Explore Done - %s results", (len(raw_results),))
     trial.set_user_attr(f"iterations", len(raw_results))
@@ -871,6 +883,7 @@ def start_study(
     threads: int,
     single: bool,
     include_first: bool,
+    player_count: int,
 ):
     """Start a study, potentially running the first trial with defaults."""
     if include_first and worker_idx == 0:
@@ -881,6 +894,7 @@ def start_study(
             single=single,
             trials=n_trials,
             use_defaults=True,
+            player_count=player_count,
         )
         if single:
             study = optuna.create_study(
@@ -903,7 +917,12 @@ def start_study(
 
     # All workers run the main optimization loop
     objective = partial(
-        run_trial, threads=threads, single=single, trials=n_trials, use_defaults=False
+        run_trial,
+        threads=threads,
+        single=single,
+        trials=n_trials,
+        use_defaults=False,
+        player_count=player_count,
     )
     if single:
         study = optuna.create_study(
@@ -953,6 +972,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Include a first trial with default settings.",
     )
+    parser.add_argument(
+        "--player-count",
+        type=int,
+        default=3,
+        help="Number of players in the game.",
+    )
 
     args = parser.parse_args()
 
@@ -966,6 +991,7 @@ if __name__ == "__main__":
         threads=args.threads,
         single=args.single_study,
         include_first=args.include_first,
+        player_count=args.player_count,
     )
 
     with Pool(processes=args.processes) as pool:
