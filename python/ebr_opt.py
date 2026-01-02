@@ -882,26 +882,43 @@ def start_study(
             trials=n_trials,
             use_defaults=True,
         )
-        study = optuna.create_study(
-            storage=storage,
-            study_name=study_name,
-            directions=["minimize"] * (1 + len(GOALS)) if not single else "minimize",
-            load_if_exists=True,
-        )
+        if single:
+            study = optuna.create_study(
+                storage=storage,
+                study_name=study_name,
+                direction="minimize",
+                load_if_exists=True,
+            )
+        else:
+            study = optuna.create_study(
+                storage=storage,
+                study_name=study_name,
+                directions=["minimize"] * (1 + len(GOALS)),
+                load_if_exists=True,
+            )
         # Only run if no trials exist
         if len(study.get_trials(deepcopy=False)) == 0:
             study.optimize(default_objective, n_trials=1)
+        logging.info("Default trial complete")
 
     # All workers run the main optimization loop
     objective = partial(
         run_trial, threads=threads, single=single, trials=n_trials, use_defaults=False
     )
-    study = optuna.create_study(
-        storage=storage,
-        study_name=study_name,
-        directions=["minimize"] * (1 + len(GOALS)) if not single else "minimize",
-        load_if_exists=True,
-    )
+    if single:
+        study = optuna.create_study(
+            storage=storage,
+            study_name=study_name,
+            direction="minimize",
+            load_if_exists=True,
+        )
+    else:
+        study = optuna.create_study(
+            storage=storage,
+            study_name=study_name,
+            directions=["minimize"] * (1 + len(GOALS)),
+            load_if_exists=True,
+        )
     study.optimize(objective, n_trials=n_trials)
 
 
