@@ -116,6 +116,7 @@ class GoalAspect(NamedTuple):
 
 
 DIFF_WEIGHT = 10
+SMALL_LOSS_WEIGHT = 10
 
 GOALS: Dict[str, Dict[str, GoalAspect]] = {
     "Game End Reasons": {
@@ -721,7 +722,9 @@ def run_trial(
     # Scalars is separate so they can be stored without recalculating
     logging.info("Trusted entries %s", (len(trusted),))
 
-    losses = [suggested_hyperparams.difference * DIFF_WEIGHT]
+    losses = [suggested_hyperparams.difference * DIFF_WEIGHT, suggested_hyperparams.small_loss * SMALL_LOSS_WEIGHT]
+    trial.set_user_attr(f"diff_loss", suggested_hyperparams.difference)
+    trial.set_user_attr(f"small_loss", suggested_hyperparams.small_loss)
 
     for goal in GOALS.values():
         goal_scalars = {
@@ -744,7 +747,7 @@ def start_multi_study(_):
     objective = partial(run_trial, threads=4)
     study = optuna.create_study(
         storage="sqlite:///db.sqlite3",  # Specify the storage URL here.
-        study_name="ebr_study_1_a",
+        study_name="ebr_study_4_multi",
         directions=["minimize"] * (1 + len(GOALS)),
         load_if_exists=True,
     )
@@ -756,7 +759,7 @@ def start_single_study(_):
     objective = partial(run_trial, threads=4, single=True)
     study = optuna.create_study(
         storage="sqlite:///db.sqlite3",  # Specify the storage URL here.
-        study_name="ebr_study_3",
+        study_name="ebr_study_4",
         load_if_exists=True,
     )
     study.optimize(objective, n_trials=2000)
@@ -766,4 +769,4 @@ def start_single_study(_):
 if __name__ == "__main__":
     processes = CPU_COUNT
     with Pool(processes=processes) as pool:
-        pool.map(start_single_study, range(processes))
+        pool.map(start_multi_study, range(processes))
