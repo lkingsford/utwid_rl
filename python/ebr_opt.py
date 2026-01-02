@@ -228,10 +228,24 @@ class ModifiedSuggestion(Generic[T], NamedTuple):
     difference: float
     """OK - difference here is really 'normalized value from 0-1' that I can use to try to use to tend towards the original values"""
 
+    small_loss: float
+    """Bias towards smaller numbers"""
+
 
 def calc_norm_diff(original, new, min_expected, max_expected) -> float:
     max_diff = max(abs(original - min_expected), abs(original - max_expected))
     return abs(original - new) / max_diff
+
+
+def bias_small_loss(val: float) -> float:
+    """
+    Calculates a loss that biases towards smaller numbers.
+    log10(max(1, val)) - 1
+    - val=1 -> -1
+    - val=10 -> 0
+    - val=100 -> 1
+    """
+    return math.log10(max(1, val)) - 1.0
 
 
 def suggest_revenue(feature: str, trial: optuna.Trial) -> List[int]:
@@ -270,7 +284,13 @@ def suggest_modified_terrain(
         )
     ) / 2
 
-    return ModifiedSuggestion(suggestion, diff)
+    weight = 1.0 if terrain_type == "plain" else 0.5
+    small_loss = (
+        bias_small_loss(fmean(suggestion["revenue"]))
+        + bias_small_loss(suggestion["build_cost"])
+    ) * weight
+
+    return ModifiedSuggestion(suggestion, diff, small_loss)
 
 
 Feature = TypedDict(
@@ -307,7 +327,20 @@ def suggest_modified_feature(
         )
     ) / 2
 
-    return ModifiedSuggestion(suggestion, diff)
+    feature_type = feature["feature_type"]
+    if feature_type == "town":
+        weight = 1.0
+    elif feature_type == "port":
+        weight = 0.75
+    else:
+        weight = 0.5
+
+    small_loss = (
+        bias_small_loss(fmean(suggestion["revenue"]))
+        + bias_small_loss(suggestion["additional_cost"])
+    ) * weight
+
+    return ModifiedSuggestion(suggestion, diff, small_loss)
 
 
 Bond = TypedDict("Bond", {"face_value": int, "coupon": int})
@@ -346,7 +379,7 @@ def suggest_bonds(
 
     max_face_diff = calc_norm_diff(
         max([bond["face_value"] for bond in original]),
-        max([bond["face_value"] for bond in suggested]),
+        max([bond["face_value"] for bond in suggested]) if suggested else 0,
         0,
         # TBD if this is the wise thing to do -
         # - but I need a way to make sure it's normalized to max of 1. This means the
@@ -356,7 +389,7 @@ def suggest_bonds(
 
     min_face_diff = calc_norm_diff(
         min([bond["face_value"] for bond in original]),
-        min([bond["face_value"] for bond in suggested]),
+        min([bond["face_value"] for bond in suggested]) if suggested else 0,
         0,
         # ... as above.
         MIN_BOND_FACE_STEP * max(bond_count, len(original)),
@@ -364,7 +397,9 @@ def suggest_bonds(
 
     ratio_diff = calc_norm_diff(
         fmean([bond["coupon"] / bond["face_value"] for bond in original]),
-        fmean([bond["coupon"] / bond["face_value"] for bond in suggested]),
+        fmean([bond["coupon"] / bond["face_value"] for bond in suggested])
+        if suggested
+        else 0,
         0,
         1,
     )
@@ -376,7 +411,14 @@ def suggest_bonds(
         + ratio_diff * (1 / 3)
     )
 
-    return ModifiedSuggestion(suggested, diff)
+    if not suggested:
+        small_loss = 0
+    else:
+        avg_face = fmean([b["face_value"] for b in suggested])
+        avg_coupon = fmean([b["coupon"] for b in suggested])
+        small_loss = bias_small_loss(avg_face) + bias_small_loss(avg_coupon * 3)
+
+    return ModifiedSuggestion(suggested, diff, small_loss)
 
 
 CompanyFixedDetail = TypedDict(
@@ -466,7 +508,16 @@ def suggest_modified_company_fixed_detail(
             MAX_TRACK_AVAILABLE,
         )
     )
-    return ModifiedSuggestion(suggestion, fmean(diffs) if diffs else 0)
+    diff = fmean(diffs) if diffs else 0
+
+    small_loss = bias_small_loss(suggestion["track_available"])
+    if suggestion["private"]:
+        small_loss += bias_small_loss(suggestion["initial_interest"] * 2)
+        small_loss += bias_small_loss(suggestion["initial_treasury"])
+    else:
+        small_loss += bias_small_loss(suggestion["stock_available"])
+
+    return ModifiedSuggestion(suggestion, diff, small_loss)
 
 
 def suggest_initial_cash(
@@ -481,12 +532,12 @@ def suggest_initial_cash(
     modified = original.copy()
     modified[str(players)] = suggested_cash
 
-    return ModifiedSuggestion(
-        modified,
-        calc_norm_diff(
-            original_cash, suggested_cash, MIN_INITIAL_CASH, MAX_INITIAL_CASH
-        ),
+    diff = calc_norm_diff(
+        original_cash, suggested_cash, MIN_INITIAL_CASH, MAX_INITIAL_CASH
     )
+    small_loss = bias_small_loss(suggested_cash) * 4
+
+    return ModifiedSuggestion(modified, diff, small_loss)
 
 
 class EbrHyperparams(TypedDict):
@@ -508,10 +559,17 @@ class EbrHyperparams(TypedDict):
     initial_resource_cubes: List[List[int]]
 
 
+# Small loss is a bias towards smaller numbers.
+# If each component of small loss is 1 (which means the value is 100), the total would be 31.
+# See gemini_investigation.py for details
+SMALL_LOSS_NORMALIZATION_FACTOR = 31.0
+
+
 def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]:
     hyperparams: EbrHyperparams = mon2y.default_hyperparams(mon2y.Games.EBR)
 
     diffs = {}
+    small_losses = []
 
     terrain_diff_sum = 0
     for terrain_type, terrain in hyperparams["terrain_attributes"].items():
@@ -520,6 +578,7 @@ def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]
         suggested = suggest_modified_terrain(terrain, terrain_type, trial)
         terrain_diff_sum += suggested.difference
         hyperparams["terrain_attributes"][terrain_type] = suggested.suggestion
+        small_losses.append(suggested.small_loss)
     diffs["terrain_diff"] = (
         terrain_diff_sum / len(hyperparams["terrain_attributes"]),
         1,
@@ -531,13 +590,27 @@ def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]
         suggested = suggest_modified_feature(feature, trial)
         feature_diff_sum += suggested.difference
         hyperparams["features"][i] = (coords, suggested.suggestion)
+        small_losses.append(suggested.small_loss)
     diffs["feature_diff"] = (feature_diff_sum / len(hyperparams["features"]), 1)
 
     company_diff_sum = 0
+    # We're calculating the average of private company losses, so we need to collect them
+    private_company_losses = []
     for company_id, details in hyperparams["company_fixed_details"].items():
         suggested = suggest_modified_company_fixed_detail(company_id, details, trial)
         company_diff_sum += suggested.difference
         hyperparams["company_fixed_details"][company_id] = suggested.suggestion
+
+        # The small loss for companies is a bit more complex.
+        # From the prompt:
+        # - Sum of (small loss of stock available for all non private companies)
+        # - Sum of (small loss of track available for all companies)
+        # - Small loss of (average of all private company initial interest * 2)
+        # - Small loss of (average of all private company initial treasury)
+        # The suggest_modified_company_fixed_detail returns the loss for a single company.
+        # I will sum them here.
+        small_losses.append(suggested.small_loss)
+
     diffs["company_diff"] = (
         (company_diff_sum / len(hyperparams["company_fixed_details"])),
         1,
@@ -546,12 +619,14 @@ def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]
     suggested_bonds = suggest_bonds(hyperparams["bonds"], trial)
     hyperparams["bonds"] = suggested_bonds.suggestion
     diffs["suggested_bonds_diff"] = (suggested_bonds.difference, 1)
+    small_losses.append(suggested_bonds.small_loss)
 
     initial_cash = suggest_initial_cash(
         PLAYER_COUNT, hyperparams["initial_cash"], trial
     )
     hyperparams["initial_cash"] = initial_cash.suggestion
     diffs["initial_cash_diff"] = (initial_cash.difference, 1)
+    small_losses.append(initial_cash.small_loss)
 
     # Integer hyperparameters
     for key, min_const, max_const in [
@@ -583,7 +658,12 @@ def suggest_for_trial(trial: optuna.Trial) -> ModifiedSuggestion[EbrHyperparams]
 
     diff_result = [diff[0] for diff in diffs.values()]
     diff_weight = [diff[1] for diff in diffs.values()]
-    return ModifiedSuggestion(hyperparams, fmean(diff_result, diff_weight))
+
+    total_small_loss = sum(small_losses) / SMALL_LOSS_NORMALIZATION_FACTOR
+
+    return ModifiedSuggestion(
+        hyperparams, fmean(diff_result, diff_weight), total_small_loss
+    )
 
 
 def most_trusted_hyperrewards(df: pd.DataFrame) -> pd.DataFrame:
