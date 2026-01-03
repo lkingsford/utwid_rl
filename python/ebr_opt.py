@@ -44,7 +44,7 @@ CPU_COUNT = os.cpu_count() or 8
 # Rules related consts
 #####
 
-MAX_REVENUE = 50
+MAX_REVENUE = 25
 
 MIN_BUILD_COST = 0
 MAX_BUILD_COST = 20
@@ -123,43 +123,57 @@ GOALS: Dict[str, Dict[str, GoalAspect]] = {
             1 / 3,
             1 / 6,
             3,
-            lambda df, _: (df["end_game_reason"] == "Bankruptcy").sum() / len(df),
+            lambda df, _: (df["end_game_reason"] == "Bankruptcy").sum() / len(df)
+            if not df.empty
+            else 0.0,
         ),
         "Dividends": GoalAspect(
             1 / 3,
             1 / 6,
             1,
-            lambda df, _: (df["end_game_reason"] == "Dividends").sum() / len(df),
+            lambda df, _: (df["end_game_reason"] == "Dividends").sum() / len(df)
+            if not df.empty
+            else 0.0,
         ),
         "Shares": GoalAspect(
             1 / 6,
             1 / 6,
             1,
-            lambda df, _: (df["end_game_reason"] == "Shares").sum() / len(df),
+            lambda df, _: (df["end_game_reason"] == "Shares").sum() / len(df)
+            if not df.empty
+            else 0.0,
         ),
         "Bonds": GoalAspect(
             1 / 5 / 3,
             1 / 6,
             1,
-            lambda df, _: (df["end_game_reason"] == "Bonds").sum() / len(df),
+            lambda df, _: (df["end_game_reason"] == "Bonds").sum() / len(df)
+            if not df.empty
+            else 0.0,
         ),
         "Track": GoalAspect(
             1 / 5 / 3,
             1 / 6,
             1,
-            lambda df, _: (df["end_game_reason"] == "Track").sum() / len(df),
+            lambda df, _: (df["end_game_reason"] == "Track").sum() / len(df)
+            if not df.empty
+            else 0.0,
         ),
         "Resources": GoalAspect(
             1 / 5 / 3,
             1 / 6,
             1,
-            lambda df, _: (df["end_game_reason"] == "Resources").sum() / len(df),
+            lambda df, _: (df["end_game_reason"] == "Resources").sum() / len(df)
+            if not df.empty
+            else 0.0,
         ),
         "Stalemate": GoalAspect(
             1 / 5 / 3,
             1 / 6,
             1,
-            lambda df, _: (df["end_game_reason"] == "Stalemate").sum() / len(df),
+            lambda df, _: (df["end_game_reason"] == "Stalemate").sum() / len(df)
+            if not df.empty
+            else 0.0,
         ),
     },
     "Utilization": {
@@ -167,17 +181,19 @@ GOALS: Dict[str, Dict[str, GoalAspect]] = {
             2 / 3,
             2 / 3,
             1,
-            lambda df, hyper: df.query("completed_dividend_rounds == 6")[
-                "total_bonds_issued"
-            ].mean()
-            / len(hyper["bonds"]),
+            lambda df, hyper: (
+                np.nan_to_num(subset["total_bonds_issued"].mean())
+                / len(hyper["bonds"])
+                if not (subset := df.query("completed_dividend_rounds == 6")).empty
+                else 0.0
+            ),
         ),
         "Resources Remaining": GoalAspect(
             2,
             1,
             1,
             lambda df, _: (
-                subset["remaining_resource_cubes"].median()
+                np.nan_to_num(subset["remaining_resource_cubes"].median())
                 if not (subset := df.query("completed_dividend_rounds == 6")).empty
                 else 0.0
             ),
@@ -202,28 +218,36 @@ GOALS: Dict[str, Dict[str, GoalAspect]] = {
             1 / 2,
             1,
             lambda df, _: len(df.query("ebrc_auction_winner == winning_player_id"))
-            / len(df),
+            / len(df)
+            if not df.empty
+            else 0.0,
         ),
         "IPO LW Winner Bias": GoalAspect(
             1 / 4,
             1 / 2,
             1,
             lambda df, _: len(df.query("lw_auction_winner == winning_player_id"))
-            / len(df),
+            / len(df)
+            if not df.empty
+            else 0.0,
         ),
         "IPO TMLC Winner Bias": GoalAspect(
             1 / 4,
             1 / 2,
             1,
             lambda df, _: len(df.query("tmlc_auction_winner == winning_player_id"))
-            / len(df),
+            / len(df)
+            if not df.empty
+            else 0.0,
         ),
         "IPO GT Winner Bias": GoalAspect(
             1 / 4,
             1 / 2,
             1,
             lambda df, _: len(df.query("gt_auction_winner == winning_player_id"))
-            / len(df),
+            / len(df)
+            if not df.empty
+            else 0.0,
         ),
     },
 }
@@ -251,14 +275,11 @@ def bias_small_loss(val: float) -> float:
     """
     Calculates a loss that biases towards smaller numbers.
     log10(max(1, val)) - 1
-    - val=1 -> -1
-    - val=10 -> 0
-    - val=100 -> 1
     """
-    return math.log10(max(1, val)) - 1.0
+    return math.pow(math.log10(max(1, val)), 2)-1.0
 
 
-def suggest_fixed(trial: optuna.Trial, name: str, value: any) -> any:
+def suggest_fixed(trial: optuna.Trial, name: str, value: any, *args) -> any:
     """Suggests a fixed value for a parameter."""
     if isinstance(value, int):
         return trial.suggest_int(name, value, value)
@@ -315,11 +336,12 @@ def suggest_modified_terrain(
             terrain["build_cost"]
             if use_defaults
             else MAX_BUILD_COST,
-        ),
-        "revenue": suggest_revenue(
-            terrain_type, trial, use_defaults, terrain["revenue"]
-        ),
+            ),
+        "revenue": [
+            trial.suggest_int(f"{terrain_type}_rev",0,MAX_REVENUE)
+        ] * 6
     }
+            
 
     if use_defaults:
         return ModifiedSuggestion(suggestion, 0.0, 0.0)
@@ -334,7 +356,7 @@ def suggest_modified_terrain(
         )
     ) / 2
 
-    weight = 1.0 if terrain_type == "plain" else 0.5
+    weight = 3.0 if terrain_type == "plain" else 1
     small_loss = (
         bias_small_loss(fmean(suggestion["revenue"]))
         + bias_small_loss(suggestion["build_cost"])
@@ -672,7 +694,7 @@ class EbrHyperparams(TypedDict):
 # Small loss is a bias towards smaller numbers.
 # If each component of small loss is 1 (which means the value is 100), the total would be 31.
 # See gemini_investigation.py for details
-SMALL_LOSS_NORMALIZATION_FACTOR = 31.0
+SMALL_LOSS_NORMALIZATION_FACTOR = 34.0
 
 
 def suggest_for_trial(
@@ -686,7 +708,7 @@ def suggest_for_trial(
 
     terrain_diff_sum = 0
     for terrain_type, terrain in hyperparams["terrain_attributes"].items():
-        if terrain_type == "nothing":
+        if terrain_type in ("town", "port", "nothing"):
             continue
         suggested = suggest_modified_terrain(
             terrain, terrain_type, trial, use_defaults
@@ -907,7 +929,7 @@ def start_study(
             study = optuna.create_study(
                 storage=storage,
                 study_name=study_name,
-                directions=["minimize"] * (1 + len(GOALS)),
+                directions=["minimize"] * (2 + len(GOALS)),
                 load_if_exists=True,
             )
         # Only run if no trials exist
@@ -935,7 +957,7 @@ def start_study(
         study = optuna.create_study(
             storage=storage,
             study_name=study_name,
-            directions=["minimize"] * (1 + len(GOALS)),
+            directions=["minimize"] * (2 + len(GOALS)),
             load_if_exists=True,
         )
     study.optimize(objective, n_trials=n_trials)
