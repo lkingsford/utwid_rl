@@ -52,12 +52,12 @@ MAX_BUILD_COST = 20
 MIN_ADDITIONAL_COST = 0
 MAX_ADDITIONAL_COST = 20
 
-MIN_BOND_COUNT = 1
-MAX_BOND_COUNT = 50
-MIN_BOND_FACE_STEP = 0
-MAX_BOND_FACE_STEP = 10
-MIN_BOND_COUPON_STEP = 0
-MAX_BOND_COUPON_STEP = 10
+MIN_BOND_COUNT = 5
+MAX_BOND_COUNT = 20
+MIN_BOND_FACE = 1
+MAX_BOND_FACE = 50
+MIN_BOND_COUPON_RATIO = 0.1
+MAX_BOND_COUPON_RATIO = 0.5
 
 MIN_PRIVATE_INITIAL_TREASURY = 0
 MAX_PRIVATE_INITIAL_TREASURY = 50
@@ -435,34 +435,28 @@ def suggest_bonds(
 ) -> ModifiedSuggestion[List[Bond]]:
     s_int = partial(suggest_fixed, trial) if use_defaults else trial.suggest_int
 
-    bond_count = s_int(
-        "bond_count",
-        len(original) if use_defaults else MIN_BOND_COUNT,
-        len(original) if use_defaults else MAX_BOND_COUNT,
-    )
-
-    suggested: List[Bond] = []
-    face = 0
-    coupon = 0
-    for i in range(bond_count):
-        if use_defaults:
+    if use_defaults:
+        bond_count = s_int("bond_count", len(original), len(original))
+        suggested: List[Bond] = []
+        for i in range(bond_count):
             face = s_int(f"bond_face_{i}", original[i]["face_value"])
             coupon = s_int(f"bond_coupon_{i}", original[i]["coupon"])
-        else:
-            face = trial.suggest_int(
-                f"bond_face_{i}",
-                max(1, face + MIN_BOND_FACE_STEP),
-                face + MAX_BOND_FACE_STEP,
-            )
-            coupon = trial.suggest_int(
-                f"bond_coupon_{i}",
-                coupon + MIN_BOND_COUPON_STEP,
-                coupon + MAX_BOND_COUPON_STEP,
-            )
-        suggested.append({"face_value": face, "coupon": coupon})
-
-    if use_defaults:
+            suggested.append({"face_value": face, "coupon": coupon})
         return ModifiedSuggestion(suggested, 0.0, 0.0)
+
+    # `use_defaults` is false from here
+    bond_count = trial.suggest_int("bond_count", MIN_BOND_COUNT, MAX_BOND_COUNT)
+
+    min_face = trial.suggest_int("min_bond_face", MIN_BOND_FACE, MAX_BOND_FACE)
+    max_face = trial.suggest_int("max_bond_face", min_face, MAX_BOND_FACE)
+
+    suggested: List[Bond] = []
+    for i in range(bond_count):
+        face = trial.suggest_int(f"bond_face_{i}", min_face, max_face)
+        min_coupon = max(0, math.ceil(face * MIN_BOND_COUPON_RATIO))
+        max_coupon = max(min_coupon, math.floor(face * MAX_BOND_COUPON_RATIO))
+        coupon = trial.suggest_int(f"bond_coupon_{i}", int(min_coupon), int(max_coupon))
+        suggested.append({"face_value": face, "coupon": coupon})
 
     # Difference is a bit less clear (because amount of bonds might be different)
     # So - we're a few values:
@@ -474,29 +468,38 @@ def suggest_bonds(
         len(original), bond_count, MIN_BOND_COUNT, MAX_BOND_COUNT
     )
 
+    original_faces = [bond["face_value"] for bond in original]
+    original_max_face = max(original_faces) if original_faces else 0
+    original_min_face = min(original_faces) if original_faces else 0
+
+    suggested_faces = [bond["face_value"] for bond in suggested]
+    suggested_max_face = max(suggested_faces) if suggested_faces else 0
+    suggested_min_face = min(suggested_faces) if suggested_faces else 0
+
     max_face_diff = calc_norm_diff(
-        max([bond["face_value"] for bond in original]),
-        max([bond["face_value"] for bond in suggested]) if suggested else 0,
-        0,
-        # TBD if this is the wise thing to do -
-        # - but I need a way to make sure it's normalized to max of 1. This means the
-        # ratio is different depending on bond_count, but I hope that's OK anyway.
-        MAX_BOND_FACE_STEP * max(bond_count, len(original)),
+        original_max_face,
+        suggested_max_face,
+        MIN_BOND_FACE,
+        MAX_BOND_FACE,
     )
 
     min_face_diff = calc_norm_diff(
-        min([bond["face_value"] for bond in original]),
-        min([bond["face_value"] for bond in suggested]) if suggested else 0,
-        0,
-        # ... as above.
-        MIN_BOND_FACE_STEP * max(bond_count, len(original)),
+        original_min_face,
+        suggested_min_face,
+        MIN_BOND_FACE,
+        MAX_BOND_FACE,
     )
 
+    original_ratios = [
+        b["coupon"] / b["face_value"] for b in original if b["face_value"] > 0
+    ]
+    suggested_ratios = [
+        b["coupon"] / b["face_value"] for b in suggested if b["face_value"] > 0
+    ]
+
     ratio_diff = calc_norm_diff(
-        fmean([bond["coupon"] / bond["face_value"] for bond in original]),
-        fmean([bond["coupon"] / bond["face_value"] for bond in suggested])
-        if suggested
-        else 0,
+        fmean(original_ratios) if original_ratios else 0,
+        fmean(suggested_ratios) if suggested_ratios else 0,
         0,
         1,
     )
