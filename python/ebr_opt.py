@@ -211,6 +211,29 @@ GOALS: Dict[str, Dict[str, GoalAspect]] = {
             )
             / max(0.1, len(df.query("completed_dividend_rounds == 6"))),
         ),
+        "Overall Track Ratio": GoalAspect(
+            1.0,
+            0.5,
+            0.5,
+            lambda df, _: (
+                subset["overall_track_ratio"].mean()
+                if not (subset := df.query("completed_dividend_rounds == 6")).empty
+                else 0.0
+            ),
+        ),
+        "Average Terrain Track Ratio": GoalAspect(
+            1.0,
+            0.5,
+            0.5,
+            lambda df, _: (
+                subset["terrain_track_ratios"]
+                .apply(lambda x: fmean(x.values()) if x else 0.0)
+                .mean()
+                if not (subset := df.query("completed_dividend_rounds == 6")).empty
+                and "terrain_track_ratios" in subset.columns
+                else 0.0
+            ),
+        ),
     },
     "Bias": {
         "IPO EBRC Winner Bias": GoalAspect(

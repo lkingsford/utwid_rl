@@ -75,6 +75,8 @@ pub struct EBRHyperrewards {
     pub winning_player_id: Option<usize>,
     pub winning_player_score: Option<isize>,
     pub player_scores: Vec<isize>,
+    pub overall_track_ratio: f32,
+    pub terrain_track_ratios: HashMap<Terrain, f32>,
 }
 
 impl GameHyperrewardTrait for EBRHyperrewards {
@@ -1847,6 +1849,50 @@ impl State for EBRState {
             (None, None)
         };
 
+        let all_track_locations: HashSet<Coordinate> =
+            self.track.iter().map(|t| t.location).collect();
+        let mut terrain_coords: HashMap<Terrain, Vec<Coordinate>> = HashMap::new();
+        for (y, row) in TERRAIN.iter().enumerate() {
+            for (x, &terrain) in row.iter().enumerate() {
+                terrain_coords.entry(terrain).or_default().push((x, y));
+            }
+        }
+
+        let mut terrain_track_ratios: HashMap<Terrain, f32> = HashMap::new();
+        for (terrain, coords) in &terrain_coords {
+            if *terrain == Terrain::Nothing {
+                continue;
+            }
+            let tracked_count = coords
+                .iter()
+                .filter(|c| all_track_locations.contains(c))
+                .count();
+            let ratio = if coords.is_empty() {
+                0.0
+            } else {
+                tracked_count as f32 / coords.len() as f32
+            };
+            terrain_track_ratios.insert(*terrain, ratio);
+        }
+
+        let non_nothing_tiles: Vec<Coordinate> = terrain_coords
+            .iter()
+            .filter(|(&t, _)| t != Terrain::Nothing)
+            .flat_map(|(_, coords)| coords)
+            .cloned()
+            .collect();
+
+        let tracked_non_nothing_count = non_nothing_tiles
+            .iter()
+            .filter(|c| all_track_locations.contains(c))
+            .count();
+
+        let overall_track_ratio = if non_nothing_tiles.is_empty() {
+            0.0
+        } else {
+            tracked_non_nothing_count as f32 / non_nothing_tiles.len() as f32
+        };
+
         EBRHyperrewards {
             total_bonds_issued: self.hyperparams.bonds.len() - self.unissued_bonds.len(),
             end_game_reason: self.end_game_reason,
@@ -1896,6 +1942,8 @@ impl State for EBRState {
             winning_player_id,
             winning_player_score,
             player_scores: sorted_cash.iter().map(|s| s.1).collect(),
+            overall_track_ratio,
+            terrain_track_ratios,
         }
     }
 
