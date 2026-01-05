@@ -935,49 +935,10 @@ def start_study(
     single: bool,
     include_first: bool,
     player_count: int,
+    force_iterations: Optional[int],
 ):
     """Start a study, potentially running the first trial with defaults."""
     logging.debug("Starting study")
-    if include_first and worker_idx == 0:
-        # This worker will run the default trial first
-        default_objective = partial(
-            run_trial,
-            threads=threads,
-            single=single,
-            trials=n_trials,
-            use_defaults=True,
-            player_count=player_count,
-        )
-        if single:
-            study = optuna.create_study(
-                storage=storage,
-                study_name=study_name,
-                direction="minimize",
-                load_if_exists=True,
-            )
-        else:
-            study = optuna.create_study(
-                storage=storage,
-                study_name=study_name,
-                directions=["minimize"] * (2 + len(GOALS)),
-                load_if_exists=True,
-            )
-        # Only run if no trials exist
-        if len(study.get_trials(deepcopy=False)) == 0:
-            study.optimize(default_objective, n_trials=1)
-        logging.info("Default trial complete")
-
-    logging.debug("Creating study")
-
-    # All workers run the main optimization loop
-    objective = partial(
-        run_trial,
-        threads=threads,
-        single=single,
-        trials=n_trials,
-        use_defaults=False,
-        player_count=player_count,
-    )
     if single:
         study = optuna.create_study(
             storage=storage,
@@ -992,8 +953,43 @@ def start_study(
             directions=["minimize"] * (2 + len(GOALS)),
             load_if_exists=True,
         )
-    logging.debug("Starting optimize")
-    study.optimize(objective, n_trials=n_trials)
+
+    if include_first and worker_idx == 0:
+        # This worker will run the default trial first
+        # Only run if no trials exist
+        if len(study.get_trials(deepcopy=False)) == 0:
+            trial = study.ask()
+            try:
+                result = run_trial(
+                    trial,
+                    threads=threads,
+                    single=single,
+                    trials=n_trials,
+                    use_defaults=True,
+                    player_count=player_count,
+                    force_iterations=force_iterations,
+                )
+                study.tell(trial, result)
+            except Exception:
+                # If the default trial fails, we still want to continue with the study
+                study.tell(trial, state=optuna.trial.TrialState.FAIL)
+            logging.info("Default trial complete")
+
+    for _ in range(n_trials):
+        trial = study.ask()
+        try:
+            result = run_trial(
+                trial,
+                threads=threads,
+                single=single,
+                trials=n_trials,
+                use_defaults=False,
+                player_count=player_count,
+                force_iterations=force_iterations,
+            )
+            study.tell(trial, result)
+        except Exception:
+            study.tell(trial, state=optuna.trial.TrialState.FAIL)
 
 
 if __name__ == "__main__":
@@ -1040,6 +1036,11 @@ if __name__ == "__main__":
         default=3,
         help="Number of players in the game.",
     )
+    parser.add_argument(
+        "--force-iterations",
+        type=int,
+        help="Force the number of iterations for each trial. Useful for debugging.",
+    )
 
     args = parser.parse_args()
 
@@ -1068,6 +1069,7 @@ if __name__ == "__main__":
         single=args.single_study,
         include_first=args.include_first,
         player_count=args.player_count,
+        force_iterations=args.force_iterations,
     )
 
     if args.processes > 1:
