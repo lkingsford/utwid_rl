@@ -23,12 +23,6 @@ import pandas as pd
 
 import mon2y
 
-logging.basicConfig(
-    format="%(asctime)s %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    level=logging.INFO,
-)
-
 #####
 # Optimization related consts
 #####
@@ -320,6 +314,7 @@ def suggest_revenue(
     use_defaults: bool = False,
     default: Optional[List[int]] = None,
 ) -> List[int]:
+    logging.debug(f"Suggesting revenue for {feature}")
     if use_defaults:
         assert default is not None
         return [
@@ -348,6 +343,7 @@ def suggest_modified_terrain(
     trial: optuna.Trial,
     use_defaults: bool = False,
 ) -> ModifiedSuggestion[Terrain]:
+    logging.debug(f"Suggesting for terrain: {terrain_type}")
     s_int = partial(suggest_fixed, trial) if use_defaults else trial.suggest_int
 
     suggestion: Terrain = {
@@ -402,6 +398,7 @@ Feature = TypedDict(
 def suggest_modified_feature(
     feature: Feature, trial: optuna.Trial, use_defaults: bool = False
 ) -> ModifiedSuggestion[Feature]:
+    logging.debug(f"Suggesting for feature: {feature['location_name']}")
     s_int = partial(suggest_fixed, trial) if use_defaults else trial.suggest_int
 
     suggestion: Feature = {
@@ -456,6 +453,7 @@ Bond = TypedDict("Bond", {"face_value": int, "coupon": int})
 def suggest_bonds(
     original: List[Bond], trial: optuna.Trial, use_defaults: bool = False
 ) -> ModifiedSuggestion[List[Bond]]:
+    logging.debug("Suggesting bonds")
     s_int = partial(suggest_fixed, trial) if use_defaults else trial.suggest_int
 
     if use_defaults:
@@ -563,6 +561,7 @@ def suggest_modified_company_fixed_detail(
     trial: optuna.Trial,
     use_defaults: bool = False,
 ) -> ModifiedSuggestion[CompanyFixedDetail]:
+    logging.debug(f"Suggesting for company: {company_id}")
     s_int = partial(suggest_fixed, trial) if use_defaults else trial.suggest_int
 
     suggestion: CompanyFixedDetail = {
@@ -675,6 +674,7 @@ def suggest_initial_cash(
     trial: optuna.Trial,
     use_defaults: bool = False,
 ) -> ModifiedSuggestion[dict[str, int]]:
+    logging.debug(f"Suggesting initial cash for {players} players")
     s_int = partial(suggest_fixed, trial) if use_defaults else trial.suggest_int
     # Diff wise, we're only changing (and caring about) the one for the current
     # amount of players.
@@ -867,6 +867,7 @@ def run_trial(
     use_defaults: bool = False,
     player_count: int = 3,
 ):
+    logging.debug("Starting run trial")
     trials = trials or TRIALS
     max_iterations = max_iterations or MAX_ITERATIONS
     explore_iterations = force_iterations or max_iterations * (
@@ -875,10 +876,12 @@ def run_trial(
     explore_iterations = max(explore_iterations, MIN_ITERATIONS)
     logging.info(f"Iterations: {explore_iterations}")
 
+    logging.debug("Suggesting hyperparams")
     suggested_hyperparams = suggest_for_trial(
         trial, use_defaults=use_defaults, player_count=player_count
     )
 
+    logging.debug("Starting explore")
     raw_results = mon2y.explore(
         mon2y.Games.EBR,
         int(explore_iterations),
@@ -934,6 +937,7 @@ def start_study(
     player_count: int,
 ):
     """Start a study, potentially running the first trial with defaults."""
+    logging.debug("Starting study")
     if include_first and worker_idx == 0:
         # This worker will run the default trial first
         default_objective = partial(
@@ -963,6 +967,8 @@ def start_study(
             study.optimize(default_objective, n_trials=1)
         logging.info("Default trial complete")
 
+    logging.debug("Creating study")
+
     # All workers run the main optimization loop
     objective = partial(
         run_trial,
@@ -986,11 +992,19 @@ def start_study(
             directions=["minimize"] * (2 + len(GOALS)),
             load_if_exists=True,
         )
+    logging.debug("Starting optimize")
     study.optimize(objective, n_trials=n_trials)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Optimize EBR hyperparameters.")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase verbosity level: -v for INFO, -vv for DEBUG.",
+    )
     parser.add_argument(
         "--processes", type=int, default=CPU_COUNT, help="Number of processes to use."
     )
@@ -1029,6 +1043,20 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Configure logging
+    if args.verbose == 0:
+        log_level = logging.WARNING
+    elif args.verbose == 1:
+        log_level = logging.INFO
+    else:  # >= 2
+        log_level = logging.DEBUG
+
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        level=log_level,
+    )
+
     study_name = args.study_name if args.single_study else f"{args.study_name}_multi"
 
     runner = partial(
@@ -1042,5 +1070,8 @@ if __name__ == "__main__":
         player_count=args.player_count,
     )
 
-    with Pool(processes=args.processes) as pool:
-        pool.map(runner, range(args.processes))
+    if args.processes > 1:
+        with Pool(processes=args.processes) as pool:
+            pool.map(runner, range(args.processes))
+    else:
+        runner(0)
