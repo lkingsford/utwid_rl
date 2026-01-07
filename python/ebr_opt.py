@@ -5,6 +5,7 @@ import math
 import os
 from statistics import fmean
 from typing import (
+    Any,
     Dict,
     List,
     TypedDict,
@@ -106,6 +107,16 @@ class GoalAspect(NamedTuple):
     def loss(self, result_mean: float) -> float:
         z = (self.mean - result_mean) / self.std_dev
         return (1.0 - math.exp(z * z / -2)) * self.weight
+
+
+class EbrMeta(NamedTuple):
+    terrain_type_keys: List[str]
+    feature_keys: List[str]
+    private_company_keys: List[str]
+    public_company_keys: List[str]
+
+
+EBR_META: Optional[EbrMeta] = None
 
 
 DIFF_WEIGHT = 10
@@ -296,7 +307,7 @@ def bias_small_loss(val: float) -> float:
     return math.pow(math.log10(max(1, val)), 2)-1.0
 
 
-def suggest_fixed(trial: optuna.Trial, name: str, value: any, *args) -> any:
+def suggest_fixed(trial: optuna.Trial, name: str, value: Any, *args) -> Any:
     """Suggests a fixed value for a parameter."""
     if isinstance(value, int):
         return trial.suggest_int(name, value, value)
@@ -938,6 +949,35 @@ def start_study(
     force_iterations: Optional[int],
 ):
     """Start a study, potentially running the first trial with defaults."""
+    global EBR_META
+    if EBR_META is None:
+        logging.debug("Populating EbrMeta")
+        hyperparams = mon2y.default_hyperparams(mon2y.Games.EBR)
+        terrain_type_keys = [
+            key
+            for key in hyperparams["terrain_attributes"].keys()
+            if key not in ("town", "port", "nothing")
+        ]
+        feature_keys = [
+            feature["location_name"] for _, feature in hyperparams["features"]
+        ]
+        private_company_keys = [
+            cid
+            for cid, details in hyperparams["company_fixed_details"].items()
+            if details["private"]
+        ]
+        public_company_keys = [
+            cid
+            for cid, details in hyperparams["company_fixed_details"].items()
+            if not details["private"]
+        ]
+        EBR_META = EbrMeta(
+            terrain_type_keys=terrain_type_keys,
+            feature_keys=feature_keys,
+            private_company_keys=private_company_keys,
+            public_company_keys=public_company_keys,
+        )
+
     logging.debug("Starting study")
     if single:
         study = optuna.create_study(
