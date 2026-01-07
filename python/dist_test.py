@@ -1,6 +1,7 @@
 import argparse
 import logging
 import math
+import time
 from datetime import datetime
 
 import optuna
@@ -30,11 +31,16 @@ def evaluate(params: dict) -> float:
     logging.info(f"Evaluation result: {val}")
     return val
 
-def start_trial(study: optuna.Study, dists: dict):
+def start_trial(study: optuna.Study, dists: dict) -> float:
     """Ask for a trial, evaluate it, and tell the study."""
     logging.info("Starting trial.")
     
+    start_time = time.perf_counter()
     trial = study.ask(dists)
+    end_time = time.perf_counter()
+    duration_ms = (end_time - start_time) * 1000
+    logging.info(f"study.ask took {duration_ms:.2f} ms")
+    
     logging.info(f"Trial params: {trial.params}")
     
     result = evaluate(trial.params)
@@ -42,6 +48,7 @@ def start_trial(study: optuna.Study, dists: dict):
     
     study.tell(trial, result)
     logging.info("Finished trial.")
+    return duration_ms
 
 def main():
     """Main function to run the optimization."""
@@ -70,10 +77,25 @@ def main():
 
     dists = define(args.n)
     
+    ask_timings = []
     logging.info(f"Starting {args.trials} trials.")
     for _ in range(args.trials):
-        start_trial(study, dists)
+        duration = start_trial(study, dists)
+        ask_timings.append(duration)
     logging.info("Finished all trials.")
+    
+    total_time_ms = sum(ask_timings)
+    if ask_timings:
+        mean_time_per_ask_ms = total_time_ms / len(ask_timings)
+        mean_time_per_ask_per_n_ms = mean_time_per_ask_ms / args.n
+    else:
+        mean_time_per_ask_ms = 0
+        mean_time_per_ask_per_n_ms = 0
+
+    print("--- Timing Metrics ---")
+    print(f"Total study.ask time: {total_time_ms:.2f} ms")
+    print(f"Mean time per study.ask: {mean_time_per_ask_ms:.2f} ms")
+    print(f"Mean time per study.ask / n: {mean_time_per_ask_per_n_ms:.2f} ms")
     
     logging.info("Finished main function.")
 
