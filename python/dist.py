@@ -1,12 +1,8 @@
-from dataclasses import asdict, dataclass
-import json
 import os
-from typing import Any, Dict, List, NamedTuple
+from typing import Any, Dict
 
 from flask import Flask, jsonify, request
 import optuna
-
-from .ebr_opt import EbrHyperparams, suggest_for_trial, GOALS
 
 app = Flask(__name__)
 
@@ -14,98 +10,145 @@ STORAGE_URL = os.environ.get("OPTUNA_STORAGE") or "sqlite:///db.sqlite3"
 
 studies: Dict[str, optuna.Study] = {}
 
-@dataclass
-class AskResponse:
-    study_name: str
-    trial_number: int
-    hyperparams: EbrHyperparams
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "study_name": self.study_name,
-            "trial_number": self.trial_number,
-            "hyperparams": self.hyperparams.to_dict(),
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AskResponse":
-        return cls(
-            study_name=data["study_name"],
-            trial_number=data["trial_number"],
-            hyperparams=EbrHyperparams.from_dict(data["hyperparams"]),
-        )
-
-    def serialize(self) -> str:
-        return json.dumps(self.to_dict())
-
-    @classmethod
-    def deserialize(cls, json_str: str) -> "AskResponse":
-        return cls.from_dict(json.loads(json_str))
-
 
 def get_study(study_name) -> optuna.Study:
     if study_name not in studies:
-        studies[study_name] = optuna.LoadStudy(study_name)
+        studies[study_name] = optuna.load_study(
+            study_name=study_name, storage=STORAGE_URL
+        )
     return studies[study_name]
 
 
-@app.route("/ask")
-def ask() -> str:
-    study = get_study()
-    trial = study.ask()
-    modified_suggestion = suggest_for_trial(trial, use_defaults=False, player_count=3)
-
-    response = AskResponse(
-        study_name=STUDY_NAME,
-        trial_number=trial.number,
-        hyperparams=modified_suggestion.suggestion,
-    )
-    return response.serialize()
-
-
-@app.route("/tell")
-def tell(study_name: str, ):
+@app.route("/create_study", methods=["POST"])
+def create_study():
     data = request.json
     if not data:
-        return jsonify({"error": "Invalid request"}), 400
+        return jsonify({"error": "Invalid request, expected JSON body"}), 400
 
     study_name = data.get("study_name")
-    trial_number = data.get("trial_number")
-    results = data.get("results")
+    if not study_name:
+        return jsonify({"error": "study_name is required"}), 400
 
-    if not all([study_name, isinstance(trial_number, int), results]):
-        return jsonify({"error": "Missing required fields"}), 400
-    
-    if study_name != STUDY_NAME:
-        return jsonify({"error": f"Invalid study name, expected {STUDY_NAME}"}), 400
+    directions_str = data.get("direction", "min")
+    directions = [d.strip() for d in directions_str.split(",")]
+    for d in directions:
+        if d not in ["min", "max"]:
+            return (
+                jsonify(
+                    {"error": f"Invalid direction '{d}', must be 'min' or 'max'"}
+                ),
+                400,
+            )
 
-    study = get_study()
-    
-    # Optuna doesn't have a direct way to get a trial by number and then tell it.
-    # We have to re-create the conditions to report the results.
-    # This is not ideal, but it's how Optuna's distributed system works without using their built-in mechanisms.
-    # A better approach would be to have workers report directly to the Optuna database.
-    # For this simulation, we will just mark it as complete.
     try:
-        study.tell(trial_number, results)
-        return jsonify({"status": "ok"})
+        study = optuna.create_study(
+            study_name=study_name,
+            storage=STORAGE_URL,
+            directions=directions,
+            load_if_exists=True,
+        )
     except Exception as e:
-        # This can happen if the trial is already finished or doesn't exist.
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Failed to create or load study: {e}"}), 500
 
-
-class OpenStudy(NamedTuple):
-    hash: str 
-    """Hash of mon2y being used"""
-
-
-@app.route("/open")
-def open_studies() -> Dict[str, dict[str, Any]]:
-    all_studies = optuna.get_all_study_summaries()
-    open_studies = [study for study in all_studies if study.user_parameters.user_attrs("dist_status") == "open"]
-    return {
-        study.study_name: OpenStudy(
+    user_attrs = {
+        "dist-status": "open",
     }
+    x86_wheel = data.get("x86_manylinux_wheel_s3")
+    if x86_wheel:
+        user_attrs["x86_manylinux_wheel_s3"] = x86_wheel
+
+    arm_wheel = data.get("arm_manylinux_wheel_s3")
+    if arm_wheel:
+        user_attrs["arm_manylinux_wheel_s3"] = arm_wheel
+
+    for key, value in user_attrs.items():
+        study.set_user_attr(key, value)
+
+    return jsonify({"status": "ok", "study_name": study_name})
+
+
+
+@app.route("/ask", methods=["POST"])
+def ask():
+    data = request.json
+    if not data:
+        return jsonify({"error": "Invalid request, expected JSON body"}), 400
+
+    study_name = data.get("study_name")
+    if not study_name:
+        return jsonify({"error": "study_name is required"}), 400
+
+    distributions_json = data.get("distributions")
+    if not distributions_json:
+        return jsonify({"error": "distributions is required"}), 400
+
+    try:
+        study = get_study(study_name)
+    except Exception as e:
+        return jsonify({"error": f"Failed to load study: {e}"}), 500
+
+    try:
+        distributions = {
+            param_name: optuna.distributions.json_to_distribution(param_json)
+            for param_name, param_json in distributions_json.items()
+        }
+    except Exception as e:
+        return jsonify({"error": f"Failed to parse distributions: {e}"}), 400
+
+    trial = study.ask(search_space=distributions)
+    return jsonify({"trial_number": trial.number, "params": trial.params})
+
+
+@app.route("/tell", methods=["POST"])
+def tell():
+    data = request.json
+    if not data:
+        return jsonify({"error": "Invalid request, expected JSON body"}), 400
+
+    study_name = data.get("study_name")
+    if not study_name:
+        return jsonify({"error": "study_name is required"}), 400
+
+    trial_number = data.get("trial_number")
+    if trial_number is None:  # trial_number can be 0
+        return jsonify({"error": "trial_number is required"}), 400
+
+    status = data.get("status")
+    if not status:
+        return jsonify({"error": "status is required"}), 400
+
+    try:
+        study = get_study(study_name)
+    except Exception as e:
+        return jsonify({"error": f"Failed to load study: {e}"}), 500
+
+    user_data = data.get("user_data")
+    if user_data:
+        try:
+            for key, value in user_data.items():
+                study.set_trial_user_attr(trial_number, key, value)
+        except Exception as e:
+            return jsonify({"error": f"Failed to set user data: {e}"}), 500
+
+    if status == "succeed":
+        result = data.get("result")
+        if result is None:
+            return jsonify({"error": "result is required for status 'succeed'"}), 400
+        try:
+            study.tell(trial_number, values=result)
+            return jsonify({"status": "ok"})
+        except Exception as e:
+            return jsonify({"error": f"Failed to tell study: {e}"}), 500
+
+    elif status == "fail":
+        try:
+            study.tell(trial_number, state=optuna.trial.TrialState.FAIL)
+            return jsonify({"status": "ok"})
+        except Exception as e:
+            return jsonify({"error": f"Failed to tell study: {e}"}), 500
+
+    else:
+        return jsonify({"error": "status must be 'succeed' or 'fail'"}), 400
 
 
 if __name__ == "__main__":
