@@ -19,6 +19,10 @@ def get_study(study_name) -> optuna.Study:
         )
     return studies[study_name]
 
+DIRECTION = {
+    "min": "minimize",
+    "max": "maximize"
+}
 
 @app.route("/create_study", methods=["POST"])
 def create_study():
@@ -33,21 +37,30 @@ def create_study():
     directions_str = data.get("direction", "min")
     directions = [d.strip() for d in directions_str.split(",")]
     for d in directions:
-        if d not in ["min", "max"]:
+        if d not in DIRECTION:
             return (
                 jsonify(
                     {"error": f"Invalid direction '{d}', must be 'min' or 'max'"}
                 ),
                 400,
             )
+    converted_directions = [DIRECTION[d] for d in directions]
 
     try:
-        study = optuna.create_study(
-            study_name=study_name,
-            storage=STORAGE_URL,
-            directions=directions,
-            load_if_exists=True,
-        )
+        if len(directions) == 1:
+            study = optuna.create_study(
+                study_name=study_name,
+                storage=STORAGE_URL,
+                direction=converted_directions[0],
+                load_if_exists=True,
+            )
+        else:
+            study = optuna.create_study(
+                study_name=study_name,
+                storage=STORAGE_URL,
+                directions=converted_directions,
+                load_if_exists=True,
+            )
     except Exception as e:
         return jsonify({"error": f"Failed to create or load study: {e}"}), 500
 
@@ -61,6 +74,16 @@ def create_study():
     arm_wheel = data.get("arm_manylinux_wheel_s3")
     if arm_wheel:
         user_attrs["arm_manylinux_wheel_s3"] = arm_wheel
+
+    module = data.get("module")
+    if not module:
+        return jsonify({"error": "Invalid Request, expected 'module'"}),400
+    user_attrs["module"] = module
+
+    module = data.get("function")
+    if not module:
+        return jsonify({"error": "Invalid Request, expected 'module'"}),400
+    user_attrs["module"] = module
 
     for key, value in user_attrs.items():
         study.set_user_attr(key, value)
