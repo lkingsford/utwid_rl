@@ -13,4 +13,3 @@ build-backend = "maturin"
 [tool.maturin]
 python-source = "python"
 module_name = "mon2y.pyrunner"
-
