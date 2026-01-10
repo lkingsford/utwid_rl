@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 from typing import Any, Dict
 
@@ -113,13 +114,14 @@ def ask():
 
     try:
         distributions = {
-            param_name: optuna.distributions.json_to_distribution(param_json)
+            # This is lazy, but I can't be bothered rewriting part of the library code to support this bit
+            param_name: optuna.distributions.json_to_distribution(json.dumps(param_json))
             for param_name, param_json in distributions_json.items()
         }
     except Exception as e:
         return jsonify({"error": f"Failed to parse distributions: {e}"}), 400
 
-    trial = study.ask(search_space=distributions)
+    trial = study.ask(distributions)
     return jsonify({"trial_number": trial.number, "params": trial.params})
 
 
