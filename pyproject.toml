@@ -1,0 +1,16 @@
+[project]
+name = "mon2y"
+version = "0.1.0"
+dependencies = [
+	"numpy~=2.4",
+	"pandas~=2.3"
+]
+
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+python-source = "python"
+module_name = "mon2y.pyrunner"
+

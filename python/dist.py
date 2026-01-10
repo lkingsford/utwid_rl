@@ -1,3 +1,4 @@
+import datetime
 import os
 from typing import Any, Dict
 
@@ -149,6 +150,45 @@ def tell():
 
     else:
         return jsonify({"error": "status must be 'succeed' or 'fail'"}), 400
+
+
+@app.route("/heartbeat", methods=["POST"])
+def heartbeat():
+    data = request.json
+    if not data:
+        return jsonify({"error": "Invalid request, expected JSON body"}), 400
+
+    study_name = data.get("study_name")
+    if not study_name:
+        return jsonify({"error": "study_name is required"}), 400
+
+    trial_number = data.get("trial_number")
+    if trial_number is None:
+        return jsonify({"error": "trial_number is required"}), 400
+
+    try:
+        study = get_study(study_name)
+    except Exception as e:
+        return jsonify({"error": f"Failed to load study: {e}"}), 500
+
+    storage = study._storage
+    if not isinstance(storage, optuna.storages.RDBStorage):
+        return jsonify({"error": "Heartbeat is only supported for RDBStorage"}), 501
+
+    trial_id = None
+    for trial in study.get_trials(deepcopy=False):
+        if trial.number == trial_number:
+            trial_id = trial._id
+            break
+
+    if trial_id is None:
+        return jsonify({"error": f"Trial number {trial_number} not found in study {study_name}"}), 404
+
+    try:
+        storage.record_heartbeat(trial_id)
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": f"Failed to record heartbeat: {e}"}), 500
 
 
 if __name__ == "__main__":
