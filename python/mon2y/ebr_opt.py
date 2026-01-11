@@ -430,12 +430,98 @@ Bond = TypedDict("Bond", {"face_value": int, "coupon": int})
 def suggest_bonds(
     original: List[Bond], params: Dict[str, Any]
 ) -> ModifiedSuggestion[List[Bond]]:
-    """
-    Ignoring bonds for now as per user request.
-    This function will just return the original bonds.
-    """
-    logging.debug("Suggesting bonds (ignored, returning original)")
-    return ModifiedSuggestion(original, 0.0, 0.0)
+    logging.debug("Suggesting bonds")
+
+    bond_count = params["bond_count"]
+
+    face_d_all = sorted(
+        [
+            params[f"bond_{i:0{len(str(MAX_BOND_COUNT))}}_face"]
+            for i in range(MAX_BOND_COUNT)
+        ]
+    )
+
+    if bond_count == 1:
+        indices = [0]
+    else:
+        indices = [
+            math.floor(i * (MAX_BOND_COUNT - 1) / (bond_count - 1))
+            for i in range(bond_count)
+        ]
+
+    face_d_subset = [face_d_all[i] for i in indices]
+
+    faces_subset = [
+        round(face_d * (MAX_BOND_FACE - MIN_BOND_FACE) + MIN_BOND_FACE)
+        for face_d in face_d_subset
+    ]
+
+    coupon_ratios_subset = [
+        params[f"bond_{i:0{len(str(MAX_BOND_COUNT))}}_coupon_ratio"]
+        for i in range(bond_count)
+    ]
+
+    suggested: List[Bond] = []
+    for face, coupon_ratio in zip(faces_subset, coupon_ratios_subset):
+        coupon = round(face * coupon_ratio)
+        suggested.append({"face_value": int(face), "coupon": int(coupon)})
+
+    # Re-implement diff and small_loss calculation
+    count_diff = calc_norm_diff(
+        len(original), bond_count, MIN_BOND_COUNT, MAX_BOND_COUNT
+    )
+
+    original_faces = [bond["face_value"] for bond in original]
+    original_max_face = max(original_faces) if original_faces else 0
+    original_min_face = min(original_faces) if original_faces else 0
+
+    suggested_faces = [bond["face_value"] for bond in suggested]
+    suggested_max_face = max(suggested_faces) if suggested_faces else 0
+    suggested_min_face = min(suggested_faces) if suggested_faces else 0
+
+    max_face_diff = calc_norm_diff(
+        original_max_face,
+        suggested_max_face,
+        MIN_BOND_FACE,
+        MAX_BOND_FACE,
+    )
+
+    min_face_diff = calc_norm_diff(
+        original_min_face,
+        suggested_min_face,
+        MIN_BOND_FACE,
+        MAX_BOND_FACE,
+    )
+
+    original_ratios = [
+        b["coupon"] / b["face_value"] for b in original if b["face_value"] > 0
+    ]
+    suggested_ratios = [
+        b["coupon"] / b["face_value"] for b in suggested if b["face_value"] > 0
+    ]
+
+    ratio_diff = calc_norm_diff(
+        fmean(original_ratios) if original_ratios else 0,
+        fmean(suggested_ratios) if suggested_ratios else 0,
+        0,
+        1,
+    )
+
+    diff = (
+        count_diff * (1 / 3)
+        + max_face_diff * (1 / 6)
+        + min_face_diff * (1 / 6)
+        + ratio_diff * (1 / 3)
+    )
+
+    if not suggested:
+        small_loss = 0
+    else:
+        avg_face = fmean([b["face_value"] for b in suggested])
+        avg_coupon = fmean([b["coupon"] for b in suggested])
+        small_loss = bias_small_loss(avg_face) + bias_small_loss(avg_coupon * 3)
+
+    return ModifiedSuggestion(suggested, diff, small_loss)
 
 
 CompanyFixedDetail = TypedDict(
