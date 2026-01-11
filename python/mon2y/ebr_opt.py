@@ -891,6 +891,10 @@ def most_trusted_hyperrewards(df: pd.DataFrame) -> pd.DataFrame:
 _dists: Optional[Dict[str, optuna.distributions.BaseDistribution]] = None
 
 
+def _rev_dist(prefix: str, min: int, max: int) -> dict[str, IntDistribution]:
+    return {f"{prefix}_rev_{i}": IntDistribution(min, max) for i in range(3)}
+
+
 def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
     global _dists
 
@@ -921,17 +925,33 @@ def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
 
     default_hp = mon2y.default_hyperparams(mon2y.Games.EBR)
 
-    features = default_hp["features"]
-    terrain_types = default_hp["terrain_attributes"].keys()
+    feature_dists = ChainMap(
+        *[
+            _rev_dist(feature['location_name'], 0, MAX_REVENUE)
+            | {
+                "additional_cost": IntDistribution(
+                    MIN_ADDITIONAL_COST, MAX_ADDITIONAL_COST
+                )
+            }
+            for _, feature in default_hp["features"]
+        ]
+    )
 
-    private_companies = [
-        key
-        for key, detail in default_hp["company_fixed_details"].items()
-        if not detail["private"]
-    ]
+    terrains_dists = ChainMap(
+        *[
+            {
+                f"{terrain_type}_build_cost": IntDistribution(
+                    MIN_BUILD_COST, MAX_BUILD_COST
+                )
+            }
+            | _rev_dist(terrain_type, MIN_BUILD_COST, MAX_BUILD_COST)
+            for terrain_type, terrain in default_hp["terrain_attributes"].items()
+            if terrain_type not in ["town", "port", "nothing"]
+        ]
+    )
 
     company_dists = ChainMap(
-        [
+        *[
             (
                 {
                     f"public_{company_id}_track_available": IntDistribution(
@@ -946,7 +966,7 @@ def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
                         MIN_PRIVATE_INITIAL_COUPON, MAX_PRIVATE_INITIAL_COUPON
                     ),
                 }
-                if detail.private
+                if detail['private']
                 else {
                     f"public_{company_id}_stock_available": IntDistribution(
                         MIN_STOCK_AVAILABLE, MAX_STOCK_AVAILABLE
@@ -967,7 +987,7 @@ def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
         for key in ("coupon_ratio", "face")
     }
 
-    return simple_dists | bond_dists | company_dists
+    return dict(simple_dists | bond_dists | company_dists | feature_dists)
 
 
 def run_trial(
