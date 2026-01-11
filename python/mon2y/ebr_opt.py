@@ -15,11 +15,18 @@ from typing import (
     Tuple,
     Optional,
     Callable,
+    Mapping,
 )
 import argparse
 
 import numpy as np
 import optuna
+from optuna.distributions import (
+    IntDistribution,
+    FloatDistribution,
+    CategoricalDistribution,
+    BaseDistribution,
+)
 import pandas as pd
 
 import mon2y
@@ -92,7 +99,6 @@ MIN_TAKE_PORT_DELIVER_DIVIDEND = 0
 MAX_TAKE_PORT_DELIVER_DIVIDEND = 10
 
 
-
 #####
 # Optimization Goal Related Consts/Types
 #####
@@ -128,57 +134,71 @@ GOALS: Dict[str, Dict[str, GoalAspect]] = {
             1 / 3,
             1 / 6,
             3,
-            lambda df, _: (df["end_game_reason"] == "Bankruptcy").sum() / len(df)
-            if not df.empty
-            else 0.0,
+            lambda df, _: (
+                (df["end_game_reason"] == "Bankruptcy").sum() / len(df)
+                if not df.empty
+                else 0.0
+            ),
         ),
         "Dividends": GoalAspect(
             1 / 3,
             1 / 6,
             1,
-            lambda df, _: (df["end_game_reason"] == "Dividends").sum() / len(df)
-            if not df.empty
-            else 0.0,
+            lambda df, _: (
+                (df["end_game_reason"] == "Dividends").sum() / len(df)
+                if not df.empty
+                else 0.0
+            ),
         ),
         "Shares": GoalAspect(
             1 / 6,
             1 / 6,
             1,
-            lambda df, _: (df["end_game_reason"] == "Shares").sum() / len(df)
-            if not df.empty
-            else 0.0,
+            lambda df, _: (
+                (df["end_game_reason"] == "Shares").sum() / len(df)
+                if not df.empty
+                else 0.0
+            ),
         ),
         "Bonds": GoalAspect(
             1 / 5 / 3,
             1 / 6,
             1,
-            lambda df, _: (df["end_game_reason"] == "Bonds").sum() / len(df)
-            if not df.empty
-            else 0.0,
+            lambda df, _: (
+                (df["end_game_reason"] == "Bonds").sum() / len(df)
+                if not df.empty
+                else 0.0
+            ),
         ),
         "Track": GoalAspect(
             1 / 5 / 3,
             1 / 6,
             1,
-            lambda df, _: (df["end_game_reason"] == "Track").sum() / len(df)
-            if not df.empty
-            else 0.0,
+            lambda df, _: (
+                (df["end_game_reason"] == "Track").sum() / len(df)
+                if not df.empty
+                else 0.0
+            ),
         ),
         "Resources": GoalAspect(
             1 / 5 / 3,
             1 / 6,
             1,
-            lambda df, _: (df["end_game_reason"] == "Resources").sum() / len(df)
-            if not df.empty
-            else 0.0,
+            lambda df, _: (
+                (df["end_game_reason"] == "Resources").sum() / len(df)
+                if not df.empty
+                else 0.0
+            ),
         ),
         "Stalemate": GoalAspect(
             1 / 5 / 3,
             1 / 6,
             1,
-            lambda df, _: (df["end_game_reason"] == "Stalemate").sum() / len(df)
-            if not df.empty
-            else 0.0,
+            lambda df, _: (
+                (df["end_game_reason"] == "Stalemate").sum() / len(df)
+                if not df.empty
+                else 0.0
+            ),
         ),
     },
     "Utilization": {
@@ -187,8 +207,7 @@ GOALS: Dict[str, Dict[str, GoalAspect]] = {
             2 / 3,
             1,
             lambda df, hyper: (
-                np.nan_to_num(subset["total_bonds_issued"].mean())
-                / len(hyper["bonds"])
+                np.nan_to_num(subset["total_bonds_issued"].mean()) / len(hyper["bonds"])
                 if not (subset := df.query("completed_dividend_rounds == 6")).empty
                 else 0.0
             ),
@@ -245,37 +264,41 @@ GOALS: Dict[str, Dict[str, GoalAspect]] = {
             1 / 4,
             1 / 2,
             1,
-            lambda df, _: len(df.query("ebrc_auction_winner == winning_player_id"))
-            / len(df)
-            if not df.empty
-            else 0.0,
+            lambda df, _: (
+                len(df.query("ebrc_auction_winner == winning_player_id")) / len(df)
+                if not df.empty
+                else 0.0
+            ),
         ),
         "IPO LW Winner Bias": GoalAspect(
             1 / 4,
             1 / 2,
             1,
-            lambda df, _: len(df.query("lw_auction_winner == winning_player_id"))
-            / len(df)
-            if not df.empty
-            else 0.0,
+            lambda df, _: (
+                len(df.query("lw_auction_winner == winning_player_id")) / len(df)
+                if not df.empty
+                else 0.0
+            ),
         ),
         "IPO TMLC Winner Bias": GoalAspect(
             1 / 4,
             1 / 2,
             1,
-            lambda df, _: len(df.query("tmlc_auction_winner == winning_player_id"))
-            / len(df)
-            if not df.empty
-            else 0.0,
+            lambda df, _: (
+                len(df.query("tmlc_auction_winner == winning_player_id")) / len(df)
+                if not df.empty
+                else 0.0
+            ),
         ),
         "IPO GT Winner Bias": GoalAspect(
             1 / 4,
             1 / 2,
             1,
-            lambda df, _: len(df.query("gt_auction_winner == winning_player_id"))
-            / len(df)
-            if not df.empty
-            else 0.0,
+            lambda df, _: (
+                len(df.query("gt_auction_winner == winning_player_id")) / len(df)
+                if not df.empty
+                else 0.0
+            ),
         ),
     },
 }
@@ -304,7 +327,7 @@ def bias_small_loss(val: float) -> float:
     Calculates a loss that biases towards smaller numbers.
     log10(max(1, val)) - 1
     """
-    return math.pow(math.log10(max(1, val)), 2)-1.0
+    return math.pow(math.log10(max(1, val)), 2) - 1.0
 
 
 def suggest_fixed(trial: optuna.Trial, name: str, value: Any, *args) -> Any:
@@ -360,18 +383,11 @@ def suggest_modified_terrain(
     suggestion: Terrain = {
         "build_cost": s_int(
             f"{terrain_type}_build_cost",
-            terrain["build_cost"]
-            if use_defaults
-            else MIN_BUILD_COST,
-            terrain["build_cost"]
-            if use_defaults
-            else MAX_BUILD_COST,
-            ),
-        "revenue": [
-            trial.suggest_int(f"{terrain_type}_rev",0,MAX_REVENUE)
-        ] * 6
+            terrain["build_cost"] if use_defaults else MIN_BUILD_COST,
+            terrain["build_cost"] if use_defaults else MAX_BUILD_COST,
+        ),
+        "revenue": [trial.suggest_int(f"{terrain_type}_rev", 0, MAX_REVENUE)] * 6,
     }
-            
 
     if use_defaults:
         return ModifiedSuggestion(suggestion, 0.0, 0.0)
@@ -420,12 +436,8 @@ def suggest_modified_feature(
         ),
         "additional_cost": s_int(
             f"{feature["location_name"]}_additional_cost",
-            feature["additional_cost"]
-            if use_defaults
-            else MIN_ADDITIONAL_COST,
-            feature["additional_cost"]
-            if use_defaults
-            else MAX_ADDITIONAL_COST,
+            feature["additional_cost"] if use_defaults else MIN_ADDITIONAL_COST,
+            feature["additional_cost"] if use_defaults else MAX_ADDITIONAL_COST,
         ),
     }
 
@@ -581,12 +593,16 @@ def suggest_modified_company_fixed_detail(
         "initial_treasury": (
             s_int(
                 f"{company_id}_initial_treasury",
-                company_detail["initial_treasury"]
-                if use_defaults
-                else MIN_PRIVATE_INITIAL_TREASURY,
-                company_detail["initial_treasury"]
-                if use_defaults
-                else MAX_PRIVATE_INITIAL_TREASURY,
+                (
+                    company_detail["initial_treasury"]
+                    if use_defaults
+                    else MIN_PRIVATE_INITIAL_TREASURY
+                ),
+                (
+                    company_detail["initial_treasury"]
+                    if use_defaults
+                    else MAX_PRIVATE_INITIAL_TREASURY
+                ),
             )
             if company_detail["private"]
             else 0
@@ -594,12 +610,16 @@ def suggest_modified_company_fixed_detail(
         "initial_interest": (
             s_int(
                 f"{company_id}_initial_interest",
-                company_detail["initial_interest"]
-                if use_defaults
-                else MIN_PRIVATE_INITIAL_COUPON,
-                company_detail["initial_interest"]
-                if use_defaults
-                else MAX_PRIVATE_INITIAL_COUPON,
+                (
+                    company_detail["initial_interest"]
+                    if use_defaults
+                    else MIN_PRIVATE_INITIAL_COUPON
+                ),
+                (
+                    company_detail["initial_interest"]
+                    if use_defaults
+                    else MAX_PRIVATE_INITIAL_COUPON
+                ),
             )
             if company_detail["private"]
             else 0
@@ -609,22 +629,22 @@ def suggest_modified_company_fixed_detail(
             if company_detail["private"]
             else s_int(
                 f"{company_id}_stock_available",
-                company_detail["stock_available"]
-                if use_defaults
-                else MIN_STOCK_AVAILABLE,
-                company_detail["stock_available"]
-                if use_defaults
-                else MAX_STOCK_AVAILABLE,
+                (
+                    company_detail["stock_available"]
+                    if use_defaults
+                    else MIN_STOCK_AVAILABLE
+                ),
+                (
+                    company_detail["stock_available"]
+                    if use_defaults
+                    else MAX_STOCK_AVAILABLE
+                ),
             )
         ),
         "track_available": s_int(
             f"{company_id}_track_available",
-            company_detail["track_available"]
-            if use_defaults
-            else MIN_TRACK_AVAILABLE,
-            company_detail["track_available"]
-            if use_defaults
-            else MAX_TRACK_AVAILABLE,
+            company_detail["track_available"] if use_defaults else MIN_TRACK_AVAILABLE,
+            company_detail["track_available"] if use_defaults else MAX_TRACK_AVAILABLE,
         ),
     }
 
@@ -747,9 +767,7 @@ def suggest_for_trial(
     for terrain_type, terrain in hyperparams["terrain_attributes"].items():
         if terrain_type in ("town", "port", "nothing"):
             continue
-        suggested = suggest_modified_terrain(
-            terrain, terrain_type, trial, use_defaults
-        )
+        suggested = suggest_modified_terrain(terrain, terrain_type, trial, use_defaults)
         terrain_diff_sum += suggested.difference
         hyperparams["terrain_attributes"][terrain_type] = suggested.suggestion
         small_losses.append(suggested.small_loss)
@@ -866,6 +884,70 @@ def most_trusted_hyperrewards(df: pd.DataFrame) -> pd.DataFrame:
     trust_sigma = df["norm_trust"].std()
 
     return pd.DataFrame(df[df["norm_trust"] >= trust_mu + trust_sigma])
+
+
+_dists: Optional[Dict[str, optuna.distributions.BaseDistribution]] = None
+
+
+def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
+    global _dists
+
+    if _dists:
+        return _dists
+
+    simple_dists: Dict[str, BaseDistribution] = {
+        "initial_cash": IntDistribution(MIN_INITIAL_CASH, MAX_INITIAL_CASH),
+        "water_1_cost": IntDistribution(MIN_WATER_COST, MAX_WATER_COST),
+        "water_2_cost": IntDistribution(MIN_WATER_COST, MAX_WATER_COST),
+        "narrow_gauge_initial": IntDistribution(
+            MIN_NARROW_GAUGE_INITIAL, MAX_NARROW_GAUGE_INITIAL
+        ),
+        "max_builds": IntDistribution(MIN_MAX_BUILDS, MAX_MAX_BUILDS),
+        "narrow_track_cost": IntDistribution(
+            MIN_NARROW_TRACK_COST, MAX_NARROW_TRACK_COST
+        ),
+        "take_resource_cost": IntDistribution(
+            MIN_TAKE_RESOURCE_COST, MAX_TAKE_RESOURCE_COST
+        ),
+        "take_town_deliver_dividend": IntDistribution(
+            MIN_TAKE_TOWN_DELIVER_DIVIDEND, MAX_TAKE_TOWN_DELIVER_DIVIDEND
+        ),
+        "take_port_deliver_dividend": IntDistribution(
+            MIN_TAKE_PORT_DELIVER_DIVIDEND, MAX_TAKE_PORT_DELIVER_DIVIDEND
+        ),
+    }
+
+    default_hp = mon2y.default_hyperparams(mon2y.Games.EBR)
+
+    features = default_hp["features"]
+    terrain_types = default_hp["terrain_attributes"].keys()
+    private_companies = [
+        key
+        for key, detail in default_hp["company_fixed_details"].items()
+        if not detail["private"]
+    ]
+    public_companies = [
+        key
+        for key, detail in default_hp["company_fixed_details"].items()
+        if detail["private"]
+    ]
+
+    bond_dists: Mapping[str, BaseDistribution] = (
+        {
+            "bond_count": IntDistribution(MIN_BOND_COUNT, MAX_BOND_COUNT),
+            "max_bond_face": IntDistribution(MIN_BOND_FACE, MAX_BOND_FACE),
+        }
+        | {
+            f"bond_{i:len(str(MAX_BOND_COUNT))}_coupon_ratio": FloatDistribution(0, 1)
+            for i in range(MAX_BOND_COUNT)
+        }
+        | {
+            f"bond_{i:len(str(MAX_BOND_COUNT))}_face": FloatDistribution(0, 1)
+            for i in range(MAX_BOND_COUNT)
+        }
+    )
+
+    return simple_dists | bond_dists
 
 
 def run_trial(
