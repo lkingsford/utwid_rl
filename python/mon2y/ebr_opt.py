@@ -1,4 +1,5 @@
 from functools import partial
+from itertools import accumulate
 from multiprocessing import Pool
 import logging
 import math
@@ -16,6 +17,7 @@ from typing import (
     Optional,
     Callable,
     Mapping,
+    ChainMap,
 )
 import argparse
 
@@ -921,33 +923,51 @@ def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
 
     features = default_hp["features"]
     terrain_types = default_hp["terrain_attributes"].keys()
+
     private_companies = [
         key
         for key, detail in default_hp["company_fixed_details"].items()
         if not detail["private"]
     ]
-    public_companies = [
-        key
-        for key, detail in default_hp["company_fixed_details"].items()
-        if detail["private"]
-    ]
 
-    bond_dists: Mapping[str, BaseDistribution] = (
-        {
-            "bond_count": IntDistribution(MIN_BOND_COUNT, MAX_BOND_COUNT),
-            "max_bond_face": IntDistribution(MIN_BOND_FACE, MAX_BOND_FACE),
-        }
-        | {
-            f"bond_{i:len(str(MAX_BOND_COUNT))}_coupon_ratio": FloatDistribution(0, 1)
-            for i in range(MAX_BOND_COUNT)
-        }
-        | {
-            f"bond_{i:len(str(MAX_BOND_COUNT))}_face": FloatDistribution(0, 1)
-            for i in range(MAX_BOND_COUNT)
-        }
+    company_dists = ChainMap(
+        [
+            (
+                {
+                    f"public_{company_id}_track_available": IntDistribution(
+                        MIN_TRACK_AVAILABLE, MAX_TRACK_AVAILABLE
+                    ),
+                }
+                | {
+                    f"public_{company_id}_initial_treasury": IntDistribution(
+                        MIN_PRIVATE_INITIAL_TREASURY, MAX_PRIVATE_INITIAL_TREASURY
+                    ),
+                    f"public_{company_id}_initial_coupon": IntDistribution(
+                        MIN_PRIVATE_INITIAL_COUPON, MAX_PRIVATE_INITIAL_COUPON
+                    ),
+                }
+                if detail.private
+                else {
+                    f"public_{company_id}_stock_available": IntDistribution(
+                        MIN_STOCK_AVAILABLE, MAX_STOCK_AVAILABLE
+                    ),
+                }
+            )
+            for company_id, detail in default_hp["company_fixed_details"].items()
+            if not detail["private"]
+        ]
     )
 
-    return simple_dists | bond_dists
+    bond_dists: Mapping[str, BaseDistribution] = {
+        "bond_count": IntDistribution(MIN_BOND_COUNT, MAX_BOND_COUNT),
+        "max_bond_face": IntDistribution(MIN_BOND_FACE, MAX_BOND_FACE),
+    } | {
+        f"bond_{i:0{len(str(MAX_BOND_COUNT))}}_{key}": FloatDistribution(0, 1)
+        for i in range(MAX_BOND_COUNT)
+        for key in ("coupon_ratio", "face")
+    }
+
+    return simple_dists | bond_dists | company_dists
 
 
 def run_trial(
