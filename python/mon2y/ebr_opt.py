@@ -332,38 +332,9 @@ def bias_small_loss(val: float) -> float:
     return math.pow(math.log10(max(1, val)), 2) - 1.0
 
 
-def suggest_fixed(trial: optuna.Trial, name: str, value: Any, *args) -> Any:
-    """Suggests a fixed value for a parameter."""
-    if isinstance(value, int):
-        return trial.suggest_int(name, value, value)
-    elif isinstance(value, float):
-        return trial.suggest_float(name, value, value)
-    elif isinstance(value, str):
-        return trial.suggest_categorical(name, [value])
-    else:
-        raise TypeError(f"Unsupported type for suggest_fixed: {type(value)}")
-
-
-def suggest_revenue(
-    feature: str,
-    trial: optuna.Trial,
-    use_defaults: bool = False,
-    default: Optional[List[int]] = None,
-) -> List[int]:
-    logging.debug(f"Suggesting revenue for {feature}")
-    if use_defaults:
-        assert default is not None
-        return [
-            suggest_fixed(trial, f"{feature}_rev_rnd_{i}", default[i * 2])
-            for i in range(0, 3)
-            for _ in (0, 1)
-        ]
-    # Revenue goes for two rounds each time
-    return [
-        trial.suggest_int(f"{feature}_rev_rnd_{i}", 0, MAX_REVENUE)
-        for i in range(0, 3)
-        for _ in (0, 1)
-    ]
+def get_revenue_from_params(prefix: str, params: Dict[str, Any]) -> List[int]:
+    """Converts from {prefix}_rev_0, {prefix}_rev_1, {prefix}_rev_2 keys to a 6-element revenue list."""
+    return [params[f"{prefix}_rev_{i}"] for i in range(3) for _ in (0, 1)]
 
 
 def diff_revenue(original: List[int], new: List[int]) -> float:
@@ -376,23 +347,14 @@ Terrain = TypedDict("Terrain", {"build_cost": int, "revenue": List[int]})
 def suggest_modified_terrain(
     terrain: Terrain,
     terrain_type: str,
-    trial: optuna.Trial,
-    use_defaults: bool = False,
+    params: Dict[str, Any],
 ) -> ModifiedSuggestion[Terrain]:
     logging.debug(f"Suggesting for terrain: {terrain_type}")
-    s_int = partial(suggest_fixed, trial) if use_defaults else trial.suggest_int
 
     suggestion: Terrain = {
-        "build_cost": s_int(
-            f"{terrain_type}_build_cost",
-            terrain["build_cost"] if use_defaults else MIN_BUILD_COST,
-            terrain["build_cost"] if use_defaults else MAX_BUILD_COST,
-        ),
-        "revenue": [trial.suggest_int(f"{terrain_type}_rev", 0, MAX_REVENUE)] * 6,
+        "build_cost": params[f"{terrain_type}_build_cost"],
+        "revenue": get_revenue_from_params(terrain_type, params),
     }
-
-    if use_defaults:
-        return ModifiedSuggestion(suggestion, 0.0, 0.0)
 
     diff = (
         diff_revenue(terrain["revenue"], suggestion["revenue"])
@@ -425,26 +387,16 @@ Feature = TypedDict(
 
 
 def suggest_modified_feature(
-    feature: Feature, trial: optuna.Trial, use_defaults: bool = False
+    feature: Feature, params: Dict[str, Any]
 ) -> ModifiedSuggestion[Feature]:
     logging.debug(f"Suggesting for feature: {feature['location_name']}")
-    s_int = partial(suggest_fixed, trial) if use_defaults else trial.suggest_int
 
     suggestion: Feature = {
         "feature_type": feature["feature_type"],
         "location_name": feature["location_name"],
-        "revenue": suggest_revenue(
-            feature["location_name"], trial, use_defaults, feature["revenue"]
-        ),
-        "additional_cost": s_int(
-            f"{feature["location_name"]}_additional_cost",
-            feature["additional_cost"] if use_defaults else MIN_ADDITIONAL_COST,
-            feature["additional_cost"] if use_defaults else MAX_ADDITIONAL_COST,
-        ),
+        "revenue": get_revenue_from_params(feature["location_name"], params),
+        "additional_cost": params[f"{feature['location_name']}_additional_cost"],
     }
-
-    if use_defaults:
-        return ModifiedSuggestion(suggestion, 0.0, 0.0)
 
     diff = (
         diff_revenue(feature["revenue"], suggestion["revenue"])
@@ -476,95 +428,14 @@ Bond = TypedDict("Bond", {"face_value": int, "coupon": int})
 
 
 def suggest_bonds(
-    original: List[Bond], trial: optuna.Trial, use_defaults: bool = False
+    original: List[Bond], params: Dict[str, Any]
 ) -> ModifiedSuggestion[List[Bond]]:
-    logging.debug("Suggesting bonds")
-    s_int = partial(suggest_fixed, trial) if use_defaults else trial.suggest_int
-
-    if use_defaults:
-        bond_count = s_int("bond_count", len(original), len(original))
-        suggested: List[Bond] = []
-        for i in range(bond_count):
-            face = s_int(f"bond_face_{i}", original[i]["face_value"])
-            coupon = s_int(f"bond_coupon_{i}", original[i]["coupon"])
-            suggested.append({"face_value": face, "coupon": coupon})
-        return ModifiedSuggestion(suggested, 0.0, 0.0)
-
-    # `use_defaults` is false from here
-    bond_count = trial.suggest_int("bond_count", MIN_BOND_COUNT, MAX_BOND_COUNT)
-
-    min_face = trial.suggest_int("min_bond_face", MIN_BOND_FACE, MAX_BOND_FACE)
-    max_face = trial.suggest_int("max_bond_face", min_face, MAX_BOND_FACE)
-
-    suggested: List[Bond] = []
-    for i in range(bond_count):
-        face = trial.suggest_int(f"bond_face_{i}", min_face, max_face)
-        min_coupon = max(0, math.ceil(face * MIN_BOND_COUPON_RATIO))
-        max_coupon = max(min_coupon, math.floor(face * MAX_BOND_COUPON_RATIO))
-        coupon = trial.suggest_int(f"bond_coupon_{i}", int(min_coupon), int(max_coupon))
-        suggested.append({"face_value": face, "coupon": coupon})
-
-    # Difference is a bit less clear (because amount of bonds might be different)
-    # So - we're a few values:
-    # - Bond count (weight: 1/3)
-    # - Difference in max of face (weight: 1/6)
-    # - Difference in min of face (weight: 1/6)
-    # - Difference in mean ratio between face/coupon (weight: 1/3)
-    count_diff = calc_norm_diff(
-        len(original), bond_count, MIN_BOND_COUNT, MAX_BOND_COUNT
-    )
-
-    original_faces = [bond["face_value"] for bond in original]
-    original_max_face = max(original_faces) if original_faces else 0
-    original_min_face = min(original_faces) if original_faces else 0
-
-    suggested_faces = [bond["face_value"] for bond in suggested]
-    suggested_max_face = max(suggested_faces) if suggested_faces else 0
-    suggested_min_face = min(suggested_faces) if suggested_faces else 0
-
-    max_face_diff = calc_norm_diff(
-        original_max_face,
-        suggested_max_face,
-        MIN_BOND_FACE,
-        MAX_BOND_FACE,
-    )
-
-    min_face_diff = calc_norm_diff(
-        original_min_face,
-        suggested_min_face,
-        MIN_BOND_FACE,
-        MAX_BOND_FACE,
-    )
-
-    original_ratios = [
-        b["coupon"] / b["face_value"] for b in original if b["face_value"] > 0
-    ]
-    suggested_ratios = [
-        b["coupon"] / b["face_value"] for b in suggested if b["face_value"] > 0
-    ]
-
-    ratio_diff = calc_norm_diff(
-        fmean(original_ratios) if original_ratios else 0,
-        fmean(suggested_ratios) if suggested_ratios else 0,
-        0,
-        1,
-    )
-
-    diff = (
-        count_diff * (1 / 3)
-        + max_face_diff * (1 / 6)
-        + min_face_diff * (1 / 6)
-        + ratio_diff * (1 / 3)
-    )
-
-    if not suggested:
-        small_loss = 0
-    else:
-        avg_face = fmean([b["face_value"] for b in suggested])
-        avg_coupon = fmean([b["coupon"] for b in suggested])
-        small_loss = bias_small_loss(avg_face) + bias_small_loss(avg_coupon * 3)
-
-    return ModifiedSuggestion(suggested, diff, small_loss)
+    """
+    Ignoring bonds for now as per user request.
+    This function will just return the original bonds.
+    """
+    logging.debug("Suggesting bonds (ignored, returning original)")
+    return ModifiedSuggestion(original, 0.0, 0.0)
 
 
 CompanyFixedDetail = TypedDict(
@@ -583,75 +454,30 @@ CompanyFixedDetail = TypedDict(
 def suggest_modified_company_fixed_detail(
     company_id: str,
     company_detail: CompanyFixedDetail,
-    trial: optuna.Trial,
-    use_defaults: bool = False,
+    params: Dict[str, Any],
 ) -> ModifiedSuggestion[CompanyFixedDetail]:
     logging.debug(f"Suggesting for company: {company_id}")
-    s_int = partial(suggest_fixed, trial) if use_defaults else trial.suggest_int
 
     suggestion: CompanyFixedDetail = {
         "private": company_detail["private"],
         "starting": company_detail["starting"],
         "initial_treasury": (
-            s_int(
-                f"{company_id}_initial_treasury",
-                (
-                    company_detail["initial_treasury"]
-                    if use_defaults
-                    else MIN_PRIVATE_INITIAL_TREASURY
-                ),
-                (
-                    company_detail["initial_treasury"]
-                    if use_defaults
-                    else MAX_PRIVATE_INITIAL_TREASURY
-                ),
-            )
+            params[f"{company_id}_initial_treasury"]
             if company_detail["private"]
             else 0
         ),
         "initial_interest": (
-            s_int(
-                f"{company_id}_initial_interest",
-                (
-                    company_detail["initial_interest"]
-                    if use_defaults
-                    else MIN_PRIVATE_INITIAL_COUPON
-                ),
-                (
-                    company_detail["initial_interest"]
-                    if use_defaults
-                    else MAX_PRIVATE_INITIAL_COUPON
-                ),
-            )
+            params[f"{company_id}_initial_interest"]
             if company_detail["private"]
             else 0
         ),
         "stock_available": (
             1
             if company_detail["private"]
-            else s_int(
-                f"{company_id}_stock_available",
-                (
-                    company_detail["stock_available"]
-                    if use_defaults
-                    else MIN_STOCK_AVAILABLE
-                ),
-                (
-                    company_detail["stock_available"]
-                    if use_defaults
-                    else MAX_STOCK_AVAILABLE
-                ),
-            )
+            else params[f"{company_id}_stock_available"]
         ),
-        "track_available": s_int(
-            f"{company_id}_track_available",
-            company_detail["track_available"] if use_defaults else MIN_TRACK_AVAILABLE,
-            company_detail["track_available"] if use_defaults else MAX_TRACK_AVAILABLE,
-        ),
+        "track_available": params[f"{company_id}_track_available"],
     }
-
-    if use_defaults:
-        return ModifiedSuggestion(suggestion, 0.0, 0.0)
 
     diffs = []
     if company_detail["private"]:
@@ -704,24 +530,15 @@ def suggest_modified_company_fixed_detail(
 def suggest_initial_cash(
     players: int,
     original: dict[str, int],
-    trial: optuna.Trial,
-    use_defaults: bool = False,
+    params: Dict[str, Any],
 ) -> ModifiedSuggestion[dict[str, int]]:
     logging.debug(f"Suggesting initial cash for {players} players")
-    s_int = partial(suggest_fixed, trial) if use_defaults else trial.suggest_int
     # Diff wise, we're only changing (and caring about) the one for the current
     # amount of players.
     original_cash = original[str(players)]
-    suggested_cash = s_int(
-        f"initial_cash_{players}p",
-        original_cash if use_defaults else MIN_INITIAL_CASH,
-        original_cash if use_defaults else MAX_INITIAL_CASH,
-    )
+    suggested_cash = params["initial_cash"]
     modified = original.copy()
     modified[str(players)] = suggested_cash
-
-    if use_defaults:
-        return ModifiedSuggestion(modified, 0.0, 0.0)
 
     diff = calc_norm_diff(
         original_cash, suggested_cash, MIN_INITIAL_CASH, MAX_INITIAL_CASH
@@ -757,10 +574,9 @@ SMALL_LOSS_NORMALIZATION_FACTOR = 34.0
 
 
 def suggest_for_trial(
-    trial: optuna.Trial, use_defaults: bool = False, player_count: int = 3
+    params: Dict[str, Any], player_count: int = 3
 ) -> ModifiedSuggestion[EbrHyperparams]:
     hyperparams: EbrHyperparams = mon2y.default_hyperparams(mon2y.Games.EBR)
-    s_int = partial(suggest_fixed, trial) if use_defaults else trial.suggest_int
 
     diffs = {}
     small_losses = []
@@ -769,7 +585,7 @@ def suggest_for_trial(
     for terrain_type, terrain in hyperparams["terrain_attributes"].items():
         if terrain_type in ("town", "port", "nothing"):
             continue
-        suggested = suggest_modified_terrain(terrain, terrain_type, trial, use_defaults)
+        suggested = suggest_modified_terrain(terrain, terrain_type, params)
         terrain_diff_sum += suggested.difference
         hyperparams["terrain_attributes"][terrain_type] = suggested.suggestion
         small_losses.append(suggested.small_loss)
@@ -781,30 +597,19 @@ def suggest_for_trial(
     feature_diff_sum = 0
     # A feature is a tuple of (coords, feature_details)
     for i, (coords, feature) in enumerate(hyperparams["features"]):
-        suggested = suggest_modified_feature(feature, trial, use_defaults)
+        suggested = suggest_modified_feature(feature, params)
         feature_diff_sum += suggested.difference
         hyperparams["features"][i] = (coords, suggested.suggestion)
         small_losses.append(suggested.small_loss)
     diffs["feature_diff"] = (feature_diff_sum / len(hyperparams["features"]), 1)
 
     company_diff_sum = 0
-    # We're calculating the average of private company losses, so we need to collect them
-    private_company_losses = []
     for company_id, details in hyperparams["company_fixed_details"].items():
         suggested = suggest_modified_company_fixed_detail(
-            company_id, details, trial, use_defaults
+            company_id, details, params
         )
         company_diff_sum += suggested.difference
         hyperparams["company_fixed_details"][company_id] = suggested.suggestion
-
-        # The small loss for companies is a bit more complex.
-        # From the prompt:
-        # - Sum of (small loss of stock available for all non private companies)
-        # - Sum of (small loss of track available for all companies)
-        # - Small loss of (average of all private company initial interest * 2)
-        # - Small loss of (average of all private company initial treasury)
-        # The suggest_modified_company_fixed_detail returns the loss for a single company.
-        # I will sum them here.
         small_losses.append(suggested.small_loss)
 
     diffs["company_diff"] = (
@@ -812,13 +617,13 @@ def suggest_for_trial(
         1,
     )
 
-    suggested_bonds = suggest_bonds(hyperparams["bonds"], trial, use_defaults)
+    suggested_bonds = suggest_bonds(hyperparams["bonds"], params)
     hyperparams["bonds"] = suggested_bonds.suggestion
     diffs["suggested_bonds_diff"] = (suggested_bonds.difference, 1)
     small_losses.append(suggested_bonds.small_loss)
 
     initial_cash = suggest_initial_cash(
-        player_count, hyperparams["initial_cash"], trial, use_defaults
+        player_count, hyperparams["initial_cash"], params
     )
     hyperparams["initial_cash"] = initial_cash.suggestion
     diffs["initial_cash_diff"] = (initial_cash.difference, 1)
@@ -845,18 +650,13 @@ def suggest_for_trial(
         ),
     ]:
         original_value = hyperparams[key]
-        suggested_value = s_int(
-            key,
-            original_value if use_defaults else min_const,
-            original_value if use_defaults else max_const,
-        )
+        suggested_value = params[key]
         hyperparams[key] = suggested_value
 
-        if not use_defaults:
-            diffs[f"{key}_diff"] = (
-                calc_norm_diff(original_value, suggested_value, min_const, max_const),
-                0.5,
-            )
+        diffs[f"{key}_diff"] = (
+            calc_norm_diff(original_value, suggested_value, min_const, max_const),
+            0.5,
+        )
 
     diff_result = [diff[0] for diff in diffs.values()]
     diff_weight = [diff[1] for diff in diffs.values()]
@@ -868,7 +668,7 @@ def suggest_for_trial(
         fmean(diff_result, diff_weight) if diff_result else 0.0,
         total_small_loss,
     )
-
+    
 
 def most_trusted_hyperrewards(df: pd.DataFrame) -> pd.DataFrame:
     df["ratio"] = (df["turns"] - df["rwalk"]) / df["turns"]
@@ -915,6 +715,7 @@ def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
         "take_resource_cost": IntDistribution(
             MIN_TAKE_RESOURCE_COST, MAX_TAKE_RESOURCE_COST
         ),
+        "take_dividend": IntDistribution(MIN_TAKE_DIVIDEND, MAX_TAKE_DIVIDEND),
         "take_town_deliver_dividend": IntDistribution(
             MIN_TAKE_TOWN_DELIVER_DIVIDEND, MAX_TAKE_TOWN_DELIVER_DIVIDEND
         ),
@@ -929,7 +730,7 @@ def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
         *[
             _rev_dist(feature['location_name'], 0, MAX_REVENUE)
             | {
-                "additional_cost": IntDistribution(
+                f"{feature['location_name']}_additional_cost": IntDistribution(
                     MIN_ADDITIONAL_COST, MAX_ADDITIONAL_COST
                 )
             }
@@ -944,7 +745,7 @@ def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
                     MIN_BUILD_COST, MAX_BUILD_COST
                 )
             }
-            | _rev_dist(terrain_type, MIN_BUILD_COST, MAX_BUILD_COST)
+            | _rev_dist(terrain_type, 0, MAX_REVENUE)
             for terrain_type, terrain in default_hp["terrain_attributes"].items()
             if terrain_type not in ["town", "port", "nothing"]
         ]
@@ -954,27 +755,29 @@ def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
         *[
             (
                 {
-                    f"public_{company_id}_track_available": IntDistribution(
+                    f"{company_id}_track_available": IntDistribution(
                         MIN_TRACK_AVAILABLE, MAX_TRACK_AVAILABLE
                     ),
                 }
-                | {
-                    f"public_{company_id}_initial_treasury": IntDistribution(
-                        MIN_PRIVATE_INITIAL_TREASURY, MAX_PRIVATE_INITIAL_TREASURY
-                    ),
-                    f"public_{company_id}_initial_coupon": IntDistribution(
-                        MIN_PRIVATE_INITIAL_COUPON, MAX_PRIVATE_INITIAL_COUPON
-                    ),
-                }
-                if detail['private']
-                else {
-                    f"public_{company_id}_stock_available": IntDistribution(
-                        MIN_STOCK_AVAILABLE, MAX_STOCK_AVAILABLE
-                    ),
-                }
+                | (
+                    {
+                        f"{company_id}_initial_treasury": IntDistribution(
+                            MIN_PRIVATE_INITIAL_TREASURY,
+                            MAX_PRIVATE_INITIAL_TREASURY,
+                        ),
+                        f"{company_id}_initial_interest": IntDistribution(
+                            MIN_PRIVATE_INITIAL_COUPON, MAX_PRIVATE_INITIAL_COUPON
+                        ),
+                    }
+                    if detail["private"]
+                    else {
+                        f"{company_id}_stock_available": IntDistribution(
+                            MIN_STOCK_AVAILABLE, MAX_STOCK_AVAILABLE
+                        ),
+                    }
+                )
             )
             for company_id, detail in default_hp["company_fixed_details"].items()
-            if not detail["private"]
         ]
     )
 
@@ -987,32 +790,28 @@ def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
         for key in ("coupon_ratio", "face")
     }
 
-    return dict(simple_dists | bond_dists | company_dists | feature_dists)
+    _dists = dict(
+        simple_dists | bond_dists | company_dists | terrains_dists | feature_dists
+    )
+    return _dists
 
 
-def run_trial(
-    trial: optuna.Trial,
+def start_trial(
+    params: Dict[str, Any],
     threads: Optional[int] = None,
     trials: Optional[int] = None,
     max_iterations: Optional[int] = None,
     force_iterations: Optional[int] = None,
-    single: bool = False,
-    use_defaults: bool = False,
     player_count: int = 3,
-):
+) -> Dict[str, Any]:
     logging.debug("Starting run trial")
     trials = trials or TRIALS
     max_iterations = max_iterations or MAX_ITERATIONS
-    explore_iterations = force_iterations or max_iterations * (
-        1 - (math.log(max(1, trials - max(trial.number, 2))) / math.log(trials))
-    )
-    explore_iterations = max(explore_iterations, MIN_ITERATIONS)
+    explore_iterations = force_iterations or MIN_ITERATIONS
     logging.info(f"Iterations: {explore_iterations}")
 
     logging.debug("Suggesting hyperparams")
-    suggested_hyperparams = suggest_for_trial(
-        trial, use_defaults=use_defaults, player_count=player_count
-    )
+    suggested_hyperparams = suggest_for_trial(params, player_count=player_count)
 
     logging.debug("Starting explore")
     raw_results = mon2y.explore(
@@ -1023,7 +822,8 @@ def run_trial(
         player_count=player_count,
     )
     logging.info("Explore Done - %s results", (len(raw_results),))
-    trial.set_user_attr(f"iterations", len(raw_results))
+    
+    results: Dict[str, Any] = {"iterations": len(raw_results)}
 
     df = pd.DataFrame(raw_results)
     logging.info("Dataframe Converted - %s items", (len(df),))
@@ -1039,8 +839,8 @@ def run_trial(
         suggested_hyperparams.difference * DIFF_WEIGHT,
         suggested_hyperparams.small_loss * SMALL_LOSS_WEIGHT,
     ]
-    trial.set_user_attr(f"diff_loss", suggested_hyperparams.difference)
-    trial.set_user_attr(f"small_loss", suggested_hyperparams.small_loss)
+    results["diff_loss"] = suggested_hyperparams.difference
+    results["small_loss"] = suggested_hyperparams.small_loss
 
     for goal in GOALS.values():
         goal_scalars = {
@@ -1048,7 +848,7 @@ def run_trial(
             for goal_name, goal in goal.items()
         }
         for goal_name, scalar in goal_scalars.items():
-            trial.set_user_attr(f"{goal_name}", scalar)
+            results[f"{goal_name}"] = scalar
         goals_loss = {
             goal_name: goal.loss(goal_scalars[goal_name])
             for goal_name, goal in goal.items()
@@ -1056,186 +856,6 @@ def run_trial(
 
         losses.append(sum(goals_loss.values()))
 
-    return losses if not single else (sum(losses))
-
-
-def start_study(
-    worker_idx: int,
-    study_name: str,
-    n_trials: int,
-    storage: str,
-    threads: int,
-    single: bool,
-    include_first: bool,
-    player_count: int,
-    force_iterations: Optional[int],
-):
-    """Start a study, potentially running the first trial with defaults."""
-    global EBR_META
-    if EBR_META is None:
-        logging.debug("Populating EbrMeta")
-        hyperparams = mon2y.default_hyperparams(mon2y.Games.EBR)
-        terrain_type_keys = [
-            key
-            for key in hyperparams["terrain_attributes"].keys()
-            if key not in ("town", "port", "nothing")
-        ]
-        feature_keys = [
-            feature["location_name"] for _, feature in hyperparams["features"]
-        ]
-        private_company_keys = [
-            cid
-            for cid, details in hyperparams["company_fixed_details"].items()
-            if details["private"]
-        ]
-        public_company_keys = [
-            cid
-            for cid, details in hyperparams["company_fixed_details"].items()
-            if not details["private"]
-        ]
-        EBR_META = EbrMeta(
-            terrain_type_keys=terrain_type_keys,
-            feature_keys=feature_keys,
-            private_company_keys=private_company_keys,
-            public_company_keys=public_company_keys,
-        )
-
-    logging.debug("Starting study")
-    if single:
-        study = optuna.create_study(
-            storage=storage,
-            study_name=study_name,
-            direction="minimize",
-            load_if_exists=True,
-        )
-    else:
-        study = optuna.create_study(
-            storage=storage,
-            study_name=study_name,
-            directions=["minimize"] * (2 + len(GOALS)),
-            load_if_exists=True,
-        )
-
-    if include_first and worker_idx == 0:
-        # This worker will run the default trial first
-        # Only run if no trials exist
-        if len(study.get_trials(deepcopy=False)) == 0:
-            trial = study.ask()
-            try:
-                result = run_trial(
-                    trial,
-                    threads=threads,
-                    single=single,
-                    trials=n_trials,
-                    use_defaults=True,
-                    player_count=player_count,
-                    force_iterations=force_iterations,
-                )
-                study.tell(trial, result)
-            except Exception:
-                # If the default trial fails, we still want to continue with the study
-                study.tell(trial, state=optuna.trial.TrialState.FAIL)
-            logging.info("Default trial complete")
-
-    for _ in range(n_trials):
-        trial = study.ask()
-        try:
-            result = run_trial(
-                trial,
-                threads=threads,
-                single=single,
-                trials=n_trials,
-                use_defaults=False,
-                player_count=player_count,
-                force_iterations=force_iterations,
-            )
-            study.tell(trial, result)
-        except Exception:
-            study.tell(trial, state=optuna.trial.TrialState.FAIL)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Optimize EBR hyperparameters.")
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
-        help="Increase verbosity level: -v for INFO, -vv for DEBUG.",
-    )
-    parser.add_argument(
-        "--processes", type=int, default=CPU_COUNT, help="Number of processes to use."
-    )
-    parser.add_argument(
-        "--threads",
-        type=int,
-        default=MAX_THREADS,
-        help="Number of threads per process.",
-    )
-    parser.add_argument(
-        "--single-study", action="store_true", help="Run a single-objective study."
-    )
-    parser.add_argument(
-        "--study-name", type=str, default="ebr_study_4", help="Name of the study."
-    )
-    parser.add_argument(
-        "--n-trials", type=int, default=1000, help="Number of trials to run."
-    )
-    parser.add_argument(
-        "--storage",
-        type=str,
-        default="sqlite:///db.sqlite3",
-        help="Database storage URL.",
-    )
-    parser.add_argument(
-        "--include-first",
-        action="store_true",
-        help="Include a first trial with default settings.",
-    )
-    parser.add_argument(
-        "--player-count",
-        type=int,
-        default=3,
-        help="Number of players in the game.",
-    )
-    parser.add_argument(
-        "--force-iterations",
-        type=int,
-        help="Force the number of iterations for each trial. Useful for debugging.",
-    )
-
-    args = parser.parse_args()
-
-    # Configure logging
-    if args.verbose == 0:
-        log_level = logging.WARNING
-    elif args.verbose == 1:
-        log_level = logging.INFO
-    else:  # >= 2
-        log_level = logging.DEBUG
-
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        level=log_level,
-    )
-
-    study_name = args.study_name if args.single_study else f"{args.study_name}_multi"
-
-    runner = partial(
-        start_study,
-        study_name=study_name,
-        n_trials=args.n_trials,
-        storage=args.storage,
-        threads=args.threads,
-        single=args.single_study,
-        include_first=args.include_first,
-        player_count=args.player_count,
-        force_iterations=args.force_iterations,
-    )
-
-    if args.processes > 1:
-        with Pool(processes=args.processes) as pool:
-            pool.map(runner, range(args.processes))
-    else:
-        runner(0)
+    results["total_loss"] = sum(losses)
+    results["losses"] = losses
+    return results
