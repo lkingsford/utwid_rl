@@ -1,3 +1,4 @@
+import json
 from functools import partial
 from itertools import accumulate
 from multiprocessing import Pool
@@ -5,8 +6,6 @@ import logging
 import math
 import os
 from statistics import fmean
-import subprocess
-import sys
 from typing import (
     Any,
     Dict,
@@ -21,7 +20,6 @@ from typing import (
     Mapping,
     ChainMap,
 )
-import argparse
 
 import numpy as np
 import optuna
@@ -32,6 +30,17 @@ from optuna.distributions import (
     BaseDistribution,
 )
 import pandas as pd
+
+try:
+    import requests
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+    import requests
+try:
+    import boto3
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "boto3"])
+    import boto3
 
 import mon2y
 
@@ -112,7 +121,7 @@ class GoalAspect(NamedTuple):
     mean: float
     std_dev: float
     weight: float
-    scalarize: Callable[[pd.DataFrame, EbrHyperparams], float]
+    scalarize: Callable[[pd.DataFrame, "EbrHyperparams"], float]
 
     def loss(self, result_mean: float) -> float:
         z = (self.mean - result_mean) / self.std_dev
@@ -323,6 +332,8 @@ class ModifiedSuggestion(Generic[T], NamedTuple):
 
 def calc_norm_diff(original, new, min_expected, max_expected) -> float:
     max_diff = max(abs(original - min_expected), abs(original - max_expected))
+    if max_diff == 0:
+        return 0.0
     return abs(original - new) / max_diff
 
 
@@ -756,9 +767,11 @@ def suggest_for_trial(
         fmean(diff_result, diff_weight) if diff_result else 0.0,
         total_small_loss,
     )
-    
+
 
 def most_trusted_hyperrewards(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "turns" not in df.columns or "rwalk" not in df.columns:
+        return pd.DataFrame()
     df["ratio"] = (df["turns"] - df["rwalk"]) / df["turns"]
 
     s = df["sum_diff_est_reward"]
@@ -779,8 +792,8 @@ def most_trusted_hyperrewards(df: pd.DataFrame) -> pd.DataFrame:
 _dists: Optional[Dict[str, optuna.distributions.BaseDistribution]] = None
 
 
-def _rev_dist(prefix: str, min: int, max: int) -> dict[str, IntDistribution]:
-    return {f"{prefix}_rev_{i}": IntDistribution(min, max) for i in range(3)}
+def _rev_dist(prefix: str, min_val: int, max_val: int) -> dict[str, IntDistribution]:
+    return {f"{prefix}_rev_{i}": IntDistribution(min_val, max_val) for i in range(3)}
 
 
 def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
@@ -816,7 +829,7 @@ def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
 
     feature_dists = ChainMap(
         *[
-            _rev_dist(feature['location_name'], 0, MAX_REVENUE)
+            _rev_dist(feature["location_name"], 0, MAX_REVENUE)
             | {
                 f"{feature['location_name']}_additional_cost": IntDistribution(
                     MIN_ADDITIONAL_COST, MAX_ADDITIONAL_COST
@@ -871,7 +884,6 @@ def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
 
     bond_dists: Mapping[str, BaseDistribution] = {
         "bond_count": IntDistribution(MIN_BOND_COUNT, MAX_BOND_COUNT),
-        "max_bond_face": IntDistribution(MIN_BOND_FACE, MAX_BOND_FACE),
     } | {
         f"bond_{i:0{len(str(MAX_BOND_COUNT))}}_{key}": FloatDistribution(0, 1)
         for i in range(MAX_BOND_COUNT)
@@ -949,165 +961,88 @@ def start_trial(
     return results, suggested_hyperparams.suggestion
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Optimize EBR hyperparameters remotely.")
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
-        help="Increase verbosity level: -v for INFO, -vv for DEBUG.",
-    )
-    parser.add_argument(
-        "--threads",
-        type=int,
-        default=MAX_THREADS,
-        help="Number of threads per process.",
-    )
-    parser.add_argument(
-        "--study-name",
-        type=str,
-        default="ebr_study_distributed",
-        help="Name of the study.",
-    )
-    parser.add_argument(
-        "--player-count",
-        type=int,
-        default=3,
-        help="Number of players in the game.",
-    )
-    parser.add_argument(
-        "--force-iterations",
-        type=int,
-        help="Force the number of iterations for each trial. Useful for debugging.",
-    )
-    parser.add_argument(
-        "--create-study",
-        action="store_true",
-        help="If provided, create the study before starting.",
-    )
-    parser.add_argument(
-        "--create-study-module",
-        type=str,
-        default="mon2y.ebr_opt",
-        help="Module name to use when creating study.",
-    )
-    parser.add_argument(
-        "--create-study-function",
-        type=str,
-        default="start_trial",
-        help="Function name to use when creating study.",
-    )
-    parser.add_argument(
-        "--create-study-directions",
-        type=str,
-        help="Optimization direction(s) for creating the study, e.g., 'min' or 'min,max'. If not provided, it will be a 'min' for each loss component.",
-    )
-    args = parser.parse_args()
 
-    # Configure logging
-    if args.verbose == 0:
-        log_level = logging.WARNING
-    elif args.verbose == 1:
-        log_level = logging.INFO
-    else:  # >= 2
-        log_level = logging.DEBUG
 
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        level=log_level,
-    )
-
-    try:
-        import requests
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
-        import requests
-
+def trial_worker(
+    comm_socket_fd: int,
+    study_name: str,
+    player_count: int,
+    threads: int,
+    force_iterations: int | None,
+):
+    # This function runs in a separate process
+    comm_socket = socket.fromfd(comm_socket_fd, socket.AF_UNIX, socket.SOCK_STREAM)
     DIST_SERVER = os.environ.get("DIST_SERVER", "http://localhost:5000")
-
-    if args.create_study:
-        num_losses = 2 + len(GOALS)
-        directions = args.create_study_directions or ",".join(["min"] * num_losses)
-        
-        create_payload = {
-            "study_name": args.study_name,
-            "direction": directions,
-            "module": args.create_study_module,
-            "function": args.create_study_function,
-        }
-        
-        try:
-            logging.info(f"Creating study '{args.study_name}' on {DIST_SERVER}")
-            response = requests.post(f"{DIST_SERVER}/create_study", json=create_payload)
-            response.raise_for_status()
-            logging.info(f"Study '{args.study_name}' created successfully.")
-        except requests.RequestException as e:
-            logging.error(f"Failed to create study: {e}")
-            if e.response:
-                logging.error(f"Response: {e.response.text}")
-            sys.exit(1)
-    
-    import json
-
     distributions = dists()
-    json_dists = {
-        name: json.loads(optuna.distributions.distribution_to_json(dist))
-        for name, dist in distributions.items()
-    }
-    ask_payload = {"study_name": args.study_name, "distributions": json_dists}
 
-    try:
-        logging.info(f"Asking for trial from {DIST_SERVER}")
-        response = requests.post(f"{DIST_SERVER}/ask", json=ask_payload)
-        response.raise_for_status()
-        ask_data = response.json()
-        trial_number = ask_data["trial_number"]
-        params = ask_data["params"]
-        logging.info(f"Received trial {trial_number}")
-    except requests.RequestException as e:
-        logging.error(f"Failed to ask for trial: {e}")
-        if e.response:
-            logging.error(f"Response: {e.response.text}")
-        sys.exit(1)
+    while True:
+        try:
+            msg = comm_socket.recv(1024)
+            if msg == b"done":
+                logging.info(f"Worker for study '{study_name}' received 'done' message.")
+                break
+        except (BlockingIOError, InterruptedError):
+            time.sleep(1)
+            continue
+        except Exception:
+            logging.exception(f"Worker for study '{study_name}' failed to recv.")
+            break
 
-    try:
-        results, hyperparams = start_trial(
-            params=params,
-            threads=args.threads,
-            force_iterations=args.force_iterations,
-            player_count=args.player_count,
-        )
-        status = "succeed"
-        result_values = results["losses"]
-    except Exception as e:
-        logging.exception("Trial failed")
-        status = "fail"
-        result_values = None
-        hyperparams = {}
+        try:
+            logging.info(f"Asking for trial for study '{study_name}'")
+            json_dists = {
+                name: json.loads(optuna.distributions.distribution_to_json(dist))
+                for name, dist in distributions.items()
+            }
+            ask_payload = {"study_name": study_name, "distributions": json_dists}
+            response = requests.post(f"{DIST_SERVER}/ask", json=ask_payload, timeout=30)
+            response.raise_for_status()
+            ask_data = response.json()
+            trial_number = ask_data["trial_number"]
+            params = ask_data["params"]
+            logging.info(f"Received trial {trial_number} for study '{study_name}'")
 
-    user_data = {}
-    if "bonds" in hyperparams:
-        user_data["bonds"] = hyperparams["bonds"]
+            results, hyperparams = start_trial(
+                params=params,
+                threads=threads,
+                force_iterations=force_iterations,
+                player_count=player_count,
+            )
+            status = "succeed"
+            result_values = results["losses"]
 
-    tell_payload = {
-        "study_name": args.study_name,
-        "trial_number": trial_number,
-        "status": status,
-    }
-    if status == "succeed":
-        tell_payload["result"] = result_values
-    if user_data:
-        tell_payload["user_data"] = user_data
+        except Exception as e:
+            logging.exception(f"Trial failed for study '{study_name}': {e}")
+            status = "fail"
+            result_values = None
+            hyperparams = {}
+            # Wait before retrying
+            time.sleep(5)
+            comm_socket.send(b"run")
+            continue
 
-    try:
-        logging.info(f"Telling result for trial {trial_number}")
-        response = requests.post(f"{DIST_SERVER}/tell", json=tell_payload)
-        response.raise_for_status()
-        logging.info(f"Successfully told result for trial {trial_number}")
-    except requests.RequestException as e:
-        logging.error(f"Failed to tell result: {e}")
-        if e.response:
-            logging.error(f"Response: {e.response.text}")
-        sys.exit(1)
+        user_data: Dict[str, Any] = {}
+        if "bonds" in hyperparams:
+            user_data["bonds"] = hyperparams["bonds"]
+
+        tell_payload: Dict[str, Any] = {
+            "study_name": study_name,
+            "trial_number": trial_number,
+            "status": status,
+        }
+        if status == "succeed":
+            tell_payload["result"] = result_values
+        if user_data:
+            tell_payload["user_data"] = user_data
+
+        try:
+            logging.info(f"Telling result for trial {trial_number} in study '{study_name}'")
+            response = requests.post(f"{DIST_SERVER}/tell", json=tell_payload, timeout=30)
+            response.raise_for_status()
+            logging.info(f"Successfully told result for trial {trial_number}")
+        except requests.RequestException as e:
+            logging.exception(f"Failed to tell result for trial {trial_number}: {e}")
+        
+        # Ask for another run
+        comm_socket.send(b"run")
+

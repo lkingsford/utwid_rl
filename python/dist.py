@@ -356,6 +356,25 @@ def heartbeat():
         return jsonify({"error": f"Failed to record heartbeat: {e}"}), 500
 
 
+@app.route("/open", methods=["GET"])
+def get_open_studies():
+    app.logger.info("Received /open request")
+    try:
+        all_studies = optuna.study.get_all_study_summaries(storage=STORAGE_URL, include_best_trial=False)
+        open_studies = []
+        for study_summary in all_studies:
+            if study_summary.user_attrs.get("dist-status") == "open":
+                open_studies.append({
+                    "study_id": study_summary.study_id,
+                    "study_name": study_summary.study_name,
+                    "user_attrs": study_summary.user_attrs,
+                })
+        return jsonify(open_studies)
+    except Exception as e:
+        app.logger.exception("Failed to get open studies")
+        return jsonify({"error": f"Failed to get open studies: {e}"}), 500
+
+
 if __name__ == "__main__":
     app.logger.info("Starting Flask development server.")
     app.run(debug=True)
