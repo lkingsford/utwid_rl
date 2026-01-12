@@ -5,6 +5,8 @@ import logging
 import math
 import os
 from statistics import fmean
+import subprocess
+import sys
 from typing import (
     Any,
     Dict,
@@ -889,7 +891,7 @@ def start_trial(
     max_iterations: Optional[int] = None,
     force_iterations: Optional[int] = None,
     player_count: int = 3,
-) -> Dict[str, Any]:
+) -> Tuple[Dict[str, Any], EbrHyperparams]:
     logging.debug("Starting run trial")
     trials = trials or TRIALS
     max_iterations = max_iterations or MAX_ITERATIONS
@@ -908,7 +910,7 @@ def start_trial(
         player_count=player_count,
     )
     logging.info("Explore Done - %s results", (len(raw_results),))
-    
+
     results: Dict[str, Any] = {"iterations": len(raw_results)}
 
     df = pd.DataFrame(raw_results)
@@ -944,4 +946,168 @@ def start_trial(
 
     results["total_loss"] = sum(losses)
     results["losses"] = losses
-    return results
+    return results, suggested_hyperparams.suggestion
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Optimize EBR hyperparameters remotely.")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase verbosity level: -v for INFO, -vv for DEBUG.",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=MAX_THREADS,
+        help="Number of threads per process.",
+    )
+    parser.add_argument(
+        "--study-name",
+        type=str,
+        default="ebr_study_distributed",
+        help="Name of the study.",
+    )
+    parser.add_argument(
+        "--player-count",
+        type=int,
+        default=3,
+        help="Number of players in the game.",
+    )
+    parser.add_argument(
+        "--force-iterations",
+        type=int,
+        help="Force the number of iterations for each trial. Useful for debugging.",
+    )
+    parser.add_argument(
+        "--create-study",
+        action="store_true",
+        help="If provided, create the study before starting.",
+    )
+    parser.add_argument(
+        "--create-study-module",
+        type=str,
+        default="mon2y.ebr_opt",
+        help="Module name to use when creating study.",
+    )
+    parser.add_argument(
+        "--create-study-function",
+        type=str,
+        default="start_trial",
+        help="Function name to use when creating study.",
+    )
+    parser.add_argument(
+        "--create-study-directions",
+        type=str,
+        help="Optimization direction(s) for creating the study, e.g., 'min' or 'min,max'. If not provided, it will be a 'min' for each loss component.",
+    )
+    args = parser.parse_args()
+
+    # Configure logging
+    if args.verbose == 0:
+        log_level = logging.WARNING
+    elif args.verbose == 1:
+        log_level = logging.INFO
+    else:  # >= 2
+        log_level = logging.DEBUG
+
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        level=log_level,
+    )
+
+    try:
+        import requests
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+        import requests
+
+    DIST_SERVER = os.environ.get("DIST_SERVER", "http://localhost:5000")
+
+    if args.create_study:
+        num_losses = 2 + len(GOALS)
+        directions = args.create_study_directions or ",".join(["min"] * num_losses)
+        
+        create_payload = {
+            "study_name": args.study_name,
+            "direction": directions,
+            "module": args.create_study_module,
+            "function": args.create_study_function,
+        }
+        
+        try:
+            logging.info(f"Creating study '{args.study_name}' on {DIST_SERVER}")
+            response = requests.post(f"{DIST_SERVER}/create_study", json=create_payload)
+            response.raise_for_status()
+            logging.info(f"Study '{args.study_name}' created successfully.")
+        except requests.RequestException as e:
+            logging.error(f"Failed to create study: {e}")
+            if e.response:
+                logging.error(f"Response: {e.response.text}")
+            sys.exit(1)
+    
+    import json
+
+    distributions = dists()
+    json_dists = {
+        name: json.loads(optuna.distributions.distribution_to_json(dist))
+        for name, dist in distributions.items()
+    }
+    ask_payload = {"study_name": args.study_name, "distributions": json_dists}
+
+    try:
+        logging.info(f"Asking for trial from {DIST_SERVER}")
+        response = requests.post(f"{DIST_SERVER}/ask", json=ask_payload)
+        response.raise_for_status()
+        ask_data = response.json()
+        trial_number = ask_data["trial_number"]
+        params = ask_data["params"]
+        logging.info(f"Received trial {trial_number}")
+    except requests.RequestException as e:
+        logging.error(f"Failed to ask for trial: {e}")
+        if e.response:
+            logging.error(f"Response: {e.response.text}")
+        sys.exit(1)
+
+    try:
+        results, hyperparams = start_trial(
+            params=params,
+            threads=args.threads,
+            force_iterations=args.force_iterations,
+            player_count=args.player_count,
+        )
+        status = "succeed"
+        result_values = results["losses"]
+    except Exception as e:
+        logging.exception("Trial failed")
+        status = "fail"
+        result_values = None
+        hyperparams = {}
+
+    user_data = {}
+    if "bonds" in hyperparams:
+        user_data["bonds"] = hyperparams["bonds"]
+
+    tell_payload = {
+        "study_name": args.study_name,
+        "trial_number": trial_number,
+        "status": status,
+    }
+    if status == "succeed":
+        tell_payload["result"] = result_values
+    if user_data:
+        tell_payload["user_data"] = user_data
+
+    try:
+        logging.info(f"Telling result for trial {trial_number}")
+        response = requests.post(f"{DIST_SERVER}/tell", json=tell_payload)
+        response.raise_for_status()
+        logging.info(f"Successfully told result for trial {trial_number}")
+    except requests.RequestException as e:
+        logging.error(f"Failed to tell result: {e}")
+        if e.response:
+            logging.error(f"Response: {e.response.text}")
+        sys.exit(1)
