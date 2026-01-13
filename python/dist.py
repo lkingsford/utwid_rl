@@ -2,11 +2,19 @@ import datetime
 import json
 import logging
 import os
+import sys
+import subprocess
 from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request
 import optuna
 import optuna.exceptions
+
+try:
+    import boto3
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "boto3"])
+    import boto3
 
 app = Flask(__name__)
 handler = logging.StreamHandler()
@@ -354,6 +362,98 @@ def heartbeat():
             f"/heartbeat: Failed to record heartbeat for trial {trial_number} in study '{study_name}'"
         )
         return jsonify({"error": f"Failed to record heartbeat: {e}"}), 500
+
+
+@app.route("/update_wheel", methods=["POST"])
+def update_wheel():
+    app.logger.info(f"Received /update_wheel request from {request.remote_addr}")
+    
+    study_name = request.args.get("study_name")
+    if not study_name:
+        app.logger.error("/update_wheel: 'study_name' is required")
+        return jsonify({"error": "'study_name' is required"}), 400
+
+    platform = request.args.get("platform")
+    if not platform:
+        app.logger.error("/update_wheel: 'platform' is required")
+        return jsonify({"error": "'platform' is required"}), 400
+    if platform not in ["x86_manylinux", "arm_manylinux"]:
+        app.logger.error(f"/update_wheel: Invalid 'platform' {platform}")
+        return jsonify({"error": "platform must be 'x86_manylinux' or 'arm_manylinux'"}), 400
+
+    filename = request.args.get("filename")
+    if not filename:
+        app.logger.error("/update_wheel: 'filename' is required")
+        return jsonify({"error": "'filename' is required"}), 400
+
+    wheel_data = request.data
+    if not wheel_data:
+        app.logger.error("/update_wheel: POST data is empty")
+        return jsonify({"error": "POST data is empty"}), 400
+
+    s3_bucket = os.environ.get("S3_BUCKET")
+    if not s3_bucket:
+        app.logger.error("/update_wheel: S3_BUCKET environment variable not set")
+        return jsonify({"error": "Server is not configured for S3 uploads"}), 500
+    
+    study = get_study(study_name)
+    if study is None:
+        app.logger.error(f"/update_wheel: Study '{study_name}' not found")
+        return jsonify({"error": f"Study '{study_name}' not found"}), 404
+
+    s3 = boto3.client("s3")
+    s3_key = f"{study_name}/{filename}"
+    s3_path = f"s3://{s3_bucket}/{s3_key}"
+    
+    try:
+        app.logger.info(f"Uploading wheel to {s3_path}")
+        s3.put_object(Bucket=s3_bucket, Key=s3_key, Body=wheel_data)
+    except Exception as e:
+        app.logger.exception(f"Failed to upload to S3: {e}")
+        return jsonify({"error": f"Failed to upload to S3: {e}"}), 500
+    
+    user_attr_key = f"{platform}_wheel_s3"
+    try:
+        app.logger.info(f"Setting user attr '{user_attr_key}' to '{s3_path}'")
+        study.set_user_attr(user_attr_key, s3_path)
+    except Exception as e:
+        app.logger.exception(f"Failed to set user attribute: {e}")
+        return jsonify({"error": f"Failed to set user attribute: {e}"}), 500
+
+    return jsonify({"status": "ok", "s3_path": s3_path})
+
+
+@app.route("/remove_wheel", methods=["POST"])
+def remove_wheel():
+    app.logger.info(f"Received /remove_wheel request from {request.remote_addr}")
+    
+    study_name = request.args.get("study_name")
+    if not study_name:
+        app.logger.error("/remove_wheel: 'study_name' is required")
+        return jsonify({"error": "'study_name' is required"}), 400
+    
+    platform = request.args.get("platform")
+    if not platform:
+        app.logger.error("/remove_wheel: 'platform' is required")
+        return jsonify({"error": "'platform' is required"}), 400
+    if platform not in ["x86_manylinux", "arm_manylinux"]:
+        app.logger.error(f"/remove_wheel: Invalid 'platform' {platform}")
+        return jsonify({"error": "platform must be 'x86_manylinux' or 'arm_manylinux'"}), 400
+
+    study = get_study(study_name)
+    if study is None:
+        app.logger.error(f"/remove_wheel: Study '{study_name}' not found")
+        return jsonify({"error": f"Study '{study_name}' not found"}), 404
+
+    user_attr_key = f"{platform}_wheel_s3"
+    try:
+        app.logger.info(f"Setting user attr '{user_attr_key}' to None")
+        study.set_user_attr(user_attr_key, None)
+    except Exception as e:
+        app.logger.exception(f"Failed to set user attribute: {e}")
+        return jsonify({"error": f"Failed to set user attribute: {e}"}), 500
+        
+    return jsonify({"status": "ok"})
 
 
 @app.route("/open", methods=["GET"])
