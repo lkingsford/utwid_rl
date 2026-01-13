@@ -375,6 +375,3 @@ def get_open_studies():
         return jsonify({"error": f"Failed to get open studies: {e}"}), 500
 
 
-if __name__ == "__main__":
-    app.logger.info("Starting Flask development server.")
-    app.run(debug=True)
