@@ -70,12 +70,6 @@ if __name__ == "__main__":
         help="Number of threads per process.",
     )
     parser.add_argument(
-        "--player-count",
-        type=int,
-        default=3,
-        help="Number of players in the game.",
-    )
-    parser.add_argument(
         "--force-iterations",
         type=int,
         help="Force the number of iterations for each trial. Useful for debugging.",
@@ -160,14 +154,35 @@ if __name__ == "__main__":
             parent_sock, child_sock = socket.socketpair()
 
             python_executable = os.path.join(venv_dir, "bin", "python")
+
+            user_attrs = study["user_attrs"]
+            module = user_attrs.get("module")
+            function = user_attrs.get("function")
+
+            if not module or not function:
+                logging.error(
+                    f"Study '{study_name}' is missing 'module' or 'function' in user_attrs."
+                )
+                continue
+
+            params = user_attrs.get("params", {})
             
             # Use this file as the entry point for the child process.
             
+            command = (
+                f"import {module}; {module}.{function}("
+                f"comm_socket_fd={child_sock.fileno()}, "
+                f"study_name='{study_name}', "
+                f"threads={args.threads}, "
+                f"force_iterations={args.force_iterations}, "
+                f"params={params})"
+            )
+
             process = subprocess.Popen(
                 [
                     python_executable,
                     "-c",
-                    f"import mon2y.ebr_opt; mon2y.ebr_opt.trial_worker(comm_socket_fd={child_sock.fileno()}, study_name='{study_name}', player_count={args.player_count}, threads={args.threads}, force_iterations={args.force_iterations})",
+                    command,
                 ],
                 pass_fds=[child_sock.fileno()],
             )

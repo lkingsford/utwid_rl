@@ -5,6 +5,7 @@ from multiprocessing import Pool
 import logging
 import math
 import os
+import time
 from statistics import fmean
 from typing import (
     Any,
@@ -54,6 +55,8 @@ TRIALS = 10000
 # Experimentation showed more than 12 threads has minimum benefit (probably) due to locking
 MAX_THREADS = 4
 CPU_COUNT = os.cpu_count() or 8
+DEFAULT_PLAYER_COUNT = 3
+
 
 #####
 # Rules related consts
@@ -902,8 +905,8 @@ def start_trial(
     trials: Optional[int] = None,
     max_iterations: Optional[int] = None,
     force_iterations: Optional[int] = None,
-    player_count: int = 3,
 ) -> Tuple[Dict[str, Any], EbrHyperparams]:
+    player_count = params.get("player_count", DEFAULT_PLAYER_COUNT)
     logging.debug("Starting run trial")
     trials = trials or TRIALS
     max_iterations = max_iterations or MAX_ITERATIONS
@@ -966,9 +969,9 @@ def start_trial(
 def trial_worker(
     comm_socket_fd: int,
     study_name: str,
-    player_count: int,
     threads: int,
     force_iterations: int | None,
+    params: Dict[str, Any],
 ):
     # This function runs in a separate process
     comm_socket = socket.fromfd(comm_socket_fd, socket.AF_UNIX, socket.SOCK_STREAM)
@@ -999,14 +1002,16 @@ def trial_worker(
             response.raise_for_status()
             ask_data = response.json()
             trial_number = ask_data["trial_number"]
-            params = ask_data["params"]
+            trial_params = ask_data["params"]
             logging.info(f"Received trial {trial_number} for study '{study_name}'")
 
+            study_params = params
+            all_params = {**study_params, **trial_params}
+
             results, hyperparams = start_trial(
-                params=params,
+                params=all_params,
                 threads=threads,
                 force_iterations=force_iterations,
-                player_count=player_count,
             )
             status = "succeed"
             result_values = results["losses"]

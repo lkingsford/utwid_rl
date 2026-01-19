@@ -138,6 +138,10 @@ def create_study():
         return jsonify({"error": "Invalid Request, expected 'function'"}), 400
     user_attrs["function"] = function
 
+    params = data.get("params")
+    if params:
+        user_attrs["params"] = params
+
     try:
         for key, value in user_attrs.items():
             study.set_user_attr(key, value)
