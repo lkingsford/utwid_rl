@@ -1,0 +1,16 @@
+[Unit]
+Description=Mon2y Trial Daemon
+After=mon2y-dist.service
+BindsTo=mon2y-dist.service
+
+[Service]
+User=lachlan
+WorkingDirectory=/home/lachlan/mon2y_rs
+Environment="PYTHONPATH=/home/lachlan/mon2y_rs/python"
+Environment="DIST_SERVER=http://127.0.0.1:5000"
+ExecStart=/home/lachlan/mon2y_rs/venv/bin/python /home/lachlan/mon2y_rs/python/trial_daemon.py --verbose
+Restart=always
+SyslogIdentifier=mon2y-trial-daemon
+
+[Install]
+WantedBy=multi-user.target

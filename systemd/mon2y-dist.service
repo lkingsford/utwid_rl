@@ -1,0 +1,17 @@
+[Unit]
+Description=Mon2y Distributed Optuna Service
+After=network.target
+
+[Service]
+# This service requires gunicorn to be installed in the virtual environment.
+# pip install gunicorn
+User=lachlan
+WorkingDirectory=/home/lachlan/mon2y_rs/python
+Environment="OPTUNA_STORAGE=sqlite:////home/lachlan/mon2y_rs/db.sqlite3"
+Environment="S3_BUCKET=mon2y-wheels"
+ExecStart=/home/lachlan/mon2y_rs/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:5000 dist:app
+Restart=always
+SyslogIdentifier=mon2y-dist
+
+[Install]
+WantedBy=multi-user.target
