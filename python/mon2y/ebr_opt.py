@@ -23,8 +23,7 @@ from typing import (
 )
 
 import numpy as np
-import optuna
-from optuna.distributions import (
+from mon2y.distributions import (
     IntDistribution,
     FloatDistribution,
     CategoricalDistribution,
@@ -993,10 +992,11 @@ def trial_worker(
 
         try:
             logging.info(f"Asking for trial for study '{study_name}'")
-            json_dists = {
-                name: json.loads(optuna.distributions.distribution_to_json(dist))
-                for name, dist in distributions.items()
-            }
+            json_dists = {}
+            for name, dist in distributions.items():
+                dist_name = dist.__class__.__name__
+                attributes = dist._asdict()
+                json_dists[name] = {"name": dist_name, "attributes": attributes}
             ask_payload = {"study_name": study_name, "distributions": json_dists}
             response = requests.post(f"{DIST_SERVER}/ask", json=ask_payload, timeout=30)
             response.raise_for_status()
@@ -1023,7 +1023,6 @@ def trial_worker(
             hyperparams = {}
             # Wait before retrying
             time.sleep(5)
-            comm_socket.send(b"run")
             continue
 
         user_data: Dict[str, Any] = {}
@@ -1048,6 +1047,5 @@ def trial_worker(
         except requests.RequestException as e:
             logging.exception(f"Failed to tell result for trial {trial_number}: {e}")
         
-        # Ask for another run
-        comm_socket.send(b"run")
+        # The loop will now repeat, asking for the next trial
 

@@ -3,7 +3,9 @@ name = "mon2y"
 version = "0.1.0"
 dependencies = [
 	"numpy~=2.4",
-	"pandas~=2.3"
+	"pandas~=2.3",
+	"requests",
+	"boto3"
 ]
 
 [build-system]
