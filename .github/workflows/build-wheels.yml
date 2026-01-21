@@ -1,0 +1,101 @@
+name: Build and Release Wheels
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'x-*'
+
+jobs:
+  build_wheels:
+    name: Build wheel for ${{ matrix.target }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64
+            manylinux: "auto"
+          - os: ubuntu-latest
+            target: aarch64
+            manylinux: "auto"
+          - os: macos-latest
+            target: x86_64
+          - os: macos-14
+            target: aarch64
+          - os: windows-latest
+            target: x86_64
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+    - name: Get package info from Cargo.toml
+      id: get_info
+      run: |
+        # Try to get the library name first, as it dictates the wheel name.
+        # Fallback to the package name if [lib] name is not found.
+        LIB_NAME=$(sed -n '/^\[lib\]/,/^\s*\[/p' Cargo.toml | grep 'name =' | sed 's/.*= *//' | tr -d '"' | head -n 1)
+        if [ -n "$LIB_NAME" ]; then
+          PACKAGE_NAME="$LIB_NAME"
+        else
+          PACKAGE_NAME=$(grep '^name' Cargo.toml | head -n 1 | sed 's/name = "\(.*\)"/\1/')
+        fi
+        
+        # PEP 427 normalizes names to use hyphens.
+        PACKAGE_NAME=${PACKAGE_NAME//_/-}
+        
+        VERSION=$(grep '^version' Cargo.toml | head -n 1 | sed 's/version = "\(.*\)"/\1/')
+        echo "package_name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Build wheel
+      uses: messense/maturin-action@v1
+      with:
+        target: ${{ matrix.target }}
+        manylinux: ${{ matrix.manylinux || 'auto' }}
+        args: --release --out dist
+
+    - name: Rename wheel for development builds
+      id: rename_wheel
+      run: |
+        WHEEL_PATH=$(ls dist/*.whl)
+        PACKAGE_NAME=${{ steps.get_info.outputs.package_name }}
+        VERSION=${{ steps.get_info.outputs.version }}
+        
+        # Append .dev<RUN_NUMBER> to the version in the filename
+        # e.g. mon2y-0.1.0-....whl -> mon2y-0.1.0.dev123-....whl
+        DEV_VERSION_SUFFIX=".dev${{ github.run_number }}"
+        NEW_WHEEL_NAME=$(basename ${WHEEL_PATH} | sed "s/\(${PACKAGE_NAME}-${VERSION}\)/\1${DEV_VERSION_SUFFIX}/")
+
+        mv $WHEEL_PATH dist/$NEW_WHEEL_NAME
+        echo "new_name=$NEW_WHEEL_NAME" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1 # Important: Change this to your S3 bucket's region
+
+    - name: Upload wheel to S3
+      run: |
+        aws s3 cp dist/${{ steps.rename_wheel.outputs.new_name }} s3://mon2y/wheels/${{ steps.rename_wheel.outputs.new_name }}
+      shell: bash
