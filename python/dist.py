@@ -469,7 +469,9 @@ def get_open_studies():
             storage=STORAGE_URL, include_best_trial=False
         )
         open_studies = []
+        app.logger.info(f"All studies: \n {repr(all_studies)}")
         for study_summary in all_studies:
+            app.logger.info(vars(study_summary))
             if study_summary.user_attrs.get("dist-status") == "open":
                 user_attrs = study_summary.user_attrs.copy()
                 for attr_key in ("x86_manylinux_wheel_s3", "arm_manylinux_wheel_s3"):
@@ -491,7 +493,8 @@ def get_open_studies():
 
                 open_studies.append(
                     {
-                        "study_id": study_summary.study_id,
+                        # Need to be cautious here
+                        "study_id": study_summary._study_id,
                         "study_name": study_summary.study_name,
                         "user_attrs": user_attrs,
                     }

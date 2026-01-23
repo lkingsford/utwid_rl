@@ -90,7 +90,7 @@ if __name__ == "__main__":
     WHEELS_DIR = "wheels"
     os.makedirs(WHEELS_DIR, exist_ok=True)
 
-    DIST_SERVER = os.environ.get("DIST_SERVER", "http://localhost:5000")
+    DIST_SERVER = os.environ.get("DIST_SERVER", "http://127.0.0.1:5000")
 
     cpu_arch = get_cpu_arch()
     if not cpu_arch:
