@@ -464,15 +464,38 @@ def remove_wheel():
 def get_open_studies():
     app.logger.info("Received /open request")
     try:
-        all_studies = optuna.study.get_all_study_summaries(storage=STORAGE_URL, include_best_trial=False)
+        s3 = boto3.client("s3")
+        all_studies = optuna.study.get_all_study_summaries(
+            storage=STORAGE_URL, include_best_trial=False
+        )
         open_studies = []
         for study_summary in all_studies:
             if study_summary.user_attrs.get("dist-status") == "open":
-                open_studies.append({
-                    "study_id": study_summary.study_id,
-                    "study_name": study_summary.study_name,
-                    "user_attrs": study_summary.user_attrs,
-                })
+                user_attrs = study_summary.user_attrs.copy()
+                for attr_key in ("x86_manylinux_wheel_s3", "arm_manylinux_wheel_s3"):
+                    if s3_path := user_attrs.get(attr_key):
+                        try:
+                            bucket, key = s3_path.replace("s3://", "").split("/", 1)
+                            presigned_url = s3.generate_presigned_url(
+                                "get_object",
+                                Params={"Bucket": bucket, "Key": key},
+                                ExpiresIn=3600,  # 1 hour
+                            )
+                            url_attr_key = attr_key.replace("_s3", "_url")
+                            user_attrs[url_attr_key] = presigned_url
+                            del user_attrs[attr_key]
+                        except Exception as e:
+                            app.logger.error(
+                                f"Failed to create presigned URL for {s3_path}: {e}"
+                            )
+
+                open_studies.append(
+                    {
+                        "study_id": study_summary.study_id,
+                        "study_name": study_summary.study_name,
+                        "user_attrs": user_attrs,
+                    }
+                )
         return jsonify(open_studies)
     except Exception as e:
         app.logger.exception("Failed to get open studies")

@@ -9,17 +9,13 @@ import tempfile
 import time
 import venv
 from typing import Any, Dict
+from urllib.parse import urlparse
 
 try:
     import requests
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
     import requests
-try:
-    import boto3
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "boto3"])
-    import boto3
 
 
 def get_cpu_arch() -> str | None:
@@ -32,10 +28,7 @@ def get_cpu_arch() -> str | None:
         return None
 
 
-def download_from_s3(s3_path: str, target_dir: str) -> str | None:
-    s3 = boto3.client("s3")
-    bucket, key = s3_path.replace("s3://", "").split("/", 1)
-    filename = os.path.basename(key)
+def download_from_url(url: str, filename: str, target_dir: str) -> str | None:
     target_path = os.path.join(target_dir, filename)
 
     if os.path.exists(target_path):
@@ -43,11 +36,15 @@ def download_from_s3(s3_path: str, target_dir: str) -> str | None:
         return target_path
 
     try:
-        logging.info(f"Downloading {s3_path} to {target_path}")
-        s3.download_file(bucket, key, target_path)
+        logging.info(f"Downloading {filename} to {target_path}")
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(target_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
         return target_path
-    except Exception as e:
-        logging.exception(f"Failed to download {s3_path}: {e}")
+    except requests.RequestException as e:
+        logging.exception(f"Failed to download from {url}: {e}")
         return None
 
 
@@ -131,15 +128,28 @@ if __name__ == "__main__":
             if study_name in running_studies:
                 continue
 
-            wheel_attr = f"{cpu_arch}_manylinux_wheel_s3"
-            if wheel_attr not in study["user_attrs"]:
-                logging.debug(f"No compatible wheel found for study '{study_name}' on {cpu_arch} architecture.")
+            wheel_url_attr = f"{cpu_arch}_manylinux_wheel_url"
+
+            user_attrs = study["user_attrs"]
+            if wheel_url_attr not in user_attrs:
+                logging.debug(
+                    f"No compatible wheel found for study '{study_name}' on {cpu_arch} architecture."
+                )
                 continue
 
             logging.info(f"Found new open study '{study_name}' with compatible wheel.")
-            
-            wheel_s3_path = study["user_attrs"][wheel_attr]
-            wheel_path = download_from_s3(wheel_s3_path, WHEELS_DIR)
+
+            wheel_url = user_attrs[wheel_url_attr]
+
+            try:
+                parsed_url = urlparse(wheel_url)
+                s3_key = parsed_url.path.lstrip("/")
+                filename = os.path.basename(s3_key)
+            except Exception as e:
+                logging.error(f"Could not parse wheel filename from URL {wheel_url}: {e}")
+                continue
+
+            wheel_path = download_from_url(wheel_url, filename, WHEELS_DIR)
             if not wheel_path:
                 continue
 
