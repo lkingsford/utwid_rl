@@ -81,10 +81,12 @@ if __name__ == "__main__":
         log_level = logging.DEBUG
 
     logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(message)s",
+        format="%(asctime)s %(levelname)s %(process)d %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         level=log_level,
     )
+
+    logging.info(f"Starting trial daemon with PID {os.getpid()}")
 
     POLL_INTERVAL = 30
     WHEELS_DIR = "wheels"
@@ -126,6 +128,7 @@ if __name__ == "__main__":
         for study in open_studies:
             study_name = study["study_name"]
             if study_name in running_studies:
+                logging.debug(f"Study '{study_name}' is already running. Skipping.")
                 continue
 
             wheel_url_attr = f"{cpu_arch}_manylinux_wheel_url"
@@ -176,10 +179,15 @@ if __name__ == "__main__":
                 continue
 
             params = user_attrs.get("params", {})
-            
+            logging.info(f"Using params for study '{study_name}': {params}")
+
             # Use this file as the entry point for the child process.
-            
+
+            log_level_str = logging.getLevelName(log_level)
             command = (
+                f"import logging; logging.basicConfig("
+                f"format='%(asctime)s %(levelname)s %(process)d %(message)s', "
+                f"datefmt='%Y-%m-%d %H:%M:%S', level='{log_level_str}'); "
                 f"import {module}; {module}.{function}("
                 f"comm_socket_fd={child_sock.fileno()}, "
                 f"study_name='{study_name}', "
@@ -187,6 +195,7 @@ if __name__ == "__main__":
                 f"force_iterations={args.force_iterations}, "
                 f"params={params})"
             )
+            logging.debug(f"Executing command for study '{study_name}': {command}")
 
             process = subprocess.Popen(
                 [
