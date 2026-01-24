@@ -1,4 +1,5 @@
 import json
+import socket
 from functools import partial
 from itertools import accumulate
 from multiprocessing import Pool
