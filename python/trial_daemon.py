@@ -71,6 +71,11 @@ if __name__ == "__main__":
         type=int,
         help="Force the number of iterations for each trial. Useful for debugging.",
     )
+    parser.add_argument(
+        "--current_venv",
+        action="store_true",
+        help="If set, do not create a new virtual environment, use the current one.",
+    )
     args = parser.parse_args()
 
     if args.verbose == 0:
@@ -156,17 +161,21 @@ if __name__ == "__main__":
             if not wheel_path:
                 continue
 
-            venv_dir = tempfile.mkdtemp()
-            logging.info(f"Creating virtual environment in {venv_dir}")
-            venv.create(venv_dir, with_pip=True)
-            
-            pip_executable = os.path.join(venv_dir, "bin", "pip")
-            logging.info(f"Installing wheel {wheel_path} into virtual environment.")
-            subprocess.check_call([pip_executable, "install", wheel_path])
+            if args.current_venv:
+                logging.info("Using current virtual environment.")
+                python_executable = sys.executable
+            else:
+                venv_dir = tempfile.mkdtemp()
+                logging.info(f"Creating virtual environment in {venv_dir}")
+                venv.create(venv_dir, with_pip=True)
+                
+                pip_executable = os.path.join(venv_dir, "bin", "pip")
+                logging.info(f"Installing wheel {wheel_path} into virtual environment.")
+                subprocess.check_call([pip_executable, "install", wheel_path])
+                
+                python_executable = os.path.join(venv_dir, "bin", "python")
             
             parent_sock, child_sock = socket.socketpair()
-
-            python_executable = os.path.join(venv_dir, "bin", "python")
 
             user_attrs = study["user_attrs"]
             module = user_attrs.get("module")
