@@ -8,7 +8,8 @@ import sys
 import tempfile
 import time
 import venv
-from typing import Any, Dict
+from typing import Any, Dict, Optional, NamedTuple, List, Set
+from enum import Enum
 from urllib.parse import urlparse
 
 try:
@@ -28,7 +29,14 @@ def get_cpu_arch() -> str | None:
         return None
 
 
-def download_from_url(url: str, filename: str, target_dir: str) -> str | None:
+def download_from_url(url: str, target_dir: str) -> str | None:
+    try:
+        parsed_url = urlparse(wheel_url)
+        s3_key = parsed_url.path.lstrip("/")
+        filename = os.path.basename(s3_key)
+    except Exception as e:
+        raise ValueError(f"Could not parse wheel filename from URL {wheel_url}: {e}")
+
     target_path = os.path.join(target_dir, filename)
 
     if os.path.exists(target_path):
@@ -48,11 +56,187 @@ def download_from_url(url: str, filename: str, target_dir: str) -> str | None:
         return None
 
 
+MSG_DONE = b"done"
+
+
+class RunnerDetails(NamedTuple):
+    study_name: str
+    module: str
+    function: str
+    threads: int
+    force_iterations: Optional[int]
+    params: Dict[str, Any]
+
+
+class TrialRunnerState(Enum):
+    STARTING = 0
+    RUNNING = 1
+    SHUTTING_DOWN = 2
+    STOPPED = 3
+
+
+class TrialRunner:
+    def status(self) -> TrialRunnerState:
+        if not self._started:
+            return TrialRunnerState.STARTING
+        elif self._process.poll() is not None:
+            return TrialRunnerState.STOPPED
+        elif self._stop_sent:
+            return TrialRunnerState.SHUTTING_DOWN
+        return TrialRunnerState.RUNNING
+
+    def shutdown(self):
+        # Sends the socket message to finish at a convenient time
+        self._parent_sock.send(MSG_DONE)
+
+    def kill(self):
+        self._process.kill()
+
+    def __del__(self):
+        self._parent_sock.close()
+        self._child_sock.close()
+
+    def __init__(
+        self,
+        python_executable: str,
+        runner_details: RunnerDetails,
+    ):
+        self._parent_sock, self._child_sock = socket.socketpair()
+        self._stop_sent: bool = False
+        self._started: bool = False
+
+        log_level_str = logging.getLevelName(log_level)
+        command = (
+            f"import logging; logging.basicConfig("
+            f"format='%(asctime)s %(levelname)s %(process)d %(message)s', "
+            f"datefmt='%Y-%m-%d %H:%M:%S', level='{log_level_str}'); "
+            f"import {runner_details.module}; {runner_details.module}.{runner_details.function}("
+            f"comm_socket_fd={self._child_sock.fileno()}, "
+            f"study_name='{runner_details.study_name}', "
+            f"threads={runner_details.threads},"
+            f"force_iterations={runner_details.force_iterations}, "
+            f"params={runner_details.params})"
+        )
+        logging.debug(f"Executing command for study '{study_name}': {command}")
+        self._process = subprocess.Popen(
+            [
+                python_executable,
+                "-c",
+                command,
+            ],
+            pass_fds=[self._child_sock.fileno()],
+        )
+        self._started = True
+
+
+class StudyError(RuntimeError):
+    pass
+
+
+class NoWheelException(StudyError):
+    pass
+
+
+class Study:
+    def __init__(
+        self,
+        wheel_uri: Optional[str],
+        runner_details: RunnerDetails,
+        use_current_env: bool = False,
+    ):
+        self.study_name = (study_name,)
+        self.wheel_uri = wheel_uri
+        self.use_current_env = use_current_env
+        self._executable: Optional[str] = None
+        self.runner_details = runner_details
+        if not wheel_uri and not use_current_env:
+            raise ValueError(
+                "wheel_uri must be provided when not using current [virtual] environment"
+            )
+        self._runners: List[TrialRunner] = []
+
+    def executable(self) -> str:
+        """Gets the python interpreter to use, creating a new venv if needed"""
+        if self._executable:
+            return self._executable
+
+        if args.current_venv:
+            logging.info("Using current virtual environment.")
+            self._executable = sys.executable
+
+        else:
+            wheel_path = download_from_url(wheel_url, WHEELS_DIR)
+            if not wheel_path:
+                raise NoWheelException(wheel_path)
+            venv_dir = tempfile.mkdtemp()
+            logging.info(f"Creating virtual environment in {venv_dir}")
+            venv.create(venv_dir, with_pip=True)
+
+            pip_executable = os.path.join(venv_dir, "bin", "pip")
+            logging.info(f"Installing wheel {wheel_path} into virtual environment.")
+            subprocess.check_call([pip_executable, "install", wheel_path])
+
+            self._executable = os.path.join(venv_dir, "bin", "python")
+
+        return self._executable
+
+    def current_running(self):
+        return [
+            runner
+            for runner in self._runners
+            if runner.status in [TrialRunnerState.STARTING, TrialRunnerState.RUNNING]
+        ]
+
+    def scale(self, desired_processes: int):
+        """Scale until at correct number of processes.
+
+        Shutting down instances are not included in the count.
+        """
+        current_running = self.current_running()
+
+        if len(current_running) == desired_processes:
+            return
+
+        elif len(current_running) > desired_processes:
+            to_remove = len(current_running) - desired_processes
+            logging.info(
+                f"{self.runner_details.study_name} - Shutting down {to_remove} runners"
+            )
+            for runner in current_running[0:to_remove]:
+                runner.shutdown()
+
+        else:
+            to_add = desired_processes - len(current_running)
+            logging.info(
+                f"{self.runner_details.study_name} - Scaling up {to_add} runners"
+            )
+            for _ in range(to_add):
+                self._runners.append(
+                    TrialRunner(self.executable(), self.runner_details)
+                )
+
+    def cleanup(self):
+        """Manually clean up runners to free the sockets"""
+        stopped = [
+            runner
+            for runner in self._runners
+            if runner.status == TrialRunnerState.STOPPED
+        ]
+        if len(stopped) > 0:
+            logging.info(
+                f"{self.runner_details.study_name} - Cleaning up {len(stopped)} runners"
+            )
+        for runner in stopped:
+            del runner
+
+
 if __name__ == "__main__":
     # Experimentation showed more than 12 threads has minimum benefit (probably) due to locking
     MAX_THREADS = 4
-    
-    parser = argparse.ArgumentParser(description="EBR hyperparameter optimization daemon.")
+
+    parser = argparse.ArgumentParser(
+        description="EBR hyperparameter optimization daemon."
+    )
     parser.add_argument(
         "-v",
         "--verbose",
@@ -75,6 +259,10 @@ if __name__ == "__main__":
         "--current_venv",
         action="store_true",
         help="If set, do not create a new virtual environment, use the current one.",
+    )
+
+    parser.add_argument(
+        "--processes", type=int, default=1, help="Trial runner processes"
     )
     args = parser.parse_args()
 
@@ -104,8 +292,10 @@ if __name__ == "__main__":
         logging.error(f"Unsupported CPU architecture: {platform.machine()}")
         sys.exit(1)
     logging.info(f"Detected CPU architecture: {cpu_arch}")
+    wheel_url_attr = f"{cpu_arch}_manylinux_wheel_url"
 
-    running_studies: Dict[str, Dict[str, Any]] = {}
+    studies: Dict[str, Study] = {}
+    noted_as_incompatible: Set[str] = set()
 
     while True:
         logging.info("Polling for open studies...")
@@ -118,106 +308,53 @@ if __name__ == "__main__":
             time.sleep(POLL_INTERVAL)
             continue
 
-        open_study_names = {s["study_name"] for s in open_studies}
+        open_studies_by_name = {s["study_name"]: s for s in open_studies}
+        open_study_names = set(open_studies_by_name)
 
-        # Find and handle stopped studies
-        stopped_study_names = set(running_studies.keys()) - open_study_names
-        for study_name in stopped_study_names:
-            logging.info(f"Study '{study_name}' is no longer open. Shutting down worker.")
-            worker_info = running_studies.pop(study_name)
-            worker_info["socket"].send(b"done")
-            worker_info["socket"].close()
-            worker_info["process"].terminate()
+        for study_name in open_study_names:
+            if study_name not in studies:
+                study_info = open_studies_by_name[study_name]
+                user_attrs = study_info["user_attrs"]
 
-        # Find and handle new studies
-        for study in open_studies:
-            study_name = study["study_name"]
-            if study_name in running_studies:
-                logging.debug(f"Study '{study_name}' is already running. Skipping.")
-                continue
-
-            wheel_url_attr = f"{cpu_arch}_manylinux_wheel_url"
-
-            user_attrs = study["user_attrs"]
-            if wheel_url_attr not in user_attrs:
-                logging.debug(
-                    f"No compatible wheel found for study '{study_name}' on {cpu_arch} architecture."
+                if wheel_url_attr not in user_attrs:
+                    if study_name not in noted_as_incompatible:
+                        logging.debug(
+                            f"No compatible wheel found for study '{study_name}' on {cpu_arch} architecture."
+                        )
+                        noted_as_incompatible.add(study_name)
+                        # Going to keep checking in future runs in case added - but this at least reduces unnecessary logs
+                    continue
+                logging.info(
+                    f"Found new open study '{study_name}' with compatible wheel."
                 )
-                continue
+                wheel_url = user_attrs[wheel_url_attr]
+                try:
+                    studies[study_name] = Study(wheel_url, args.use_current_env)
+                except (ValueError, StudyError) as e:
+                    logging.exception(e)
+                    logging.info(f"Continuing. Study {study_name} not created.")
 
-            logging.info(f"Found new open study '{study_name}' with compatible wheel.")
+        logging.info(
+            f"Active runner #: { {study_name: len(study.current_running())  for study_name, study in studies.items()}}"
+        )
 
-            wheel_url = user_attrs[wheel_url_attr]
+        running_studies = {
+            study_name
+            for study_name, study in studies.items()
+            if len(study.current_running())
+        }
+        studies_to_stop = running_studies - open_study_names
+        for study_name in studies_to_stop:
+            studies[study_name].scale(0)
 
-            try:
-                parsed_url = urlparse(wheel_url)
-                s3_key = parsed_url.path.lstrip("/")
-                filename = os.path.basename(s3_key)
-            except Exception as e:
-                logging.error(f"Could not parse wheel filename from URL {wheel_url}: {e}")
-                continue
+        active_available_studies = set(studies.keys()) & open_study_names
 
-            wheel_path = download_from_url(wheel_url, filename, WHEELS_DIR)
-            if not wheel_path:
-                continue
+        if active_available_studies:
+            scale_to_set = min(1, args.processes // len(active_available_studies))
+        else:
+            scale_to_set = 0
 
-            if args.current_venv:
-                logging.info("Using current virtual environment.")
-                python_executable = sys.executable
-            else:
-                venv_dir = tempfile.mkdtemp()
-                logging.info(f"Creating virtual environment in {venv_dir}")
-                venv.create(venv_dir, with_pip=True)
-                
-                pip_executable = os.path.join(venv_dir, "bin", "pip")
-                logging.info(f"Installing wheel {wheel_path} into virtual environment.")
-                subprocess.check_call([pip_executable, "install", wheel_path])
-                
-                python_executable = os.path.join(venv_dir, "bin", "python")
-            
-            parent_sock, child_sock = socket.socketpair()
-
-            user_attrs = study["user_attrs"]
-            module = user_attrs.get("module")
-            function = user_attrs.get("function")
-
-            if not module or not function:
-                logging.error(
-                    f"Study '{study_name}' is missing 'module' or 'function' in user_attrs."
-                )
-                continue
-
-            params = user_attrs.get("params", {})
-            logging.info(f"Using params for study '{study_name}': {params}")
-
-            # Use this file as the entry point for the child process.
-
-            log_level_str = logging.getLevelName(log_level)
-            command = (
-                f"import logging; logging.basicConfig("
-                f"format='%(asctime)s %(levelname)s %(process)d %(message)s', "
-                f"datefmt='%Y-%m-%d %H:%M:%S', level='{log_level_str}'); "
-                f"import {module}; {module}.{function}("
-                f"comm_socket_fd={child_sock.fileno()}, "
-                f"study_name='{study_name}', "
-                f"threads={args.threads},"
-                f"force_iterations={args.force_iterations}, "
-                f"params={params})"
-            )
-            logging.debug(f"Executing command for study '{study_name}': {command}")
-
-            process = subprocess.Popen(
-                [
-                    python_executable,
-                    "-c",
-                    command,
-                ],
-                pass_fds=[child_sock.fileno()],
-            )
-
-            running_studies[study_name] = {"process": process, "socket": parent_sock}
-            child_sock.close() 
-            
-            parent_sock.send(b"run")
+        for study_name in active_available_studies:
+            studies[study_name].scale(scale_to_set)
 
         time.sleep(POLL_INTERVAL)
