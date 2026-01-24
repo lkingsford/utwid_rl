@@ -991,13 +991,14 @@ def trial_worker(
 
     while True:
         try:
+            logging.debug(f"Worker for study '{study_name}' reading socket")
             msg = comm_socket.recv(1024)
             if msg == b"done":
                 logging.info(f"Worker for study '{study_name}' received 'done' message.")
                 break
         except (BlockingIOError, InterruptedError):
-            time.sleep(1)
-            continue
+            logging.debug(f"Worker for study '{study_name}' has incoming messages.")
+            pass
         except Exception:
             logging.exception(f"Worker for study '{study_name}' failed to recv.")
             break
