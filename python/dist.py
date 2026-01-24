@@ -24,6 +24,8 @@ if app.logger.hasHandlers():
 app.logger.addHandler(handler)
 app.logger.setLevel(logging.INFO)
 
+S3_BUCKET = os.environ.get("S3_BUCKET", "mon2y")
+S3_REGION = os.environ.get("S3_REGION", "ap-southeast-2")
 
 STORAGE_URL = os.environ.get("OPTUNA_STORAGE") or "sqlite:///db.sqlite3"
 
@@ -118,13 +120,19 @@ def create_study():
     user_attrs = {
         "dist-status": "open",
     }
-    x86_wheel = data.get("x86_manylinux_wheel_s3")
-    if x86_wheel:
-        user_attrs["x86_manylinux_wheel_s3"] = x86_wheel
 
-    arm_wheel = data.get("arm_manylinux_wheel_s3")
-    if arm_wheel:
-        user_attrs["arm_manylinux_wheel_s3"] = arm_wheel
+
+    x86_wheel_filename = data.get("x86_manylinux_wheel_s3")
+    if x86_wheel_filename:
+        s3_path = f"s3://{S3_BUCKET}/{study_name}/{x86_wheel_filename}"
+        user_attrs["x86_manylinux_wheel_s3"] = s3_path
+        app.logger.info(f"Constructed x86 wheel S3 path: {s3_path}")
+
+    arm_wheel_filename = data.get("arm_manylinux_wheel_s3")
+    if arm_wheel_filename:
+        s3_path = f"s3://{S3_BUCKET}/{study_name}/{arm_wheel_filename}"
+        user_attrs["arm_manylinux_wheel_s3"] = s3_path
+        app.logger.info(f"Constructed arm wheel S3 path: {s3_path}")
 
     module = data.get("module")
     if not module:
@@ -395,8 +403,7 @@ def update_wheel():
         app.logger.error("/update_wheel: POST data is empty")
         return jsonify({"error": "POST data is empty"}), 400
 
-    s3_bucket = os.environ.get("S3_BUCKET")
-    if not s3_bucket:
+    if not S3_BUCKET:
         app.logger.error("/update_wheel: S3_BUCKET environment variable not set")
         return jsonify({"error": "Server is not configured for S3 uploads"}), 500
     
@@ -405,13 +412,13 @@ def update_wheel():
         app.logger.error(f"/update_wheel: Study '{study_name}' not found")
         return jsonify({"error": f"Study '{study_name}' not found"}), 404
 
-    s3 = boto3.client("s3")
+    s3 = boto3.client("s3", region_name=S3_REGION)
     s3_key = f"{study_name}/{filename}"
-    s3_path = f"s3://{s3_bucket}/{s3_key}"
+    s3_path = f"s3://{S3_BUCKET}/{s3_key}"
     
     try:
         app.logger.info(f"Uploading wheel to {s3_path}")
-        s3.put_object(Bucket=s3_bucket, Key=s3_key, Body=wheel_data)
+        s3.put_object(Bucket=S3_BUCKET, Key=s3_key, Body=wheel_data)
     except Exception as e:
         app.logger.exception(f"Failed to upload to S3: {e}")
         return jsonify({"error": f"Failed to upload to S3: {e}"}), 500
@@ -464,18 +471,21 @@ def remove_wheel():
 def get_open_studies():
     app.logger.info("Received /open request")
     try:
-        s3 = boto3.client("s3")
+        s3 = boto3.client("s3", region_name=S3_REGION)
         all_studies = optuna.study.get_all_study_summaries(
             storage=STORAGE_URL, include_best_trial=False
         )
         open_studies = []
-        app.logger.info(f"All studies: \n {repr(all_studies)}")
         for study_summary in all_studies:
-            app.logger.info(vars(study_summary))
             if study_summary.user_attrs.get("dist-status") == "open":
                 user_attrs = study_summary.user_attrs.copy()
                 for attr_key in ("x86_manylinux_wheel_s3", "arm_manylinux_wheel_s3"):
                     if s3_path := user_attrs.get(attr_key):
+                        if not s3_path.startswith("s3://"):
+                            app.logger.warning(
+                                f"Attribute '{attr_key}' for study '{study_summary.study_name}' does not contain a valid S3 path: {s3_path}. Skipping presigned URL generation."
+                            )
+                            continue
                         try:
                             bucket, key = s3_path.replace("s3://", "").split("/", 1)
                             presigned_url = s3.generate_presigned_url(
@@ -483,6 +493,7 @@ def get_open_studies():
                                 Params={"Bucket": bucket, "Key": key},
                                 ExpiresIn=3600,  # 1 hour
                             )
+                            app.logger.info(f"Presigned url is {presigned_url}")
                             url_attr_key = attr_key.replace("_s3", "_url")
                             user_attrs[url_attr_key] = presigned_url
                             del user_attrs[attr_key]
@@ -493,7 +504,6 @@ def get_open_studies():
 
                 open_studies.append(
                     {
-                        # Need to be cautious here
                         "study_id": study_summary._study_id,
                         "study_name": study_summary.study_name,
                         "user_attrs": user_attrs,
