@@ -31,11 +31,11 @@ def get_cpu_arch() -> str | None:
 
 def download_from_url(url: str, target_dir: str) -> str | None:
     try:
-        parsed_url = urlparse(wheel_url)
+        parsed_url = urlparse(url)
         s3_key = parsed_url.path.lstrip("/")
         filename = os.path.basename(s3_key)
     except Exception as e:
-        raise ValueError(f"Could not parse wheel filename from URL {wheel_url}: {e}")
+        raise ValueError(f"Could not parse wheel filename from URL {url}: {e}")
 
     target_path = os.path.join(target_dir, filename)
 
@@ -88,6 +88,7 @@ class TrialRunner:
     def shutdown(self):
         # Sends the socket message to finish at a convenient time
         self._parent_sock.send(MSG_DONE)
+        self._stop_sent = True
 
     def kill(self):
         self._process.kill()
@@ -117,7 +118,7 @@ class TrialRunner:
             f"force_iterations={runner_details.force_iterations}, "
             f"params={runner_details.params})"
         )
-        logging.debug(f"Executing command for study '{study_name}': {command}")
+        logging.debug(f"Executing command for study '{runner_details.study_name}': {command}")
         self._process = subprocess.Popen(
             [
                 python_executable,
@@ -144,7 +145,6 @@ class Study:
         runner_details: RunnerDetails,
         use_current_env: bool = False,
     ):
-        self.study_name = (study_name,)
         self.wheel_uri = wheel_uri
         self.use_current_env = use_current_env
         self._executable: Optional[str] = None
@@ -160,14 +160,14 @@ class Study:
         if self._executable:
             return self._executable
 
-        if args.current_venv:
+        if self.use_current_env:
             logging.info("Using current virtual environment.")
             self._executable = sys.executable
 
         else:
-            wheel_path = download_from_url(wheel_url, WHEELS_DIR)
+            wheel_path = download_from_url(self.wheel_uri, WHEELS_DIR)
             if not wheel_path:
-                raise NoWheelException(wheel_path)
+                raise NoWheelException(f"Failed to download wheel from {self.wheel_uri}")
             venv_dir = tempfile.mkdtemp()
             logging.info(f"Creating virtual environment in {venv_dir}")
             venv.create(venv_dir, with_pip=True)
@@ -184,7 +184,7 @@ class Study:
         return [
             runner
             for runner in self._runners
-            if runner.status in [TrialRunnerState.STARTING, TrialRunnerState.RUNNING]
+            if runner.status() in [TrialRunnerState.STARTING, TrialRunnerState.RUNNING]
         ]
 
     def scale(self, desired_processes: int):
@@ -217,17 +217,19 @@ class Study:
 
     def cleanup(self):
         """Manually clean up runners to free the sockets"""
-        stopped = [
+        
+        pre_cleanup_len = len(self._runners)
+        self._runners = [
             runner
             for runner in self._runners
-            if runner.status == TrialRunnerState.STOPPED
+            if runner.status() != TrialRunnerState.STOPPED
         ]
-        if len(stopped) > 0:
+        
+        cleaned_up_runners = pre_cleanup_len - len(self._runners)
+        if cleaned_up_runners > 0:
             logging.info(
-                f"{self.runner_details.study_name} - Cleaning up {len(stopped)} runners"
+                f"{self.runner_details.study_name} - Cleaning up {cleaned_up_runners} runners"
             )
-        for runner in stopped:
-            del runner
 
 
 if __name__ == "__main__":
@@ -316,41 +318,61 @@ if __name__ == "__main__":
                 study_info = open_studies_by_name[study_name]
                 user_attrs = study_info["user_attrs"]
 
-                if wheel_url_attr not in user_attrs:
+                if wheel_url_attr not in user_attrs and not args.current_venv:
                     if study_name not in noted_as_incompatible:
                         logging.debug(
                             f"No compatible wheel found for study '{study_name}' on {cpu_arch} architecture."
                         )
                         noted_as_incompatible.add(study_name)
-                        # Going to keep checking in future runs in case added - but this at least reduces unnecessary logs
                     continue
-                logging.info(
-                    f"Found new open study '{study_name}' with compatible wheel."
+
+                wheel_url = user_attrs.get(wheel_url_attr)
+                if wheel_url:
+                    logging.info(f"Found new open study '{study_name}' with compatible wheel.")
+                else:
+                    logging.info(f"Found new open study '{study_name}'.")
+
+                runner_details = RunnerDetails(
+                    study_name=study_name,
+                    module=user_attrs.get("module"),
+                    function=user_attrs.get("function"),
+                    threads=args.threads,
+                    force_iterations=args.force_iterations,
+                    params=user_attrs.get("params", {}),
                 )
-                wheel_url = user_attrs[wheel_url_attr]
+                
                 try:
-                    studies[study_name] = Study(wheel_url, args.use_current_env)
+                    studies[study_name] = Study(
+                        wheel_uri=wheel_url,
+                        runner_details=runner_details,
+                        use_current_env=args.current_venv
+                    )
                 except (ValueError, StudyError) as e:
                     logging.exception(e)
                     logging.info(f"Continuing. Study {study_name} not created.")
 
+        for study in studies.values():
+            study.cleanup()
+            
         logging.info(
-            f"Active runner #: { {study_name: len(study.current_running())  for study_name, study in studies.items()}}"
+            f"Active runner #: { {study_name: len(study.current_running())  for study_name, study in studies.items() if study_name in open_study_names} }"
         )
 
-        running_studies = {
+        running_study_names = {
             study_name
             for study_name, study in studies.items()
-            if len(study.current_running())
+            if len(study.current_running()) > 0
         }
-        studies_to_stop = running_studies - open_study_names
+        
+        studies_to_stop = running_study_names - open_study_names
         for study_name in studies_to_stop:
-            studies[study_name].scale(0)
+            if study_name in studies:
+                studies[study_name].scale(0)
 
         active_available_studies = set(studies.keys()) & open_study_names
 
         if active_available_studies:
-            scale_to_set = min(1, args.processes // len(active_available_studies))
+            scale_to_set = args.processes // len(active_available_studies)
         else:
             scale_to_set = 0
 
