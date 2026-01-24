@@ -985,6 +985,7 @@ def trial_worker(
 ):
     # This function runs in a separate process
     comm_socket = socket.fromfd(comm_socket_fd, socket.AF_UNIX, socket.SOCK_STREAM)
+    comm_socket.setblocking(False)
     DIST_SERVER = os.environ.get("DIST_SERVER", "http://localhost:5000")
     distributions = dists()
 
