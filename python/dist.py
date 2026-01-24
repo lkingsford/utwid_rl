@@ -174,6 +174,38 @@ def create_study():
     return jsonify({"status": "ok", "study_name": study_name})
 
 
+@app.route("/set_status", methods=["POST"])
+def set_status():
+    app.logger.info(f"Received /set_status request from {request.remote_addr}")
+    data = request.json
+    
+    study_name = data.get("study_name")
+    if not study_name:
+        app.logger.error("/set_status: 'study_name' is required")
+        return jsonify({"error": "'study_name' is required"}), 400
+
+    status = data.get("status")
+    PERMITTED_STATUSES = ["open", "done"]
+    if not status:
+        app.logger.error("/set_status: 'status' is required")
+        return jsonify({"error": "'statu' is required"}), 400
+    if status not in PERMITTED_STATUSES:
+        return jsonify({"error": f"'status' must be one of {PERMITTED_STATUSES}"}), 400
+    
+    study = get_study(study_name)
+    if study is None:
+        app.logger.error(f"/set_status: Study '{study_name}' not found")
+        return jsonify({"error": f"Study '{study_name}' not found"}), 404
+    try:
+        app.logger.info(f"Setting user attr 'dist-status' to '{status}'")
+        study.set_user_attr("dist-status", status)
+    except Exception as e:
+        app.logger.exception(f"Failed to set user attribute: {e}")
+        return jsonify({"error": f"Failed to set user attribute: {e}"}), 500
+
+    return jsonify({"status": "ok"})
+
+
 @app.route("/ask", methods=["POST"])
 def ask():
     app.logger.info(f"Received /ask request from {request.remote_addr}")
