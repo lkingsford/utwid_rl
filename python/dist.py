@@ -27,6 +27,8 @@ app.logger.setLevel(logging.INFO)
 S3_BUCKET = os.environ.get("S3_BUCKET", "mon2y")
 S3_REGION = os.environ.get("S3_REGION", "ap-southeast-2")
 
+DEFAULT_ITERATIONS = 10000
+
 STORAGE_URL = os.environ.get("OPTUNA_STORAGE") or "sqlite:///db.sqlite3"
 
 _storage = None
@@ -90,6 +92,12 @@ def create_study():
     converted_directions = [DIRECTION[d] for d in directions]
     app.logger.info(f"/create_study: directions={converted_directions}")
 
+    iterations = data.get("iterations", DEFAULT_ITERATIONS)
+    if not isinstance(iterations, int) or iterations <= 0:
+        app.logger.error("/create_study: 'iterations' must be a positive integer")
+        return jsonify({"error": "'iterations' must be a positive integer"}), 400
+    app.logger.info(f"/create_study: iterations={iterations}")
+
     try:
         app.logger.info(
             f"/create_study: Creating/loading study '{study_name}' with directions {converted_directions}"
@@ -119,6 +127,7 @@ def create_study():
 
     user_attrs = {
         "dist-status": "open",
+        "iterations": iterations,
     }
 
 
@@ -215,7 +224,7 @@ def ask():
         app.logger.info(
             f"/ask: Generated trial {trial.number} for study '{study_name}' with params: {trial.params}"
         )
-        return jsonify({"trial_number": trial.number, "params": trial.params})
+        return jsonify({"trial_number": trial.number, "params": trial.params, "iterations": study.user_attrs.get("iterations")})
     except Exception as e:
         app.logger.exception(f"/ask: Study.ask failed for study '{study_name}'")
         return jsonify({"error": f"Failed to ask for trial: {e}"}), 500

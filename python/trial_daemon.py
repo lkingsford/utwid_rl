@@ -184,6 +184,11 @@ if __name__ == "__main__":
             # Use this file as the entry point for the child process.
 
             log_level_str = logging.getLevelName(log_level)
+            force_iterations_arg = (
+                f", force_iterations={args.force_iterations}"
+                if args.force_iterations is not None
+                else ""
+            )
             command = (
                 f"import logging; logging.basicConfig("
                 f"format='%(asctime)s %(levelname)s %(process)d %(message)s', "
@@ -191,8 +196,8 @@ if __name__ == "__main__":
                 f"import {module}; {module}.{function}("
                 f"comm_socket_fd={child_sock.fileno()}, "
                 f"study_name='{study_name}', "
-                f"threads={args.threads}, "
-                f"force_iterations={args.force_iterations}, "
+                f"threads={args.threads}"
+                f"{force_iterations_arg}, "
                 f"params={params})"
             )
             logging.debug(f"Executing command for study '{study_name}': {command}")

@@ -920,7 +920,7 @@ def start_trial(
     logging.debug("Starting run trial")
     trials = trials or TRIALS
     max_iterations = max_iterations or MAX_ITERATIONS
-    explore_iterations = force_iterations or MIN_ITERATIONS
+    explore_iterations = force_iterations if force_iterations is not None else max_iterations
     logging.info(f"Iterations: {explore_iterations}")
 
     logging.debug("Suggesting hyperparams")
@@ -1014,6 +1014,7 @@ def trial_worker(
             ask_data = response.json()
             trial_number = ask_data["trial_number"]
             trial_params = ask_data["params"]
+            target_iterations = ask_data["iterations"]
             logging.info(f"Received trial {trial_number} for study '{study_name}'")
 
             study_params = params
@@ -1022,6 +1023,7 @@ def trial_worker(
             results, hyperparams = start_trial(
                 params=all_params,
                 threads=threads,
+                max_iterations=target_iterations,
                 force_iterations=force_iterations,
             )
             status = "succeed"
