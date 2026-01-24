@@ -124,13 +124,13 @@ def create_study():
 
     x86_wheel_filename = data.get("x86_manylinux_wheel_s3")
     if x86_wheel_filename:
-        s3_path = f"s3://{S3_BUCKET}/{study_name}/{x86_wheel_filename}"
+        s3_path = f"s3://{S3_BUCKET}/{x86_wheel_filename}"
         user_attrs["x86_manylinux_wheel_s3"] = s3_path
         app.logger.info(f"Constructed x86 wheel S3 path: {s3_path}")
 
     arm_wheel_filename = data.get("arm_manylinux_wheel_s3")
     if arm_wheel_filename:
-        s3_path = f"s3://{S3_BUCKET}/{study_name}/{arm_wheel_filename}"
+        s3_path = f"s3://{S3_BUCKET}/{arm_wheel_filename}"
         user_attrs["arm_manylinux_wheel_s3"] = s3_path
         app.logger.info(f"Constructed arm wheel S3 path: {s3_path}")
 
