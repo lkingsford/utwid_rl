@@ -995,7 +995,7 @@ def trial_worker(
                 logging.info(f"Worker for study '{study_name}' received 'done' message.")
                 break
         except (BlockingIOError, InterruptedError):
-            logging.debug(f"Worker for study '{study_name}' has incoming messages.")
+            logging.debug(f"Worker for study '{study_name}' has no incoming messages.")
             pass
         except Exception:
             logging.exception(f"Worker for study '{study_name}' failed to recv.")
