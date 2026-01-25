@@ -1,3 +1,4 @@
+import uuid
 import argparse
 import logging
 import os
@@ -66,6 +67,7 @@ class RunnerDetails(NamedTuple):
     threads: int
     force_iterations: Optional[int]
     params: Dict[str, Any]
+    runner_id: Optional[str]
 
 
 class TrialRunnerState(Enum):
@@ -117,7 +119,8 @@ class TrialRunner:
             f"study_name='{runner_details.study_name}', "
             f"threads={runner_details.threads},"
             f"force_iterations={runner_details.force_iterations}, "
-            f"params={runner_details.params})"
+            f"params={runner_details.params},"
+            f"runner_id='{runner_details.runner_id}')"
         )
         logging.debug(f"Executing command for study '{runner_details.study_name}': {command}")
         self._process = subprocess.Popen(
@@ -286,6 +289,8 @@ def main():
 
     logging.info(f"Starting trial daemon with PID {os.getpid()}")
 
+    runner_id = str(uuid.uuid4())[:8]
+
     POLL_INTERVAL = 30
     WHEELS_DIR = "wheels"
     os.makedirs(WHEELS_DIR, exist_ok=True)
@@ -342,6 +347,7 @@ def main():
                     threads=args.threads,
                     force_iterations=args.force_iterations,
                     params=user_attrs.get("params", {}),
+                    runner_id=runner_id,
                 )
                 
                 try:

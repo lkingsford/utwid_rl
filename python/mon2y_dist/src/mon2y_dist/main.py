@@ -1,4 +1,5 @@
 import datetime
+from datetime import timedelta
 import json
 import logging
 import os
@@ -9,6 +10,7 @@ from typing import Any, Dict, Optional
 from flask import Flask, jsonify, request
 import optuna
 import optuna.exceptions
+import mon2y_dist.runner_stats
 
 try:
     import boto3
@@ -554,6 +556,30 @@ def get_open_studies():
     except Exception as e:
         app.logger.exception("Failed to get open studies")
         return jsonify({"error": f"Failed to get open studies: {e}"}), 500
+
+
+@app.route("/runner_status", methods=["GET"])
+def get_runner_status():
+    app.logger.info("Received /runner_status request")
+    try:
+        time_seconds = int(request.args.get("time_seconds", 600))
+        end_time = datetime.datetime.now()
+        start_time = end_time - timedelta(seconds=time_seconds)
+        
+        status_output = mon2y_dist.runner_stats.runner_status(start_time, end_time)
+        
+        runners_dict = {
+            runner_id: {"iterations": stats.iterations, "process_count": stats.process_count}
+            for runner_id, stats in status_output.runners.items()
+        }
+
+        return jsonify({
+            "total_iterations": status_output.total_iterations,
+            "runners": runners_dict
+        })
+    except Exception as e:
+        app.logger.exception("Failed to get runner status")
+        return jsonify({"error": f"Failed to get runner status: {e}"}), 500
 
 
 def main():

@@ -7,7 +7,7 @@ APP_DIR="/opt/mon2y/trial_daemon"
 VENV_DIR="$APP_DIR/venv"
 S3_BUCKET="mon2y"
 # This should be replaced with the actual wheel filename or a script to find the latest
-DAEMON_WHEEL="trial_daemon/mon2y_trial_daemon-0.1.0-py3-none-any.whl"
+DAEMON_WHEEL="mon2y/mon2y_trial_daemon-0.1.0-py3-none-any.whl"
 DIST_SERVER_IP="127.0.0.1" # Replace with the actual IP of the dist server
 
 # Install dependencies

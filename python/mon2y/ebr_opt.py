@@ -980,8 +980,10 @@ def trial_worker(
     threads: int,
     force_iterations: int | None,
     params: Dict[str, Any],
+    runner_id: Optional[str] = None,
 ):
     # This function runs in a separate process
+    process_id = os.getpid()
     comm_socket = socket.fromfd(comm_socket_fd, socket.AF_UNIX, socket.SOCK_STREAM)
     comm_socket.setblocking(False)
     DIST_SERVER = os.environ.get("DIST_SERVER", "http://localhost:5000")
@@ -1037,11 +1039,18 @@ def trial_worker(
             status = "fail"
             result_values = None
             hyperparams = {}
+            results = {}
             # Wait before retrying
             time.sleep(5)
             continue
 
-        user_data: Dict[str, Any] = {}
+        user_data: Dict[str, Any] = {
+            "process_id": process_id,
+        }
+        if runner_id:
+            user_data["runner_id"] = runner_id
+        if "iterations" in results:
+            user_data["iterations"] = results["iterations"]
         if "bonds" in hyperparams:
             user_data["bonds"] = hyperparams["bonds"]
 

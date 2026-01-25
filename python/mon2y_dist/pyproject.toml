@@ -10,7 +10,8 @@ dependencies = [
     "optuna",
     "boto3",
     "gunicorn",
-    "psycopg2-binary"
+    "psycopg2-binary",
+    "sqlalchemy"
 ]
 
 [tool.setuptools]
