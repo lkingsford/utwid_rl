@@ -5,17 +5,31 @@ from typing import Dict, NamedTuple, Any
 import sqlalchemy
 from sqlalchemy import create_engine, text
 
-# NamedTuple for individual runner statistics
-class RunnerStats(NamedTuple):
+# NamedTuple for individual process statistics within a study
+class ProcessStats(NamedTuple):
+    trials_completed: int
     iterations: int
-    process_count: int
+
+# NamedTuple for statistics of a single study within a runner
+class StudyStats(NamedTuple):
+    total_trials: int
+    total_iterations: int
+    processes: Dict[int, ProcessStats]  # Keyed by process_id
+
+# NamedTuple for statistics of a single runner
+class RunnerOutput(NamedTuple):
+    total_trials: int
+    total_iterations: int
+    studies: Dict[str, StudyStats]  # Keyed by study_name
 
 # NamedTuple for the overall status output
 class StatusOutput(NamedTuple):
+    total_completed_trials: int  # New field
     total_iterations: int
-    runners: Dict[str, RunnerStats]
+    runners: Dict[str, RunnerOutput]  # Keyed by runner_id
 
 _engine = None
+
 
 def _get_engine():
     global _engine
@@ -24,19 +38,23 @@ def _get_engine():
         _engine = create_engine(storage_url)
     return _engine
 
+
 def runner_status(start_time: datetime, end_time: datetime) -> StatusOutput:
     engine = _get_engine()
-    
+
     # Query to get relevant trial user attributes for completed trials within the time range
     query = text("""
         SELECT
             t.trial_id,
-            t.datetime_complete,
+            s.study_name,
             tua_runner_id.value_json AS runner_id_json,
             tua_process_id.value_json AS process_id_json,
             tua_iterations.value_json AS iterations_json
         FROM
             trials AS t
+        JOIN
+            studies AS s
+            ON t.study_id = s.study_id
         JOIN
             trial_user_attributes AS tua_runner_id
             ON t.trial_id = tua_runner_id.trial_id AND tua_runner_id."key" = 'runner_id'
@@ -51,8 +69,11 @@ def runner_status(start_time: datetime, end_time: datetime) -> StatusOutput:
             AND t.datetime_complete BETWEEN :start_time AND :end_time
     """)
 
-    runner_data: Dict[str, Dict[str, Any]] = {}
-    total_iterations = 0
+    # Structure to hold aggregated data:
+    # { runner_id: { study_name: { process_id: { trials: int, iterations: int } } } }
+    aggregated_data: Dict[str, Dict[str, Dict[int, Dict[str, int]]]] = {}
+    overall_total_iterations = 0
+    overall_total_trials = 0
 
     with engine.connect() as connection:
         result = connection.execute(query, {"start_time": start_time, "end_time": end_time})
@@ -61,26 +82,59 @@ def runner_status(start_time: datetime, end_time: datetime) -> StatusOutput:
                 runner_id = json.loads(row.runner_id_json)
                 process_id = json.loads(row.process_id_json)
                 iterations = json.loads(row.iterations_json)
+                study_name = row.study_name  # Directly from trials table
             except json.JSONDecodeError as e:
-                # Log error and skip this row if JSON is invalid
                 print(f"Error decoding JSON from trial_user_attributes: {e} for row: {row}")
                 continue
+            except Exception as e:  # Catch other potential errors, e.g. study_name not found
+                print(f"Error processing row: {e} for row: {row}")
+                continue
 
-            if runner_id not in runner_data:
-                runner_data[runner_id] = {
-                    "iterations": 0,
-                    "process_ids": set()
-                }
-            
-            runner_data[runner_id]["iterations"] += iterations
-            runner_data[runner_id]["process_ids"].add(process_id)
-            total_iterations += iterations
+            if runner_id not in aggregated_data:
+                aggregated_data[runner_id] = {}
 
-    runners_output: Dict[str, RunnerStats] = {}
-    for runner_id, data in runner_data.items():
-        runners_output[runner_id] = RunnerStats(
-            iterations=data["iterations"],
-            process_count=len(data["process_ids"])
+            if study_name not in aggregated_data[runner_id]:
+                aggregated_data[runner_id][study_name] = {}
+
+            if process_id not in aggregated_data[runner_id][study_name]:
+                aggregated_data[runner_id][study_name][process_id] = {"trials": 0, "iterations": 0}
+
+            aggregated_data[runner_id][study_name][process_id]["trials"] += 1
+            aggregated_data[runner_id][study_name][process_id]["iterations"] += iterations
+            overall_total_iterations += iterations
+            overall_total_trials += 1
+
+    runners_output: Dict[str, RunnerOutput] = {}
+    for runner_id, studies_data in aggregated_data.items():
+        runner_total_trials = 0
+        runner_total_iterations = 0
+        studies_dict: Dict[str, StudyStats] = {}
+        for study_name, processes_data in studies_data.items():
+            study_total_trials = 0
+            study_total_iterations = 0
+            processes_dict: Dict[int, ProcessStats] = {}
+            for process_id, data in processes_data.items():
+                processes_dict[process_id] = ProcessStats(
+                    trials_completed=data["trials"],
+                    iterations=data["iterations"]
+                )
+                study_total_trials += data["trials"]
+                study_total_iterations += data["iterations"]
+            studies_dict[study_name] = StudyStats(
+                total_trials=study_total_trials,
+                total_iterations=study_total_iterations,
+                processes=processes_dict
+            )
+            runner_total_trials += study_total_trials
+            runner_total_iterations += study_total_iterations
+        runners_output[runner_id] = RunnerOutput(
+            total_trials=runner_total_trials,
+            total_iterations=runner_total_iterations,
+            studies=studies_dict
         )
-    
-    return StatusOutput(total_iterations=total_iterations, runners=runners_output)
+
+    return StatusOutput(
+        total_completed_trials=overall_total_trials,
+        total_iterations=overall_total_iterations,
+        runners=runners_output
+    )

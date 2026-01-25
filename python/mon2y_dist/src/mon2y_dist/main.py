@@ -558,25 +558,38 @@ def get_open_studies():
         return jsonify({"error": f"Failed to get open studies: {e}"}), 500
 
 
+def namedtuple_to_dict(obj):
+    if isinstance(obj, tuple) and hasattr(obj, '_asdict'):
+        return {k: namedtuple_to_dict(v) for k, v in obj._asdict().items()}
+    elif isinstance(obj, dict):
+        return {k: namedtuple_to_dict(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [namedtuple_to_dict(elem) for elem in obj]
+    else:
+        return obj
+
+
 @app.route("/runner_status", methods=["GET"])
 def get_runner_status():
     app.logger.info("Received /runner_status request")
     try:
-        time_seconds = int(request.args.get("time_seconds", 600))
-        end_time = datetime.datetime.now()
-        start_time = end_time - timedelta(seconds=time_seconds)
+        iso_start_time = request.args.get("start_time")
+        iso_end_time = request.args.get("end_time")
+
+        if iso_start_time and iso_end_time:
+            try:
+                start_time = datetime.datetime.fromisoformat(iso_start_time)
+                end_time = datetime.datetime.fromisoformat(iso_end_time)
+            except ValueError:
+                return jsonify({"error": "Invalid ISO format for start_time or end_time"}), 400
+        else:
+            time_seconds = int(request.args.get("time_seconds", 600))
+            end_time = datetime.datetime.now()
+            start_time = end_time - timedelta(seconds=time_seconds)
         
         status_output = mon2y_dist.runner_stats.runner_status(start_time, end_time)
         
-        runners_dict = {
-            runner_id: {"iterations": stats.iterations, "process_count": stats.process_count}
-            for runner_id, stats in status_output.runners.items()
-        }
-
-        return jsonify({
-            "total_iterations": status_output.total_iterations,
-            "runners": runners_dict
-        })
+        return jsonify(namedtuple_to_dict(status_output))
     except Exception as e:
         app.logger.exception("Failed to get runner status")
         return jsonify({"error": f"Failed to get runner status: {e}"}), 500
