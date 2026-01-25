@@ -269,8 +269,11 @@ def main():
         help="If set, do not create a new virtual environment, use the current one.",
     )
 
+    # Determine default number of processes
+    default_processes = os.cpu_count() if os.cpu_count() is not None else 4
+
     parser.add_argument(
-        "--processes", type=int, default=1, help="Trial runner processes"
+        "--processes", type=int, default=default_processes, help="Trial runner processes"
     )
     args = parser.parse_args()
 
