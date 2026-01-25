@@ -556,3 +556,5 @@ def get_open_studies():
         return jsonify({"error": f"Failed to get open studies: {e}"}), 500
 
 
+def main():
+    app.run(host='0.0.0.0', port=5000)

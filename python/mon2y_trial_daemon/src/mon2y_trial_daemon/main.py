@@ -101,6 +101,7 @@ class TrialRunner:
         self,
         python_executable: str,
         runner_details: RunnerDetails,
+        log_level: int,
     ):
         self._parent_sock, self._child_sock = socket.socketpair()
         self._stop_sent: bool = False
@@ -144,18 +145,20 @@ class Study:
         wheel_uri: Optional[str],
         runner_details: RunnerDetails,
         use_current_env: bool = False,
+        log_level: int = logging.INFO,
     ):
         self.wheel_uri = wheel_uri
         self.use_current_env = use_current_env
         self._executable: Optional[str] = None
         self.runner_details = runner_details
+        self.log_level = log_level
         if not wheel_uri and not use_current_env:
             raise ValueError(
                 "wheel_uri must be provided when not using current [virtual] environment"
             )
         self._runners: List[TrialRunner] = []
 
-    def executable(self) -> str:
+    def executable(self, wheels_dir: str) -> str:
         """Gets the python interpreter to use, creating a new venv if needed"""
         if self._executable:
             return self._executable
@@ -165,7 +168,7 @@ class Study:
             self._executable = sys.executable
 
         else:
-            wheel_path = download_from_url(self.wheel_uri, WHEELS_DIR)
+            wheel_path = download_from_url(self.wheel_uri, wheels_dir)
             if not wheel_path:
                 raise NoWheelException(f"Failed to download wheel from {self.wheel_uri}")
             venv_dir = tempfile.mkdtemp()
@@ -187,7 +190,7 @@ class Study:
             if runner.status() in [TrialRunnerState.STARTING, TrialRunnerState.RUNNING]
         ]
 
-    def scale(self, desired_processes: int):
+    def scale(self, desired_processes: int, wheels_dir: str):
         """Scale until at correct number of processes.
 
         Shutting down instances are not included in the count.
@@ -212,7 +215,7 @@ class Study:
             )
             for _ in range(to_add):
                 self._runners.append(
-                    TrialRunner(self.executable(), self.runner_details)
+                    TrialRunner(self.executable(wheels_dir), self.runner_details, self.log_level)
                 )
 
     def cleanup(self):
@@ -232,7 +235,7 @@ class Study:
             )
 
 
-if __name__ == "__main__":
+def main():
     # Experimentation showed more than 12 threads has minimum benefit (probably) due to locking
     MAX_THREADS = 4
 
@@ -345,7 +348,8 @@ if __name__ == "__main__":
                     studies[study_name] = Study(
                         wheel_uri=wheel_url,
                         runner_details=runner_details,
-                        use_current_env=args.current_venv
+                        use_current_env=args.current_venv,
+                        log_level=log_level,
                     )
                 except (ValueError, StudyError) as e:
                     logging.exception(e)
@@ -367,7 +371,7 @@ if __name__ == "__main__":
         studies_to_stop = running_study_names - open_study_names
         for study_name in studies_to_stop:
             if study_name in studies:
-                studies[study_name].scale(0)
+                studies[study_name].scale(0, WHEELS_DIR)
 
         active_available_studies = set(studies.keys()) & open_study_names
 
@@ -377,6 +381,9 @@ if __name__ == "__main__":
             scale_to_set = 0
 
         for study_name in active_available_studies:
-            studies[study_name].scale(scale_to_set)
+            studies[study_name].scale(scale_to_set, WHEELS_DIR)
 
         time.sleep(POLL_INTERVAL)
+
+if __name__ == "__main__":
+    main()
