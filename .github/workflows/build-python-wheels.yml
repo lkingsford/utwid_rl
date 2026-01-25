@@ -31,6 +31,25 @@ jobs:
           name: mon2y-dist-wheel
           path: wheels/
 
+      - name: Get wheel filename
+        id: get_filename
+        run: |
+          WHEEL_PATH=$(ls wheels/*.whl)
+          echo "filename=$(basename $WHEEL_PATH)" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Upload wheel to S3
+        run: |
+          aws s3 cp wheels/${{ steps.get_filename.outputs.filename }} s3://mon2y/mon2y/${{ steps.get_filename.outputs.filename }}
+        shell: bash
+
   build_trial_daemon_wheel:
     name: Build mon2y-trial-daemon wheel
     if: startsWith(github.ref, 'refs/tags/t-')
@@ -54,3 +73,22 @@ jobs:
         with:
           name: mon2y-trial-daemon-wheel
           path: wheels/
+
+      - name: Get wheel filename
+        id: get_filename
+        run: |
+          WHEEL_PATH=$(ls wheels/*.whl)
+          echo "filename=$(basename $WHEEL_PATH)" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Upload wheel to S3
+        run: |
+          aws s3 cp wheels/${{ steps.get_filename.outputs.filename }} s3://mon2y/mon2y/${{ steps.get_filename.outputs.filename }}
+        shell: bash
