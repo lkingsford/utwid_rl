@@ -29,7 +29,7 @@ jobs:
         run: python -m build -w -o wheels/ python/mon2y_dist
 
       - name: Upload mon2y-dist wheel
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: mon2y-dist-wheel
           path: wheels/
@@ -53,7 +53,7 @@ jobs:
         run: python -m build -w -o wheels/ python/mon2y_trial_daemon
       
       - name: Upload mon2y-trial-daemon wheel
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: mon2y-trial-daemon-wheel
           path: wheels/

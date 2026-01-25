@@ -9,6 +9,7 @@ dependencies = [
     "flask",
     "optuna",
     "boto3",
+    "gunicorn",
 ]
 package-dir = {"" = "src"}
 packages = ["mon2y_dist"]
