@@ -11,6 +11,8 @@ dependencies = [
     "boto3",
     "gunicorn",
 ]
+
+[tool.setuptools]
 package-dir = {"" = "src"}
 packages = ["mon2y_dist"]
 

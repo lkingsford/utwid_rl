@@ -2,17 +2,14 @@ name: Build Python Wheels
 
 on:
   push:
-    branches: [ main ]
     tags:
       - 'd-*'
       - 't-*'
-  pull_request:
-    branches: [ main ]
 
 jobs:
   build_dist_wheel:
     name: Build mon2y-dist wheel
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/d-') || github.event_name == 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/d-')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -36,7 +33,7 @@ jobs:
 
   build_trial_daemon_wheel:
     name: Build mon2y-trial-daemon wheel
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/t-') || github.event_name == 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/t-')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
