@@ -8,23 +8,9 @@ on:
 
 jobs:
   build_dist_wheel:
-    name: Build mon2y-dist wheel for ${{ matrix.target }} on ${{ matrix.os }}
+    name: Build mon2y-dist wheel
     if: startsWith(github.ref, 'refs/tags/d-')
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64
-          - os: ubuntu-latest
-            target: aarch64
-          - os: macos-latest
-            target: x86_64
-          - os: macos-14
-            target: aarch64
-          - os: windows-latest
-            target: x86_64
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
 
@@ -35,22 +21,20 @@ jobs:
 
       - name: Install build tool
         run: python -m pip install build
-        shell: bash
 
       - name: Build mon2y-dist wheel
         run: python -m build -w -o wheels/ python/mon2y_dist
-        shell: bash
 
       - name: Upload mon2y-dist wheel
         uses: actions/upload-artifact@v4
         with:
-          name: mon2y-dist-wheel-${{ matrix.os }}-${{ matrix.target }}
+          name: mon2y-dist-wheel
           path: wheels/
 
       - name: Get wheel filename
         id: get_filename
         run: |
-          WHEEL_PATH=$(find wheels -name "*.whl" | head -n 1)
+          WHEEL_PATH=$(ls wheels/*.whl)
           echo "filename=$(basename $WHEEL_PATH)" >> $GITHUB_OUTPUT
         shell: bash
 
@@ -63,27 +47,13 @@ jobs:
 
       - name: Upload wheel to S3
         run: |
-          aws s3 cp wheels/${{ steps.get_filename.outputs.filename }} s3://mon2y/mon2y/${{ matrix.os }}/${{ matrix.target }}/${{ steps.get_filename.outputs.filename }}
+          aws s3 cp wheels/${{ steps.get_filename.outputs.filename }} s3://mon2y/mon2y/${{ steps.get_filename.outputs.filename }}
         shell: bash
 
   build_trial_daemon_wheel:
-    name: Build mon2y-trial-daemon wheel for ${{ matrix.target }} on ${{ matrix.os }}
+    name: Build mon2y-trial-daemon wheel
     if: startsWith(github.ref, 'refs/tags/t-')
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64
-          - os: ubuntu-latest
-            target: aarch64
-          - os: macos-latest
-            target: x86_64
-          - os: macos-14
-            target: aarch64
-          - os: windows-latest
-            target: x86_64
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
 
@@ -94,22 +64,20 @@ jobs:
 
       - name: Install build tool
         run: python -m pip install build
-        shell: bash
 
       - name: Build mon2y-trial-daemon wheel
         run: python -m build -w -o wheels/ python/mon2y_trial_daemon
-        shell: bash
       
       - name: Upload mon2y-trial-daemon wheel
         uses: actions/upload-artifact@v4
         with:
-          name: mon2y-trial-daemon-wheel-${{ matrix.os }}-${{ matrix.target }}
+          name: mon2y-trial-daemon-wheel
           path: wheels/
 
       - name: Get wheel filename
         id: get_filename
         run: |
-          WHEEL_PATH=$(find wheels -name "*.whl" | head -n 1)
+          WHEEL_PATH=$(ls wheels/*.whl)
           echo "filename=$(basename $WHEEL_PATH)" >> $GITHUB_OUTPUT
         shell: bash
 
@@ -122,5 +90,5 @@ jobs:
 
       - name: Upload wheel to S3
         run: |
-          aws s3 cp wheels/${{ steps.get_filename.outputs.filename }} s3://mon2y/mon2y/${{ matrix.os }}/${{ matrix.target }}/${{ steps.get_filename.outputs.filename }}
+          aws s3 cp wheels/${{ steps.get_filename.outputs.filename }} s3://mon2y/mon2y/${{ steps.get_filename.outputs.filename }}
         shell: bash
