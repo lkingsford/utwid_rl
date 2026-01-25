@@ -1,4 +1,4 @@
-[build-system]
+[vuild-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
@@ -10,6 +10,7 @@ dependencies = [
     "optuna",
     "boto3",
     "gunicorn",
+    "psycopg2-binary"
 ]
 
 [tool.setuptools]
