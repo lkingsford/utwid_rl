@@ -2,13 +2,13 @@
 # Userdata script for mon2y-dist server
 
 # Variables
-SERVICE_USER="mon2y"
+SERVICE_USER="optuna"
 APP_DIR="/opt/mon2y/dist"
 VENV_DIR="$APP_DIR/venv"
 DB_DIR="/var/db/mon2y"
 S3_BUCKET="mon2y"
 # This should be replaced with the actual wheel filename or a script to find the latest
-DIST_WHEEL="dist/mon2y_dist-0.1.0-py3-none-any.whl"
+DIST_WHEEL="mon2y/mon2y_dist-0.1.0-py3-none-any.whl"
 OPTUNA_STORAGE="sqlite:///$DB_DIR/db.sqlite3"
 
 # Install dependencies

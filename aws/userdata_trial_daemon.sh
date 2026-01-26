@@ -1,6 +1,5 @@
 #!/bin/bash
 # Userdata script for mon2y-trial-daemon
-
 # Variables
 SERVICE_USER="mon2y"
 APP_DIR="/opt/mon2y/trial_daemon"
@@ -8,11 +7,10 @@ VENV_DIR="$APP_DIR/venv"
 S3_BUCKET="mon2y"
 # This should be replaced with the actual wheel filename or a script to find the latest
 DAEMON_WHEEL="mon2y/mon2y_trial_daemon-0.1.0-py3-none-any.whl"
-DIST_SERVER_IP="127.0.0.1" # Replace with the actual IP of the dist server
+DIST_SERVER="dist.mon2y.local" # Replace with the actual IP of the dist server
 
 # Install dependencies
-yum update -y
-yum install -y python3.10 python3.10-pip python3.10-devel gcc aws-cli
+dnf install -y python3.13 gcc awscli
 
 # Create user and directories
 useradd -r -m -d /home/$SERVICE_USER -s /bin/bash $SERVICE_USER
@@ -20,7 +18,7 @@ mkdir -p $APP_DIR
 chown -R $SERVICE_USER:$SERVICE_USER /opt/mon2y
 
 # Set up virtual environment
-python3.10 -m venv $VENV_DIR
+python3.13 -m venv $VENV_DIR
 chown -R $SERVICE_USER:$SERVICE_USER $VENV_DIR
 
 # Install wheel
@@ -37,8 +35,8 @@ After=network.target
 User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$APP_DIR
-Environment="DIST_SERVER=http://$DIST_SERVER_IP:5000"
-ExecStart=$VENV_DIR/bin/mon2y-trial-daemon --verbose
+Environment="DIST_SERVER=http://$DIST_SERVER:5000"
+ExecStart=$VENV_DIR/bin/python -m mon2y_trial_daemon --verbose
 Restart=always
 SyslogIdentifier=mon2y-trial-daemon
 

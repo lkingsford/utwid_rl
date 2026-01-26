@@ -354,6 +354,28 @@ def main():
                 )
                 
                 try:
+                    dist_uri = os.environ.get("DIST_URI", "http://localhost:5000")
+                    logging.info(f"Asking for trial for study {study_name}")
+                    ask_start_time = time.time()
+                    response = requests.post(
+                        f"{dist_uri}/ask",
+                        json={
+                            "study_name": study_name,
+                            "distributions": user_attrs.get("distributions"),
+                        },
+                        timeout=60,
+                    )
+                    ask_end_time = time.time()
+                    ask_time = ask_end_time - ask_start_time
+                    logging.info(f"Ask for study {study_name} took {ask_time:.2f} seconds")
+                    response.raise_for_status()
+                    trial_info = response.json()
+
+                    runner_details = runner_details._replace(
+                        params=trial_info["params"],
+                        force_iterations=trial_info.get("iterations")
+                    )
+
                     studies[study_name] = Study(
                         wheel_uri=wheel_url,
                         runner_details=runner_details,
