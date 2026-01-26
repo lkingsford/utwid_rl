@@ -1,8 +1,5 @@
-from typing import NamedTuple, List, Any, Optional
+from typing import NamedTuple, List, Any, Optional, Union
 
-class BaseDistribution:
-    """A base class for all distributions."""
-    pass
 
 class IntDistribution(NamedTuple):
     """
@@ -14,10 +11,12 @@ class IntDistribution(NamedTuple):
         step: The step of the range.
         log: If True, the distribution is sampled in the log domain.
     """
+
     low: int
     high: int
     step: int = 1
     log: bool = False
+
 
 class FloatDistribution(NamedTuple):
     """
@@ -29,10 +28,12 @@ class FloatDistribution(NamedTuple):
         step: The step of the range. If None, the range is continuous.
         log: If True, the distribution is sampled in the log domain.
     """
+
     low: float
     high: float
     step: Optional[float] = None
     log: bool = False
+
 
 class CategoricalDistribution(NamedTuple):
     """
@@ -41,4 +42,8 @@ class CategoricalDistribution(NamedTuple):
     Attributes:
         choices: The list of possible values.
     """
+
     choices: List[Any]
+
+
+type Distribution = Union[IntDistribution, FloatDistribution, CategoricalDistribution]
