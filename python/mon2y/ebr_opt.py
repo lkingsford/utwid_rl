@@ -28,7 +28,7 @@ from mon2y.distributions import (
     IntDistribution,
     FloatDistribution,
     CategoricalDistribution,
-    BaseDistribution,
+    Distribution,
 )
 import pandas as pd
 
@@ -802,20 +802,20 @@ def most_trusted_hyperrewards(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(df[df["norm_trust"] >= trust_mu + trust_sigma])
 
 
-_dists: Optional[Dict[str, optuna.distributions.BaseDistribution]] = None
+_dists: Optional[Dict[str, Distribution]] = None
 
 
 def _rev_dist(prefix: str, min_val: int, max_val: int) -> dict[str, IntDistribution]:
     return {f"{prefix}_rev_{i}": IntDistribution(min_val, max_val) for i in range(3)}
 
 
-def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
+def dists() -> Dict[str, Distribution]:
     global _dists
 
     if _dists:
         return _dists
 
-    simple_dists: Dict[str, BaseDistribution] = {
+    simple_dists: Dict[str, Distribution] = {
         "initial_cash": IntDistribution(MIN_INITIAL_CASH, MAX_INITIAL_CASH),
         "water_1_cost": IntDistribution(MIN_WATER_COST, MAX_WATER_COST),
         "water_2_cost": IntDistribution(MIN_WATER_COST, MAX_WATER_COST),
@@ -895,7 +895,7 @@ def dists() -> Dict[str, optuna.distributions.BaseDistribution]:
         ]
     )
 
-    bond_dists: Mapping[str, BaseDistribution] = {
+    bond_dists: Mapping[str, Distribution] = {
         "bond_count": IntDistribution(MIN_BOND_COUNT, MAX_BOND_COUNT),
     } | {
         f"bond_{i:0{len(str(MAX_BOND_COUNT))}}_{key}": FloatDistribution(0, 1)
