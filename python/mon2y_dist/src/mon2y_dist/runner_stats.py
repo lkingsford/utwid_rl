@@ -10,11 +10,11 @@ class ProcessStats(NamedTuple):
     trials_completed: int
     iterations: int
     sum_total_trial_time_ms: float
-    count_total_trial_time_ms: int
+    avg_total_trial_time_ms: float
     sum_explore_time_ms: float
-    count_explore_time_ms: int
+    avg_explore_time_ms: float
     sum_ask_reply_time_ms: float
-    count_ask_reply_time_ms: int
+    avg_ask_reply_time_ms: float
 
 
 # NamedTuple for statistics of a single study within a runner
@@ -22,7 +22,7 @@ class StudyStats(NamedTuple):
     total_trials: int
     total_iterations: int
     sum_ask_reply_time_ms: float
-    count_ask_reply_time_ms: int
+    avg_ask_reply_time_ms: float
     processes: Dict[int, ProcessStats]  # Keyed by process_id
 
 
@@ -31,7 +31,7 @@ class RunnerOutput(NamedTuple):
     total_trials: int
     total_iterations: int
     sum_ask_reply_time_ms: float
-    count_ask_reply_time_ms: int
+    avg_ask_reply_time_ms: float
     studies: Dict[str, StudyStats]  # Keyed by study_name
 
 
@@ -40,7 +40,7 @@ class StatusOutput(NamedTuple):
     total_completed_trials: int  # New field
     total_iterations: int
     sum_ask_reply_time_ms: float
-    count_ask_reply_time_ms: int
+    avg_ask_reply_time_ms: float
     runners: Dict[str, RunnerOutput]  # Keyed by runner_id
 
 
@@ -122,8 +122,8 @@ def runner_status(start_time: datetime, end_time: datetime) -> StatusOutput:
                 explore_time_ms = json.loads(row.explore_time_ms_json)
                 ask_reply_time_ms = json.loads(row.ask_reply_time_ms_json)
 
-                # Log the deserialized timing values
-                print(f"DEBUG runner_stats: Deserialized timings for trial {row.trial_id}: total={total_trial_time_ms}, explore={explore_time_ms}, ask_reply={ask_reply_time_ms}")
+                # Log the deserialized timing values - Removed as per user request to avoid clutter
+                # print(f"DEBUG runner_stats: Deserialized timings for trial {row.trial_id}: total={total_trial_time_ms}, explore={explore_time_ms}, ask_reply={ask_reply_time_ms}")
             except json.JSONDecodeError as e:
                 print(f"Error decoding JSON from trial_user_attributes: {e} for row: {row}")
                 continue
@@ -174,26 +174,31 @@ def runner_status(start_time: datetime, end_time: datetime) -> StatusOutput:
             study_count_ask_reply_time_ms = 0
             processes_dict: Dict[int, ProcessStats] = {}
             for process_id, data in processes_data.items():
+                avg_total_trial_time_ms = data["sum_total_trial_time_ms"] / data["count_total_trial_time_ms"] if data["count_total_trial_time_ms"] > 0 else 0.0
+                avg_explore_time_ms = data["sum_explore_time_ms"] / data["count_explore_time_ms"] if data["count_explore_time_ms"] > 0 else 0.0
+                avg_ask_reply_time_ms = data["sum_ask_reply_time_ms"] / data["count_ask_reply_time_ms"] if data["count_ask_reply_time_ms"] > 0 else 0.0
+
                 processes_dict[process_id] = ProcessStats(
                     trials_completed=data["trials"],
                     iterations=data["iterations"],
                     sum_total_trial_time_ms=data["sum_total_trial_time_ms"],
-                    count_total_trial_time_ms=data["count_total_trial_time_ms"],
+                    avg_total_trial_time_ms=avg_total_trial_time_ms,
                     sum_explore_time_ms=data["sum_explore_time_ms"],
-                    count_explore_time_ms=data["count_explore_time_ms"],
+                    avg_explore_time_ms=avg_explore_time_ms,
                     sum_ask_reply_time_ms=data["sum_ask_reply_time_ms"],
-                    count_ask_reply_time_ms=data["count_ask_reply_time_ms"]
+                    avg_ask_reply_time_ms=avg_ask_reply_time_ms
                 )
                 study_total_trials += data["trials"]
                 study_total_iterations += data["iterations"]
                 study_sum_ask_reply_time_ms += data["sum_ask_reply_time_ms"]
                 study_count_ask_reply_time_ms += data["count_ask_reply_time_ms"]
 
+            avg_study_ask_reply_time_ms = study_sum_ask_reply_time_ms / study_count_ask_reply_time_ms if study_count_ask_reply_time_ms > 0 else 0.0
             studies_dict[study_name] = StudyStats(
                 total_trials=study_total_trials,
                 total_iterations=study_total_iterations,
                 sum_ask_reply_time_ms=study_sum_ask_reply_time_ms,
-                count_ask_reply_time_ms=study_count_ask_reply_time_ms,
+                avg_ask_reply_time_ms=avg_study_ask_reply_time_ms,
                 processes=processes_dict
             )
             runner_total_trials += study_total_trials
@@ -201,18 +206,20 @@ def runner_status(start_time: datetime, end_time: datetime) -> StatusOutput:
             runner_sum_ask_reply_time_ms += study_sum_ask_reply_time_ms
             runner_count_ask_reply_time_ms += study_count_ask_reply_time_ms
 
+        avg_runner_ask_reply_time_ms = runner_sum_ask_reply_time_ms / runner_count_ask_reply_time_ms if runner_count_ask_reply_time_ms > 0 else 0.0
         runners_output[runner_id] = RunnerOutput(
             total_trials=runner_total_trials,
             total_iterations=runner_total_iterations,
             sum_ask_reply_time_ms=runner_sum_ask_reply_time_ms,
-            count_ask_reply_time_ms=runner_count_ask_reply_time_ms,
+            avg_ask_reply_time_ms=avg_runner_ask_reply_time_ms,
             studies=studies_dict
         )
 
+    avg_overall_ask_reply_time_ms = overall_sum_ask_reply_time_ms / overall_count_ask_reply_time_ms if overall_count_ask_reply_time_ms > 0 else 0.0
     return StatusOutput(
         total_completed_trials=overall_total_trials,
         total_iterations=overall_total_iterations,
         sum_ask_reply_time_ms=overall_sum_ask_reply_time_ms,
-        count_ask_reply_time_ms=overall_count_ask_reply_time_ms,
+        avg_ask_reply_time_ms=avg_overall_ask_reply_time_ms,
         runners=runners_output
     )
