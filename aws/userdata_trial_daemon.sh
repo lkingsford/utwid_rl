@@ -7,7 +7,7 @@ VENV_DIR="$APP_DIR/venv"
 S3_BUCKET="mon2y"
 # This should be replaced with the actual wheel filename or a script to find the latest
 DAEMON_WHEEL="mon2y/mon2y_trial_daemon-0.1.0-py3-none-any.whl"
-DIST_SERVER="dist.mon2y.local" # Replace with the actual IP of the dist server
+DIST_URI="dist.mon2y.local"
 
 # Install dependencies
 dnf install -y python3.13 gcc awscli
@@ -35,7 +35,7 @@ After=network.target
 User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$APP_DIR
-Environment="DIST_SERVER=http://$DIST_SERVER:5000"
+Environment="DIST_URI=http://$DIST_URI:5000"
 ExecStart=$VENV_DIR/bin/python -m mon2y_trial_daemon --verbose
 Restart=always
 SyslogIdentifier=mon2y-trial-daemon

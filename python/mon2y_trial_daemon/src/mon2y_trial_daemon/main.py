@@ -298,8 +298,6 @@ def main():
     WHEELS_DIR = "wheels"
     os.makedirs(WHEELS_DIR, exist_ok=True)
 
-    DIST_SERVER = os.environ.get("DIST_SERVER", "http://127.0.0.1:5000")
-
     cpu_arch = get_cpu_arch()
     if not cpu_arch:
         logging.error(f"Unsupported CPU architecture: {platform.machine()}")
@@ -310,10 +308,11 @@ def main():
     studies: Dict[str, Study] = {}
     noted_as_incompatible: Set[str] = set()
 
+    dist_uri = os.environ.get("DIST_URI", "http://ocalhost:5000")
     while True:
         logging.info("Polling for open studies...")
         try:
-            response = requests.get(f"{DIST_SERVER}/open", timeout=10)
+            response = requests.get(f"{dist_uri}/open", timeout=10)
             response.raise_for_status()
             open_studies = response.json()
         except requests.RequestException as e:
