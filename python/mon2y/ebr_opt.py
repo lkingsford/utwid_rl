@@ -990,6 +990,7 @@ def trial_worker(
     distributions = dists()
 
     while True:
+        trial_start_time = time.perf_counter() # Start of total trial time
         try:
             logging.debug(f"Worker for study '{study_name}' reading socket")
             msg = comm_socket.recv(1024)
@@ -1011,7 +1012,12 @@ def trial_worker(
                 attributes = dist._asdict()
                 json_dists[name] = {"name": dist_name, "attributes": attributes}
             ask_payload = {"study_name": study_name, "distributions": json_dists}
+            
+            ask_request_start_time = time.perf_counter() # Start of /ask reply time
             response = requests.post(f"{DIST_SERVER}/ask", json=ask_payload, timeout=30)
+            ask_reply_end_time = time.perf_counter() # End of /ask reply time
+            ask_reply_time_ms = (ask_reply_end_time - ask_request_start_time) * 1000
+
             response.raise_for_status()
             ask_data = response.json()
             trial_number = ask_data["trial_number"]
@@ -1023,11 +1029,15 @@ def trial_worker(
             study_params = params
             all_params = {**study_params, **trial_params}
 
+            explore_start_time = time.perf_counter() # Start of explore run time
             results, hyperparams = start_trial(
                 params=all_params,
                 threads=threads,
                 iterations=target_iterations,
             )
+            explore_end_time = time.perf_counter() # End of explore run time
+            explore_time_ms = (explore_end_time - explore_start_time) * 1000
+
             status = "succeed"
             if params.get("single_study", False):
                 result_values = results["total_loss"]
@@ -1040,12 +1050,22 @@ def trial_worker(
             result_values = None
             hyperparams = {}
             results = {}
+            ask_reply_time_ms = 0 # Default if error occurs before it's calculated
+            explore_time_ms = 0 # Default if error occurs before it's calculated
             # Wait before retrying
             time.sleep(5)
             continue
+        
+        trial_end_time = time.perf_counter() # End of total trial time
+        total_trial_time_ms = (trial_end_time - trial_start_time) * 1000
+
+        logging.info(f"Trial {trial_number} for study '{study_name}' timings: total={total_trial_time_ms:.2f}ms, explore={explore_time_ms:.2f}ms, ask_reply={ask_reply_time_ms:.2f}ms")
 
         user_data: Dict[str, Any] = {
             "process_id": process_id,
+            "total_trial_time_ms": total_trial_time_ms,
+            "explore_time_ms": explore_time_ms,
+            "ask_reply_time_ms": ask_reply_time_ms,
         }
         if runner_id:
             user_data["runner_id"] = runner_id
