@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # Userdata script for mon2y-dist server
 
 # Variables
@@ -7,13 +8,24 @@ APP_DIR="/opt/mon2y/dist"
 VENV_DIR="$APP_DIR/venv"
 DB_DIR="/var/db/mon2y"
 S3_BUCKET="mon2y"
+#
 # This should be replaced with the actual wheel filename or a script to find the latest
 DIST_WHEEL="mon2y/mon2y_dist-0.1.0-py3-none-any.whl"
 OPTUNA_STORAGE="sqlite:///$DB_DIR/db.sqlite3"
+PGDATA="/var/lib/pgsql/${PG_VERSION}/data"
+EBS_DEVICE="/dev/xvda"
+MOUNT_POINT="/var/lib/pgsql"
+DB_NAME="optuna"
+DB_USER="optuna"
 
-# Install dependencies
-yum update -y
-yum install -y python3.10 python3.10-pip python3.10-devel gcc aws-cli
+### BASIC SETUP
+dnf update -y
+dnf install -y \
+  postgresql${PG_VERSION}-server \
+  postgresql${PG_VERSION} \
+  util-linux \
+  python3.13 \
+  python3.13-pip
 
 # Create user and directories
 useradd -r -m -d /home/$SERVICE_USER -s /bin/bash $SERVICE_USER
@@ -23,7 +35,7 @@ chown -R $SERVICE_USER:$SERVICE_USER /opt/mon2y
 chown -R $SERVICE_USER:$SERVICE_USER $DB_DIR
 
 # Set up virtual environment
-python3.10 -m venv $VENV_DIR
+python3.13 -m venv $VENV_DIR
 chown -R $SERVICE_USER:$SERVICE_USER $VENV_DIR
 
 # Install wheel
@@ -54,3 +66,101 @@ EOF
 systemctl daemon-reload
 systemctl enable mon2y-dist.service
 systemctl start mon2y-dist.service
+
+
+
+### FORMAT + MOUNT EBS (FIRST BOOT SAFE)
+if ! blkid ${EBS_DEVICE}; then
+  mkfs.xfs ${EBS_DEVICE}
+fi
+
+mkdir -p ${MOUNT_POINT}
+
+if ! mount | grep -q "${MOUNT_POINT}"; then
+  mount ${EBS_DEVICE} ${MOUNT_POINT}
+fi
+
+grep -q "${EBS_DEVICE}" /etc/fstab || \
+  echo "${EBS_DEVICE} ${MOUNT_POINT} xfs defaults,nofail 0 2" >> /etc/fstab
+
+### PERMISSIONS
+chown -R postgres:postgres ${MOUNT_POINT}
+chmod 700 ${MOUNT_POINT}
+
+### INITDB (ONLY IF EMPTY)
+if [ ! -f "${PGDATA}/PG_VERSION" ]; then
+  sudo -u postgres /usr/bin/postgresql-${PG_VERSION}-setup initdb
+fi
+
+### POSTGRES CONFIG
+CONF="${PGDATA}/postgresql.conf"
+HBA="${PGDATA}/pg_hba.conf"
+
+sed -i "s/^#listen_addresses.*/listen_addresses = 'localhost'/" ${CONF}
+
+# Conservative memory for 1GiB instance
+cat >> ${CONF} <<EOF
+
+shared_buffers = 128MB
+work_mem = 4MB
+maintenance_work_mem = 64MB
+max_connections = 20
+EOF
+
+### AUTH: PEER FOR LOCAL USERS
+cat > ${HBA} <<EOF
+local   all             postgres                                peer
+local   all             ${DB_USER}                               peer
+local   all             ${SERVICE_USER}                           peer
+local   all             all                                     peer
+host    all             all             127.0.0.1/32            reject
+host    all             all             ::1/128                 reject
+EOF
+
+### ENABLE + START POSTGRES
+systemctl enable postgresql-${PG_VERSION}
+systemctl restart postgresql-${PG_VERSION}
+
+### DATABASE + ROLES (IDEMPOTENT)
+sudo -u postgres psql <<EOF
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${DB_USER}') THEN
+    CREATE ROLE ${DB_USER} LOGIN;
+  END IF;
+END
+\$\$;
+
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DB_NAME}') THEN
+    CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};
+  END IF;
+END
+\$\$;
+
+GRANT CONNECT ON DATABASE ${DB_NAME} TO ${SERVICE_USER};
+
+\c ${DB_NAME}
+
+GRANT USAGE, CREATE ON SCHEMA public TO ${SERVICE_USER};
+GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${SERVICE_USER};
+EOF
+
+# Allocate IP
+#
+INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+ALLOC_ID=$(aws ec2 describe-addresses \
+  --region "$REGION" \
+  --filters Name=tag:Name,Values=mon2y_dist \
+  --query 'Addresses[0].AllocationId' \
+  --output text)
+aws ec2 associate-address \
+  --region "$REGION" \
+  --instance-id "$INSTANCE_ID" \
+  --allocation-id "$ALLOC_ID" \
+  --allow-reassociation
+aws ec2 describe-addresses \
+  --region "$REGION" \
+  --allocation-ids "$ALLOC_ID"
