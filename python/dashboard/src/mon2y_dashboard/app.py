@@ -19,6 +19,9 @@ timestamps = deque(maxlen=MAX_LEN)
 iterations_data = {}
 trials_data = {}
 processes_data = {}
+ask_time_data = {}
+overall_ask_time_data = deque(maxlen=MAX_LEN)
+
 
 # --- Dash App Initialization ---
 app = dash.Dash(__name__)
@@ -51,6 +54,9 @@ def update_data(data):
 
     active_runners = set(data.get('runners', {}).keys())
     all_runners = set(iterations_data.keys()) | active_runners
+    
+    total_ask_time_in_window = 0
+    total_asks_in_window = 0
 
     for runner in all_runners:
         stats = data.get('runners', {}).get(runner, {})
@@ -60,13 +66,34 @@ def update_data(data):
             iterations_data[runner] = deque(padding, maxlen=timestamps.maxlen)
             trials_data[runner] = deque(padding, maxlen=timestamps.maxlen)
             processes_data[runner] = deque(padding, maxlen=timestamps.maxlen)
+            ask_time_data[runner] = deque(padding, maxlen=timestamps.maxlen)
 
-        iterations_data[runner].append(stats.get('total_iterations'))
-        trials_data[runner].append(stats.get('total_trials'))
+        iterations_per_min = (stats.get('total_iterations') or 0) / TIME_WINDOW_MINUTES
+        trials_per_min = (stats.get('total_trials') or 0) / TIME_WINDOW_MINUTES
+        
+        iterations_data[runner].append(iterations_per_min)
+        trials_data[runner].append(trials_per_min)
         processes_data[runner].append(stats.get('num_processes'))
+        
+        total_ask_time = stats.get('total_ask_time')
+        num_asks = stats.get('num_asks')
+
+        if num_asks and num_asks > 0:
+            avg_ask_time = total_ask_time / num_asks
+            ask_time_data[runner].append(avg_ask_time)
+            total_ask_time_in_window += total_ask_time
+            total_asks_in_window += num_asks
+        else:
+            ask_time_data[runner].append(None)
+    
+    if total_asks_in_window > 0:
+        overall_avg_ask_time = total_ask_time_in_window / total_asks_in_window
+        overall_ask_time_data.append(overall_avg_ask_time)
+    else:
+        overall_ask_time_data.append(None)
 
 
-def create_figure(data_dict, title):
+def create_figure(data_dict, title, yaxis_title="Count"):
     """Creates a Plotly figure for the given data."""
     fig = go.Figure()
     for runner, data in data_dict.items():
@@ -99,10 +126,48 @@ def create_figure(data_dict, title):
     fig.update_layout(
         title=title,
         xaxis_title="Time",
-        yaxis_title="Count",
+        yaxis_title=yaxis_title,
         showlegend=True
     )
     return fig
+
+def create_single_figure(data_deque, title, yaxis_title="Count"):
+    """Creates a Plotly figure for a single data series."""
+    fig = go.Figure()
+    if not timestamps or not data_deque:
+        return fig
+        
+    df = pd.DataFrame({'timestamp': list(timestamps), 'value': list(data_deque)})
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df = df.set_index('timestamp')
+
+    # 1-minute running average
+    df_1min = df.rolling('1min').mean()
+    fig.add_trace(go.Scatter(
+        x=df_1min.index,
+        y=df_1min['value'],
+        mode='lines',
+        name='1 min avg'
+    ))
+
+    # 10-minute running average
+    df_10min = df.rolling('10min').mean()
+    fig.add_trace(go.Scatter(
+        x=df_10min.index,
+        y=df_10min['value'],
+        mode='lines',
+        name='10 min avg',
+        line=dict(dash='dash')
+    ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title="Time",
+        yaxis_title=yaxis_title,
+        showlegend=True
+    )
+    return fig
+
 
 # --- Callback ---
 @app.callback(
@@ -119,9 +184,11 @@ def update_graphs(n):
         return html.Div("No data yet. Waiting for the first poll...")
 
     graphs = [
-        dcc.Graph(id='iterations-graph', figure=create_figure(iterations_data, "Iterations per Minute")),
-        dcc.Graph(id='trials-graph', figure=create_figure(trials_data, "Trials per Minute")),
-        dcc.Graph(id='processes-graph', figure=create_figure(processes_data, "Number of Processes"))
+        dcc.Graph(id='iterations-graph', figure=create_figure(iterations_data, "Average Iterations per Minute", "Iterations/min")),
+        dcc.Graph(id='trials-graph', figure=create_figure(trials_data, "Average Trials per Minute", "Trials/min")),
+        dcc.Graph(id='processes-graph', figure=create_figure(processes_data, "Processes that Returned", "Count")),
+        dcc.Graph(id='ask-time-graph', figure=create_figure(ask_time_data, "Average Ask Time per Runner", "Seconds")),
+        dcc.Graph(id='overall-ask-time-graph', figure=create_single_figure(overall_ask_time_data, "Overall Average Ask Time", "Seconds"))
     ]
 
     return graphs
