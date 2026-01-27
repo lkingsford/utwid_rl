@@ -986,7 +986,7 @@ def trial_worker(
     process_id = os.getpid()
     comm_socket = socket.fromfd(comm_socket_fd, socket.AF_UNIX, socket.SOCK_STREAM)
     comm_socket.setblocking(False)
-    DIST_SERVER = os.environ.get("DIST_SERVER", "http://localhost:5000")
+    dist_uri = os.environ.get("DIST_URI", "http://localhost:5000")
     distributions = dists()
 
     while True:
@@ -1014,7 +1014,7 @@ def trial_worker(
             ask_payload = {"study_name": study_name, "distributions": json_dists}
             
             ask_request_start_time = time.perf_counter() # Start of /ask reply time
-            response = requests.post(f"{DIST_SERVER}/ask", json=ask_payload, timeout=30)
+            response = requests.post(f"{dist_uri}/ask", json=ask_payload, timeout=30)
             ask_reply_end_time = time.perf_counter() # End of /ask reply time
             ask_reply_time_ms = (ask_reply_end_time - ask_request_start_time) * 1000
 
@@ -1086,7 +1086,7 @@ def trial_worker(
 
         try:
             logging.info(f"Telling result for trial {trial_number} in study '{study_name}'")
-            response = requests.post(f"{DIST_SERVER}/tell", json=tell_payload, timeout=30)
+            response = requests.post(f"{dist_uri}/tell", json=tell_payload, timeout=30)
             response.raise_for_status()
             logging.info(f"Successfully told result for trial {trial_number}")
         except requests.RequestException as e:
