@@ -61,12 +61,19 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
-### ---------------- EBS ATTACH ----------------
-VOLUME_TAG_NAME="Mon2y DB"
 
-INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
-AZ=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)
+#
+IMDS="http://169.254.169.254/latest"
+TOKEN=$(curl -s -X PUT "$IMDS/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+
+INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+  "$IMDS/meta-data/instance-id")
+
+AZ=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+  "$IMDS/meta-data/placement/availability-zone")
+
+REGION="${AZ::-1}"
+## ---------------- EBS ATTACH ----------------
 
 VOLUME_ID=$(aws ec2 describe-volumes \
   --region "$REGION" \
