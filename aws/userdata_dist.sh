@@ -144,8 +144,8 @@ host    all             all             127.0.0.1/32            reject
 host    all             all             ::1/128                 reject
 EOF
 
-systemctl enable postgresql-${PG_VERSION}
-systemctl start postgresql-${PG_VERSION}
+systemctl enable postgresql
+systemctl start postgresql
 
 ### DATABASE (IDEMPOTENT)
 sudo -u postgres psql <<EOF
