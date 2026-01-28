@@ -45,7 +45,7 @@ su - $SERVICE_USER -c "$VENV_DIR/bin/pip install $APP_DIR/$(basename $DIST_WHEEL
 cat > /etc/systemd/system/mon2y-dist.service <<EOF
 [Unit]
 Description=Mon2y Distributed Optuna Service
-After=network.target postgresql-${PG_VERSION}.service
+After=network.target postgresql.service
 Requires=postgresql.service
 
 [Service]
