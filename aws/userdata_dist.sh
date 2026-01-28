@@ -2,18 +2,18 @@
 set -euo pipefail
 # Userdata script for mon2y-dist server
 
+### REQUIRED EARLY VAR
+PG_VERSION=15
+
 # Variables
 SERVICE_USER="optuna"
 APP_DIR="/opt/mon2y/dist"
 VENV_DIR="$APP_DIR/venv"
 DB_DIR="/var/db/mon2y"
 S3_BUCKET="mon2y"
-#
-# This should be replaced with the actual wheel filename or a script to find the latest
 DIST_WHEEL="mon2y/mon2y_dist-0.1.0-py3-none-any.whl"
-OPTUNA_STORAGE="sqlite:///$DB_DIR/db.sqlite3"
+OPTUNA_STORAGE="postgresql+psycopg2://optuna@/optuna"
 PGDATA="/var/lib/pgsql/${PG_VERSION}/data"
-EBS_DEVICE="/dev/xvda"
 MOUNT_POINT="/var/lib/pgsql"
 DB_NAME="optuna"
 DB_USER="optuna"
@@ -25,28 +25,28 @@ dnf install -y \
   postgresql${PG_VERSION} \
   util-linux \
   python3.13 \
-  python3.13-pip
+  python3.13-pip \
+  awscli \
+  xfsprogs
 
-# Create user and directories
-useradd -r -m -d /home/$SERVICE_USER -s /bin/bash $SERVICE_USER
-mkdir -p $APP_DIR
-mkdir -p $DB_DIR
-chown -R $SERVICE_USER:$SERVICE_USER /opt/mon2y
-chown -R $SERVICE_USER:$SERVICE_USER $DB_DIR
+### USERS + DIRS
+id "$SERVICE_USER" &>/dev/null || useradd -r -m -d /home/$SERVICE_USER -s /bin/bash $SERVICE_USER
+mkdir -p "$APP_DIR" "$DB_DIR"
+chown -R $SERVICE_USER:$SERVICE_USER /opt/mon2y "$DB_DIR"
 
-# Set up virtual environment
-python3.13 -m venv $VENV_DIR
-chown -R $SERVICE_USER:$SERVICE_USER $VENV_DIR
+### PYTHON
+python3.13 -m venv "$VENV_DIR"
+chown -R $SERVICE_USER:$SERVICE_USER "$VENV_DIR"
 
-# Install wheel
 su - $SERVICE_USER -c "aws s3 cp s3://$S3_BUCKET/$DIST_WHEEL $APP_DIR/"
 su - $SERVICE_USER -c "$VENV_DIR/bin/pip install $APP_DIR/$(basename $DIST_WHEEL)"
 
-# Create systemd service file
+### SYSTEMD SERVICE
 cat > /etc/systemd/system/mon2y-dist.service <<EOF
 [Unit]
 Description=Mon2y Distributed Optuna Service
-After=network.target
+After=network.target postgresql-${PG_VERSION}.service
+Requires=postgresql-${PG_VERSION}.service
 
 [Service]
 User=$SERVICE_USER
@@ -56,72 +56,90 @@ Environment="OPTUNA_STORAGE=$OPTUNA_STORAGE"
 Environment="S3_BUCKET=$S3_BUCKET"
 ExecStart=$VENV_DIR/bin/gunicorn --workers 3 --bind 0.0.0.0:5000 mon2y_dist.main:app
 Restart=always
-SyslogIdentifier=mon2y-dist
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Enable and start service
-systemctl daemon-reload
-systemctl enable mon2y-dist.service
-systemctl start mon2y-dist.service
+### ---------------- EBS ATTACH ----------------
+VOLUME_TAG_NAME="Mon2y DB"
 
+INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+AZ=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)
 
+VOLUME_ID=$(aws ec2 describe-volumes \
+  --region "$REGION" \
+  --filters Name=tag:Name,Values="$VOLUME_TAG_NAME" Name=availability-zone,Values="$AZ" \
+  --query 'Volumes[0].VolumeId' \
+  --output text)
 
-### FORMAT + MOUNT EBS (FIRST BOOT SAFE)
-if ! blkid ${EBS_DEVICE}; then
-  mkfs.xfs ${EBS_DEVICE}
+[ "$VOLUME_ID" = "None" ] && { echo "EBS volume not found"; exit 1; }
+
+aws ec2 attach-volume \
+  --region "$REGION" \
+  --volume-id "$VOLUME_ID" \
+  --instance-id "$INSTANCE_ID" \
+  --device /dev/sdf
+
+### WAIT FOR NVME DEVICE
+for i in {1..30}; do
+  REAL_DEVICE=$(lsblk -o NAME,SERIAL | \
+    awk "/$(echo $VOLUME_ID | sed 's/-//')/ {print \"/dev/\" \$1}")
+  [ -n "$REAL_DEVICE" ] && break
+  sleep 2
+done
+
+[ -z "$REAL_DEVICE" ] && { echo "EBS device not visible"; exit 1; }
+
+### FILESYSTEM
+mkdir -p "$MOUNT_POINT"
+
+if ! blkid "$REAL_DEVICE"; then
+  mkfs.xfs "$REAL_DEVICE"
 fi
 
-mkdir -p ${MOUNT_POINT}
+mountpoint -q "$MOUNT_POINT" || mount "$REAL_DEVICE" "$MOUNT_POINT"
 
-if ! mount | grep -q "${MOUNT_POINT}"; then
-  mount ${EBS_DEVICE} ${MOUNT_POINT}
-fi
+grep -q "$REAL_DEVICE" /etc/fstab || \
+  echo "$REAL_DEVICE $MOUNT_POINT xfs defaults,nofail 0 2" >> /etc/fstab
 
-grep -q "${EBS_DEVICE}" /etc/fstab || \
-  echo "${EBS_DEVICE} ${MOUNT_POINT} xfs defaults,nofail 0 2" >> /etc/fstab
+### POSTGRES PERMS BEFORE INIT
+mkdir -p "$PGDATA"
+chown -R postgres:postgres "$MOUNT_POINT"
+chmod 700 "$MOUNT_POINT"
 
-### PERMISSIONS
-chown -R postgres:postgres ${MOUNT_POINT}
-chmod 700 ${MOUNT_POINT}
-
-### INITDB (ONLY IF EMPTY)
-if [ ! -f "${PGDATA}/PG_VERSION" ]; then
+### INITDB (IDEMPOTENT)
+if [ ! -f "$PGDATA/PG_VERSION" ]; then
   sudo -u postgres /usr/bin/postgresql-${PG_VERSION}-setup initdb
 fi
 
 ### POSTGRES CONFIG
-CONF="${PGDATA}/postgresql.conf"
-HBA="${PGDATA}/pg_hba.conf"
+CONF="$PGDATA/postgresql.conf"
+HBA="$PGDATA/pg_hba.conf"
 
-sed -i "s/^#listen_addresses.*/listen_addresses = 'localhost'/" ${CONF}
+sed -i "s/^#listen_addresses.*/listen_addresses = 'localhost'/" "$CONF"
 
-# Conservative memory for 1GiB instance
-cat >> ${CONF} <<EOF
-
+cat >> "$CONF" <<EOF
 shared_buffers = 128MB
 work_mem = 4MB
 maintenance_work_mem = 64MB
 max_connections = 20
 EOF
 
-### AUTH: PEER FOR LOCAL USERS
-cat > ${HBA} <<EOF
+cat > "$HBA" <<EOF
 local   all             postgres                                peer
 local   all             ${DB_USER}                               peer
-local   all             ${SERVICE_USER}                           peer
+local   all             ${SERVICE_USER}                          peer
 local   all             all                                     peer
 host    all             all             127.0.0.1/32            reject
 host    all             all             ::1/128                 reject
 EOF
 
-### ENABLE + START POSTGRES
 systemctl enable postgresql-${PG_VERSION}
-systemctl restart postgresql-${PG_VERSION}
+systemctl start postgresql-${PG_VERSION}
 
-### DATABASE + ROLES (IDEMPOTENT)
+### DATABASE (IDEMPOTENT)
 sudo -u postgres psql <<EOF
 DO \$\$
 BEGIN
@@ -138,29 +156,9 @@ BEGIN
   END IF;
 END
 \$\$;
-
-GRANT CONNECT ON DATABASE ${DB_NAME} TO ${SERVICE_USER};
-
-\c ${DB_NAME}
-
-GRANT USAGE, CREATE ON SCHEMA public TO ${SERVICE_USER};
-GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${SERVICE_USER};
 EOF
 
-# Allocate IP
-#
-INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
-ALLOC_ID=$(aws ec2 describe-addresses \
-  --region "$REGION" \
-  --filters Name=tag:Name,Values=mon2y_dist \
-  --query 'Addresses[0].AllocationId' \
-  --output text)
-aws ec2 associate-address \
-  --region "$REGION" \
-  --instance-id "$INSTANCE_ID" \
-  --allocation-id "$ALLOC_ID" \
-  --allow-reassociation
-aws ec2 describe-addresses \
-  --region "$REGION" \
-  --allocation-ids "$ALLOC_ID"
+### START APP
+systemctl daemon-reload
+systemctl enable mon2y-dist.service
+systemctl start mon2y-dist.service
