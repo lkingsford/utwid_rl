@@ -3,7 +3,7 @@ set -euo pipefail
 # Userdata script for mon2y-dist server
 
 ### REQUIRED EARLY VAR
-PG_VERSION=15
+PG_VERSION=17
 
 # Variables
 SERVICE_USER="optuna"
@@ -119,7 +119,7 @@ chmod 700 "$MOUNT_POINT"
 
 ### INITDB (IDEMPOTENT)
 if [ ! -f "$PGDATA/PG_VERSION" ]; then
-  sudo -u postgres /usr/bin/postgresql-${PG_VERSION}-setup initdb
+  sudo -u postgres /usr/bin/postgresql--setup initdb
 fi
 
 ### POSTGRES CONFIG
