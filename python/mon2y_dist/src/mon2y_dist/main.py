@@ -221,6 +221,7 @@ def set_status():
 
 @app.route("/ask", methods=["POST"])
 def ask():
+    start_workers_if_needed()
     app.logger.info(f"Received /ask request from {request.remote_addr}")
     data = request.json
     if not data:
@@ -287,6 +288,7 @@ def ask():
 
 @app.route("/tell", methods=["POST"])
 def tell():
+    start_workers_if_needed()
     app.logger.info(f"Received /tell request from {request.remote_addr}")
     data = request.json
     if not data:
@@ -592,16 +594,26 @@ def worker_thread_main():
             app.logger.exception(f"Error processing operation in worker thread: {e}")
             op.result_container.complete(error=e)
 
+_workers_started = False
+_worker_start_lock = threading.Lock()
+
+def start_workers_if_needed():
+    """Starts the worker threads if they haven't been started for this process."""
+    global _workers_started
+    with _worker_start_lock:
+        if not _workers_started:
+            app.logger.info(f"Starting {MAX_OP_CONNECTIONS} worker threads for PID {os.getpid()}.")
+            for i in range(MAX_OP_CONNECTIONS):
+                thread = threading.Thread(target=worker_thread_main, daemon=True, name=f"Worker-{i}")
+                thread.start()
+            _workers_started = True
 
 def main():
     # Initialize the server stats module (now without queue parameter)
     mon2y_dist.server_stats.init()
-
-    # Start the worker threads
-    app.logger.info(f"Starting {MAX_OP_CONNECTIONS} worker threads.")
-    for i in range(MAX_OP_CONNECTIONS):
-        thread = threading.Thread(target=worker_thread_main, daemon=True, name=f"Worker-{i}")
-        thread.start()
+    
+    # Note: Worker threads are now started lazily on the first request 
+    # by start_workers_if_needed() to support pre-fork servers like Gunicorn.
     
     app.run(host='0.0.0.0', port=5000)
 

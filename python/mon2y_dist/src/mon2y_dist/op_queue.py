@@ -106,17 +106,20 @@ class Tell:
                 if result is None:
                     raise ValueError("'result' is required for status 'succeed'")
                 study.tell(trial_number, values=result)
+                LOGGER.info(
+                    f"Tell for {self.study_name} trial {trial_number} completed with status 'succeed'"
+                )
                 self.result_container.complete(result={"status": "ok"})
 
             elif status == "fail":
                 study.tell(trial_number, state=optuna.trial.TrialState.FAIL)
+                LOGGER.info(
+                    f"Tell for {self.study_name} trial {trial_number} completed with status 'fail'"
+                )
                 self.result_container.complete(result={"status": "ok"})
 
             else:
                 raise ValueError("status must be 'succeed' or 'fail'")
-                LOGGER.info(
-                    f"Tell for {self.study_name} trial {trial_number} completed"
-                )
 
         except Exception as e:
             self.result_container.complete(error=e)
