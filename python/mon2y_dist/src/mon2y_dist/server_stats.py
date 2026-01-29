@@ -20,6 +20,8 @@ from sqlalchemy import (
     MetaData,
     Table,
     desc,
+    inspect,
+    text,
 )
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.scoping import scoped_session
@@ -49,6 +51,7 @@ process_status_table = Table(
     "process_status",
     _metadata,
     Column("timestamp", DateTime, primary_key=True, index=True),
+    Column("pid", Integer, nullable=True),
     Column("ops_queue_size", Integer),
     Column("ops_calls_last_minute", Integer),
     Column("dropped_ops_last_minute", Integer),
@@ -107,6 +110,7 @@ def _tidy_ops():
 
 def _monitor_poll():
     """Periodically records server and process stats to the database."""
+    pid = os.getpid()
     while True:
         time.sleep(30)
 
@@ -131,6 +135,7 @@ def _monitor_poll():
 
             stmt = process_status_table.insert().values(
                 timestamp=now,
+                pid=pid,
                 ops_queue_size=queue_size,
                 ops_calls_last_minute=_get_ops_last_minute(),
                 dropped_ops_last_minute=_get_ops_dropped_last_minute(),
@@ -147,6 +152,21 @@ def _monitor_poll():
 
 # --- Public API ---
 
+def _add_pid_column_if_not_exists(engine):
+    """Adds the 'pid' column to the 'process_status' table if it doesn't exist."""
+    inspector = inspect(engine)
+    try:
+        columns = [col['name'] for col in inspector.get_columns('process_status')]
+        if 'pid' not in columns:
+            LOGGER.info("Adding 'pid' column to 'process_status' table.")
+            with engine.connect() as connection:
+                with connection.begin():
+                    connection.execute(text('ALTER TABLE process_status ADD COLUMN pid INTEGER'))
+            LOGGER.info("'pid' column added successfully.")
+    except Exception as e:
+        # This can happen if the table doesn't exist yet, which is fine.
+        LOGGER.info(f"Could not check/add 'pid' column, probably because table does not exist yet: {e}")
+
 
 def init():
     """Initializes the server stats module. Safe to call multiple times."""
@@ -155,16 +175,19 @@ def init():
     with _init_lock:
         if _started:
             return
+        
+        # Check and add pid column before creating all tables
+        _add_pid_column_if_not_exists(_engine)
+
+        LOGGER.info("Creating tables")
+        _metadata.create_all(_engine, checkfirst=True)
+
+        monitor_thread = threading.Thread(target=_monitor_poll, daemon=True)
+        monitor_thread.start()
+
+        tidy_thread = threading.Thread(target=_tidy_ops, daemon=True)
+        tidy_thread.start()
         _started = True
-
-    LOGGER.info("Creating tables")
-    _metadata.create_all(_engine, checkfirst=True)
-
-    monitor_thread = threading.Thread(target=_monitor_poll, daemon=True)
-    monitor_thread.start()
-
-    tidy_thread = threading.Thread(target=_tidy_ops, daemon=True)
-    tidy_thread.start()
 
 
 ServerStats = namedtuple(
@@ -197,7 +220,7 @@ def server_stats(entries_count: int) -> List[ServerStats]:
 
 ProcessStats = namedtuple(
     "ProcessStats",
-    ["timestamp", "ops_queue_size", "ops_calls_last_minute", "dropped_ops_last_minute"],
+    ["timestamp", "pid", "ops_queue_size", "ops_calls_last_minute", "dropped_ops_last_minute"],
 )
 
 
@@ -215,6 +238,7 @@ def process_stats(entries_count: int) -> List[ProcessStats]:
         return [
             ProcessStats(
                 timestamp=r.timestamp.isoformat(),
+                pid=r.pid,
                 ops_queue_size=r.ops_queue_size,
                 ops_calls_last_minute=r.ops_calls_last_minute,
                 dropped_ops_last_minute=r.dropped_ops_last_minute,
