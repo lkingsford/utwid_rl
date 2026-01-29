@@ -156,15 +156,9 @@ BEGIN
   END IF;
 END
 \$\$;
-
-DO \$\$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DB_NAME}') THEN
-    CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};
-  END IF;
-END
-\$\$;
 EOF
+
+sudo -u postgres createdb optuna -O optuna || true
 
 ### START APP
 systemctl daemon-reload
