@@ -11,7 +11,8 @@ dependencies = [
     "boto3",
     "gunicorn",
     "psycopg2-binary",
-    "sqlalchemy"
+    "sqlalchemy",
+    "psutil"
 ]
 
 [tool.setuptools]

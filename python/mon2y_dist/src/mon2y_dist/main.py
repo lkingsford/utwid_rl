@@ -11,6 +11,13 @@ from flask import Flask, jsonify, request
 import optuna
 import optuna.exceptions
 import mon2y_dist.runner_stats
+import mon2y_dist.server_stats
+
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
 
 try:
     import boto3
@@ -19,6 +26,11 @@ except ImportError:
     import boto3
 
 app = Flask(__name__)
+
+# Placeholders for stats
+pending_ops = []
+OP_CONNS = 20
+
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 if app.logger.hasHandlers():
@@ -255,11 +267,13 @@ def ask():
 
     try:
         trial = study.ask(distributions)
+        mon2y_dist.server_stats.op_called()
         app.logger.info(
             f"/ask: Generated trial {trial.number} for study '{study_name}' with params: {trial.params}"
         )
         return jsonify({"trial_number": trial.number, "params": trial.params, "iterations": study.user_attrs.get("iterations")})
     except Exception as e:
+        mon2y_dist.server_stats.op_dropped()
         app.logger.exception(f"/ask: Study.ask failed for study '{study_name}'")
         return jsonify({"error": f"Failed to ask for trial: {e}"}), 500
 
@@ -595,5 +609,24 @@ def get_runner_status():
         return jsonify({"error": f"Failed to get runner status: {e}"}), 500
 
 
+@app.route("/dist_status", methods=["GET"])
+def dist_status():
+    app.logger.info("Received /dist_status request")
+    try:
+        entries = int(request.args.get("entries", 1))
+        
+        server_stats_data = mon2y_dist.server_stats.server_stats(entries)
+        process_stats_data = mon2y_dist.server_stats.process_stats(entries)
+        
+        return jsonify({
+            "server_stats": namedtuple_to_dict(server_stats_data),
+            "process_stats": namedtuple_to_dict(process_stats_data),
+        })
+    except Exception as e:
+        app.logger.exception("Failed to get dist status")
+        return jsonify({"error": f"Failed to get dist status: {e}"}), 500
+
+
 def main():
+    mon2y_dist.server_stats.init(pending_ops)
     app.run(host='0.0.0.0', port=5000)
