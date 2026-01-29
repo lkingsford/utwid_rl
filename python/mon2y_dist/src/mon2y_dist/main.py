@@ -280,7 +280,7 @@ def ask():
     op_result.result["iterations"] = study.user_attrs.get("iterations")
 
     app.logger.info(
-        f"/ask: Processed trial {op_result.result['number']} for study '{study_name}' with params: {op_result.result['params']}"
+        f"/ask: Processed trial {op_result.result['trial_number']} for study '{study_name}' with params: {op_result.result['params']}"
     )
     return jsonify(op_result.result)
 
@@ -310,28 +310,7 @@ def tell():
     mon2y_dist.server_stats.op_called()
 
     # Poll for the result
-    start_time = time.time()
-    while not op_result.is_complete:
-        if time.time() - start_time > 30:  # 30-second timeout
-            mon2y_dist.server_stats.op_dropped()
-            app.logger.error(
-                f"/tell: Request timed out for study '{study_name}', trial {data.get('trial_number')}"
-            )
-            return jsonify({"error": "Request timed out"}), 504
-
-        time.sleep(OP_POLL_MS / 1000.0)
-
-    if op_result.error:
-        mon2y_dist.server_stats.op_dropped()
-        app.logger.error(
-            f"/tell: Operation failed for study '{study_name}': {op_result.error}"
-        )
-        return jsonify({"error": f"Failed to tell study: {op_result.error}"}), 500
-
-    app.logger.info(
-        f"/tell: Successfully processed tell for study '{study_name}', trial {data.get('trial_number')}"
-    )
-    return jsonify(op_result.result)
+    return jsonify({"status":"enqueued"})
 
 
 @app.route("/heartbeat", methods=["POST"])

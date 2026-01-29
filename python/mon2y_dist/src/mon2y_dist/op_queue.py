@@ -1,3 +1,4 @@
+import logging
 import os
 import queue
 from dataclasses import dataclass, field
@@ -5,6 +6,7 @@ from typing import Any, Dict, Optional, List
 
 import optuna
 
+LOGGER = logging.getLogger()
 
 # --- Queue Configuration ---
 
@@ -45,7 +47,9 @@ class OpResult:
 class Ask:
     """An operation to get a new trial from a study (study.ask)."""
 
-    def __init__(self, study_name: str, distributions: Dict, result_container: OpResult):
+    def __init__(
+        self, study_name: str, distributions: Dict, result_container: OpResult
+    ):
         self.study_name = study_name
         self.distributions = distributions
         self.result_container = result_container
@@ -56,14 +60,14 @@ class Ask:
             trial = study.ask(self.distributions)
             # Serialize the FrozenTrial object into a JSON-friendly dictionary
             result_data = {
-                "number": trial.number,
+                "trial_number": trial.number,
                 "params": trial.params,
                 "distributions": {k: str(v) for k, v in trial.distributions.items()},
                 "user_attrs": trial.user_attrs,
                 "system_attrs": trial.system_attrs,
-                "datetime_start": trial.datetime_start.isoformat()
-                if trial.datetime_start
-                else None,
+                "datetime_start": (
+                    trial.datetime_start.isoformat() if trial.datetime_start else None
+                ),
             }
             self.result_container.complete(result=result_data)
         except Exception as e:
@@ -93,6 +97,10 @@ class Tell:
                 for key, value in user_data.items():
                     storage.set_trial_user_attr(trial_id, key, value)
 
+            LOGGER.debug(
+                f"Starting tell for {self.study_name} trial {trial_number}: {user_data}"
+            )
+
             if status == "succeed":
                 result = self.tell_data.get("result")
                 if result is None:
@@ -103,9 +111,13 @@ class Tell:
             elif status == "fail":
                 study.tell(trial_number, state=optuna.trial.TrialState.FAIL)
                 self.result_container.complete(result={"status": "ok"})
-                
+
             else:
                 raise ValueError("status must be 'succeed' or 'fail'")
+                LOGGER.info(
+                    f"Tell for {self.study_name} trial {trial_number} completed"
+                )
 
         except Exception as e:
             self.result_container.complete(error=e)
+
