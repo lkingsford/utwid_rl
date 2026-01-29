@@ -1,3 +1,4 @@
+import logging
 import datetime
 import os
 import threading
@@ -22,6 +23,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.scoping import scoped_session
+
+LOGGER = logging.getLogger()
 
 # --- Database Setup ---
 STORAGE_URL = os.environ.get("OPTUNA_STORAGE") or "sqlite:///db.sqlite3"
@@ -53,19 +56,25 @@ process_status_table = Table(
 _ops_calls: List[datetime.datetime] = []
 _dropped_calls: List[datetime.datetime] = []
 _lock = threading.Lock()
+_init_lock = threading.Lock()
+_started = False
 
 _pending_ops_queue = None
 
 
 def op_called():
     """Record that an operation was called."""
+    init()
     with _lock:
+        LOGGER.debug("os_called")
         _ops_calls.append(datetime.datetime.now(datetime.timezone.utc))
 
 
 def op_dropped():
     """Record that an operation was dropped."""
+    init()
     with _lock:
+        LOGGER.debug("os_dropped")
         _dropped_calls.append(datetime.datetime.now(datetime.timezone.utc))
 
 
@@ -81,11 +90,14 @@ def _get_ops_dropped_last_minute() -> int:
 
 # --- Background Tasks ---
 
+
 def _tidy_ops():
     """Periodically cleans up old entries from _ops_calls and _dropped_calls."""
     while True:
         time.sleep(1)
-        one_minute_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=1)
+        one_minute_ago = datetime.datetime.now(
+            datetime.timezone.utc
+        ) - datetime.timedelta(minutes=1)
         with _lock:
             while _ops_calls and _ops_calls[0] < one_minute_ago:
                 _ops_calls.pop(0)
@@ -98,16 +110,16 @@ def _monitor_poll():
     global _pending_ops_queue
     while True:
         time.sleep(30)
-        
+
         session = Session()
         try:
             now = datetime.datetime.now(datetime.timezone.utc)
-            
+
             # --- Record Server Status ---
             if psutil:
                 cpu_usage = psutil.cpu_percent()
                 ram_usage = psutil.virtual_memory().percent
-                
+
                 stmt = server_status_table.insert().values(
                     timestamp=now,
                     cpu_usage_percent=cpu_usage,
@@ -116,8 +128,10 @@ def _monitor_poll():
                 session.execute(stmt)
 
             # --- Record Process Status ---
-            queue_size = len(_pending_ops_queue) if _pending_ops_queue is not None else -1
-            
+            queue_size = (
+                len(_pending_ops_queue) if _pending_ops_queue is not None else -1
+            )
+
             stmt = process_status_table.insert().values(
                 timestamp=now,
                 ops_queue_size=queue_size,
@@ -125,7 +139,7 @@ def _monitor_poll():
                 dropped_ops_last_minute=_get_ops_dropped_last_minute(),
             )
             session.execute(stmt)
-            
+
             session.commit()
         except Exception:
             session.rollback()
@@ -136,11 +150,20 @@ def _monitor_poll():
 
 # --- Public API ---
 
-def init(pending_ops_queue):
-    """Initializes the server stats module."""
-    global _pending_ops_queue
-    _pending_ops_queue = pending_ops_queue
-    
+
+def init(pending_ops_queue=None):
+    """Initializes the server stats module. Safe to call multiple times."""
+    global _started, _pending_ops_queue
+
+    if pending_ops_queue is not None:
+        _pending_ops_queue = pending_ops_queue
+
+    with _init_lock:
+        if _started:
+            return
+        _started = True
+
+    LOGGER.info("Creating tables")
     _metadata.create_all(_engine, checkfirst=True)
 
     monitor_thread = threading.Thread(target=_monitor_poll, daemon=True)
@@ -150,10 +173,14 @@ def init(pending_ops_queue):
     tidy_thread.start()
 
 
-ServerStats = namedtuple("ServerStats", ["timestamp", "cpu_usage_percent", "ram_usage_percent"])
+ServerStats = namedtuple(
+    "ServerStats", ["timestamp", "cpu_usage_percent", "ram_usage_percent"]
+)
+
 
 def server_stats(entries_count: int) -> List[ServerStats]:
     """Returns the most recent rows from the server_status table."""
+    init()
     session = Session()
     try:
         rows = (
@@ -162,15 +189,27 @@ def server_stats(entries_count: int) -> List[ServerStats]:
             .limit(entries_count)
             .all()
         )
-        return [ServerStats(timestamp=r.timestamp.isoformat(), cpu_usage_percent=r.cpu_usage_percent, ram_usage_percent=r.ram_usage_percent) for r in rows]
+        return [
+            ServerStats(
+                timestamp=r.timestamp.isoformat(),
+                cpu_usage_percent=r.cpu_usage_percent,
+                ram_usage_percent=r.ram_usage_percent,
+            )
+            for r in rows
+        ]
     finally:
         Session.remove()
 
 
-ProcessStats = namedtuple("ProcessStats", ["timestamp", "ops_queue_size", "ops_calls_last_minute", "dropped_ops_last_minute"])
+ProcessStats = namedtuple(
+    "ProcessStats",
+    ["timestamp", "ops_queue_size", "ops_calls_last_minute", "dropped_ops_last_minute"],
+)
+
 
 def process_stats(entries_count: int) -> List[ProcessStats]:
     """Returns the most recent rows from the process_status table."""
+    init()
     session = Session()
     try:
         rows = (
@@ -179,6 +218,14 @@ def process_stats(entries_count: int) -> List[ProcessStats]:
             .limit(entries_count)
             .all()
         )
-        return [ProcessStats(timestamp=r.timestamp.isoformat(), ops_queue_size=r.ops_queue_size, ops_calls_last_minute=r.ops_calls_last_minute, dropped_ops_last_minute=r.dropped_ops_last_minute) for r in rows]
+        return [
+            ProcessStats(
+                timestamp=r.timestamp.isoformat(),
+                ops_queue_size=r.ops_queue_size,
+                ops_calls_last_minute=r.ops_calls_last_minute,
+                dropped_ops_last_minute=r.dropped_ops_last_minute,
+            )
+            for r in rows
+        ]
     finally:
         Session.remove()
