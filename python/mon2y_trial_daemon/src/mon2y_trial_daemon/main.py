@@ -122,7 +122,9 @@ class TrialRunner:
             f"params={runner_details.params},"
             f"runner_id='{runner_details.runner_id}')"
         )
-        logging.debug(f"Executing command for study '{runner_details.study_name}': {command}")
+        logging.debug(
+            f"Executing command for study '{runner_details.study_name}': {command}"
+        )
         self._process = subprocess.Popen(
             [
                 python_executable,
@@ -173,7 +175,9 @@ class Study:
         else:
             wheel_path = download_from_url(self.wheel_uri, wheels_dir)
             if not wheel_path:
-                raise NoWheelException(f"Failed to download wheel from {self.wheel_uri}")
+                raise NoWheelException(
+                    f"Failed to download wheel from {self.wheel_uri}"
+                )
             venv_dir = tempfile.mkdtemp()
             logging.info(f"Creating virtual environment in {venv_dir}")
             venv.create(venv_dir, with_pip=True)
@@ -218,19 +222,21 @@ class Study:
             )
             for _ in range(to_add):
                 self._runners.append(
-                    TrialRunner(self.executable(wheels_dir), self.runner_details, self.log_level)
+                    TrialRunner(
+                        self.executable(wheels_dir), self.runner_details, self.log_level
+                    )
                 )
 
     def cleanup(self):
         """Manually clean up runners to free the sockets"""
-        
+
         pre_cleanup_len = len(self._runners)
         self._runners = [
             runner
             for runner in self._runners
             if runner.status() != TrialRunnerState.STOPPED
         ]
-        
+
         cleaned_up_runners = pre_cleanup_len - len(self._runners)
         if cleaned_up_runners > 0:
             logging.info(
@@ -273,7 +279,10 @@ def main():
     default_processes = os.cpu_count() if os.cpu_count() is not None else 4
 
     parser.add_argument(
-        "--processes", type=int, default=default_processes, help="Trial runner processes"
+        "--processes",
+        type=int,
+        default=default_processes,
+        help="Trial runner processes",
     )
     args = parser.parse_args()
 
@@ -308,7 +317,7 @@ def main():
     studies: Dict[str, Study] = {}
     noted_as_incompatible: Set[str] = set()
 
-    dist_uri = os.environ.get("DIST_URI", "http://ocalhost:5000")
+    dist_uri = os.environ.get("DIST_URI", "http://localhost:5000")
     while True:
         logging.info("Polling for open studies...")
         try:
@@ -338,7 +347,9 @@ def main():
 
                 wheel_url = user_attrs.get(wheel_url_attr)
                 if wheel_url:
-                    logging.info(f"Found new open study '{study_name}' with compatible wheel.")
+                    logging.info(
+                        f"Found new open study '{study_name}' with compatible wheel."
+                    )
                 else:
                     logging.info(f"Found new open study '{study_name}'.")
 
@@ -351,7 +362,7 @@ def main():
                     params=user_attrs.get("params", {}),
                     runner_id=runner_id,
                 )
-                
+
                 try:
                     dist_uri = os.environ.get("DIST_URI", "http://localhost:5000")
 
@@ -367,7 +378,7 @@ def main():
 
         for study in studies.values():
             study.cleanup()
-            
+
         logging.info(
             f"Active runner #: { {study_name: len(study.current_running())  for study_name, study in studies.items() if study_name in open_study_names} }"
         )
@@ -377,7 +388,7 @@ def main():
             for study_name, study in studies.items()
             if len(study.current_running()) > 0
         }
-        
+
         studies_to_stop = running_study_names - open_study_names
         for study_name in studies_to_stop:
             if study_name in studies:
@@ -394,6 +405,7 @@ def main():
             studies[study_name].scale(scale_to_set, WHEELS_DIR)
 
         time.sleep(POLL_INTERVAL)
+
 
 if __name__ == "__main__":
     main()
