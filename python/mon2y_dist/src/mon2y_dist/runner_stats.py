@@ -33,16 +33,26 @@ def runner_status(
     """
     engine = sqlalchemy.create_engine(storage_url)
     runner_stats = defaultdict(
-        lambda: {"total_iterations": 0, "total_trials": 0}
+        lambda: {
+            "total_iterations": 0,
+            "total_trials": 0,
+            "processes": set(),
+            "total_ask_time": 0.0,
+            "num_asks": 0,
+        }
     )
 
     query = """
     SELECT
         runner_id_attr.value_json AS runner_id,
-        iterations_attr.value_json AS iterations
+        iterations_attr.value_json AS iterations,
+        process_id_attr.value_json AS process_id,
+        ask_time_attr.value_json AS ask_time_ms
     FROM trials
     JOIN trial_user_attributes AS runner_id_attr ON trials.trial_id = runner_id_attr.trial_id AND runner_id_attr.key = 'runner_id'
     JOIN trial_user_attributes AS iterations_attr ON trials.trial_id = iterations_attr.trial_id AND iterations_attr.key = 'iterations'
+    LEFT JOIN trial_user_attributes AS process_id_attr ON trials.trial_id = process_id_attr.trial_id AND process_id_attr.key = 'process_id'
+    LEFT JOIN trial_user_attributes AS ask_time_attr ON trials.trial_id = ask_time_attr.trial_id AND ask_time_attr.key = 'ask_reply_time_ms'
     WHERE
         trials.datetime_complete BETWEEN :start_time AND :end_time
         AND trials.state = 'COMPLETE'
@@ -54,22 +64,29 @@ def runner_status(
             {"start_time": start_time, "end_time": end_time},
         )
         for row in result:
-            # runner_id and iterations are stored as JSON strings (e.g., '"runner-123"' or '"1000"')
             runner_id = json.loads(row.runner_id)
-            iterations = json.loads(row.iterations)
+            if not runner_id:
+                continue
+
+            stats = runner_stats[runner_id]
+            stats["total_iterations"] += json.loads(row.iterations or "0")
+            stats["total_trials"] += 1
+
+            if row.process_id:
+                stats["processes"].add(json.loads(row.process_id))
             
-            if runner_id:
-                runner_stats[runner_id]["total_iterations"] += int(iterations)
-                runner_stats[runner_id]["total_trials"] += 1
+            if row.ask_time_ms:
+                stats["total_ask_time"] += json.loads(row.ask_time_ms) / 1000.0  # Convert ms to seconds
+                stats["num_asks"] += 1
+
 
     processed_stats = {
         runner_id: RunnerStats(
             total_iterations=stats["total_iterations"],
             total_trials=stats["total_trials"],
-            # These stats are no longer available from the database, defaulting to 0
-            num_processes=0,
-            total_ask_time=0.0,
-            num_asks=0,
+            num_processes=len(stats["processes"]),
+            total_ask_time=stats["total_ask_time"],
+            num_asks=stats["num_asks"],
         )
         for runner_id, stats in runner_stats.items()
     }
