@@ -568,7 +568,7 @@ def get_runner_status():
             end_time = datetime.datetime.now()
             start_time = end_time - timedelta(seconds=time_seconds)
         
-        status_output = mon2y_dist.runner_stats.runner_status(start_time, end_time)
+        status_output = mon2y_dist.runner_stats.runner_status(start_time, end_time, STORAGE_URL)
         
         return jsonify(namedtuple_to_dict(status_output))
     except Exception as e:
