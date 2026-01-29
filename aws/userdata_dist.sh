@@ -119,7 +119,7 @@ chmod 700 "$MOUNT_POINT"
 
 ### INITDB (IDEMPOTENT)
 if [ ! -f "$PGDATA/PG_VERSION" ]; then
-  sudo -u postgres /usr/bin/postgresql--setup initdb
+  sudo -u postgres /usr/bin/postgresql --setup initdb
 fi
 
 ### POSTGRES CONFIG
