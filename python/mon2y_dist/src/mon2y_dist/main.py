@@ -5,6 +5,8 @@ import logging
 import os
 import sys
 import subprocess
+import threading
+import time
 from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request
@@ -12,6 +14,14 @@ import optuna
 import optuna.exceptions
 import mon2y_dist.runner_stats
 import mon2y_dist.server_stats
+from mon2y_dist.op_queue import (
+    op_queue,
+    Ask,
+    Tell,
+    OpResult,
+    MAX_OP_CONNECTIONS,
+    OP_POLL_MS,
+)
 
 try:
     import psutil
@@ -26,10 +36,6 @@ except ImportError:
     import boto3
 
 app = Flask(__name__)
-
-# Placeholders for stats
-pending_ops = []
-OP_CONNS = 20
 
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -67,10 +73,11 @@ def get_study(study_name) -> Optional[optuna.Study]:
     app.logger.info(
         f"Study '{study_name}' not in memory cache, attempting to load from storage: {STORAGE_URL}"
     )
-    if study_name not in optuna.get_all_study_names(STORAGE_URL):
+    all_study_names = optuna.study.get_all_study_names(storage=storage())
+    if study_name not in all_study_names:
         app.logger.warning(f"Study '{study_name}' not found in storage.")
         return None
-    study = optuna.load_study(study_name=study_name, storage=STORAGE_URL)
+    study = optuna.load_study(study_name=study_name, storage=storage())
     studies[study_name] = study
     app.logger.info(f"Study '{study_name}' loaded from storage and cached.")
     return study
@@ -116,20 +123,13 @@ def create_study():
         app.logger.info(
             f"/create_study: Creating/loading study '{study_name}' with directions {converted_directions}"
         )
-        if len(directions) == 1:
-            study = optuna.create_study(
-                study_name=study_name,
-                storage=STORAGE_URL,
-                direction=converted_directions[0],
-                load_if_exists=True,
-            )
-        else:
-            study = optuna.create_study(
-                study_name=study_name,
-                storage=STORAGE_URL,
-                directions=converted_directions,
-                load_if_exists=True,
-            )
+        study = optuna.create_study(
+            study_name=study_name,
+            storage=storage(),
+            directions=converted_directions if len(converted_directions) > 1 else None,
+            direction=converted_directions[0] if len(converted_directions) == 1 else None,
+            load_if_exists=True,
+        )
         app.logger.info(
             f"/create_study: Study '{study_name}' created/loaded successfully."
         )
@@ -143,7 +143,6 @@ def create_study():
         "dist-status": "open",
         "iterations": iterations,
     }
-
 
     x86_wheel_filename = data.get("x86_manylinux_wheel_s3")
     if x86_wheel_filename:
@@ -238,22 +237,9 @@ def ask():
     if not distributions_json:
         app.logger.error("/ask: 'distributions' is required")
         return jsonify({"error": "distributions is required"}), 400
-
+    
     try:
-        study = get_study(study_name)
-        if study is None:
-            app.logger.error(f"/ask: Study '{study_name}' not found")
-            return jsonify({"error": f"Study '{study_name}' not found"}), 404
-    except Exception as e:
-        app.logger.exception(
-            f"/ask: Failed to load study '{study_name}' due to an unexpected error"
-        )
-        return jsonify({"error": f"Failed to load study: {e}"}), 500
-
-    try:
-        app.logger.info(f"/ask: Parsing distributions for study '{study_name}'")
         distributions = {
-            # This is lazy, but I can't be bothered rewriting part of the library code to support this bit
             param_name: optuna.distributions.json_to_distribution(
                 json.dumps(param_json)
             )
@@ -265,17 +251,38 @@ def ask():
         )
         return jsonify({"error": f"Failed to parse distributions: {e}"}), 400
 
-    try:
-        trial = study.ask(distributions)
-        mon2y_dist.server_stats.op_called()
-        app.logger.info(
-            f"/ask: Generated trial {trial.number} for study '{study_name}' with params: {trial.params}"
-        )
-        return jsonify({"trial_number": trial.number, "params": trial.params, "iterations": study.user_attrs.get("iterations")})
-    except Exception as e:
+    op_result = OpResult()
+    ask_op = Ask(study_name, distributions, op_result)
+    op_queue.put(ask_op)
+    mon2y_dist.server_stats.op_called()
+
+    # Poll for the result
+    start_time = time.time()
+    # Using a 30-second timeout as a safeguard
+    while not op_result.is_complete:
+        if time.time() - start_time > 30:
+            mon2y_dist.server_stats.op_dropped()
+            app.logger.error(f"Request timed out for study '{study_name}'")
+            return jsonify({"error": "Request timed out"}), 504  # Gateway Timeout
+
+        time.sleep(OP_POLL_MS / 1000.0)
+
+    if op_result.error:
         mon2y_dist.server_stats.op_dropped()
-        app.logger.exception(f"/ask: Study.ask failed for study '{study_name}'")
-        return jsonify({"error": f"Failed to ask for trial: {e}"}), 500
+        app.logger.error(
+            f"/ask: Operation failed for study '{study_name}': {op_result.error}"
+        )
+        return jsonify({"error": f"Failed to ask for trial: {op_result.error}"}), 500
+
+    # The result from Ask.run already contains trial number and params
+    # We just need to add the iterations from the study attributes
+    study = get_study(study_name)
+    op_result.result["iterations"] = study.user_attrs.get("iterations")
+
+    app.logger.info(
+        f"/ask: Processed trial {op_result.result['number']} for study '{study_name}' with params: {op_result.result['params']}"
+    )
+    return jsonify(op_result.result)
 
 
 @app.route("/tell", methods=["POST"])
@@ -292,79 +299,39 @@ def tell():
         return jsonify({"error": "study_name is required"}), 400
     app.logger.info(f"/tell: study_name='{study_name}'")
 
-    trial_number = data.get("trial_number")
-    if trial_number is None:  # trial_number can be 0
+    if data.get("trial_number") is None:
         app.logger.error("/tell: 'trial_number' is required")
         return jsonify({"error": "trial_number is required"}), 400
-    app.logger.info(f"/tell: trial_number='{trial_number}'")
 
-    status = data.get("status")
-    if not status:
-        app.logger.error("/tell: 'status' is required")
-        return jsonify({"error": "status is required"}), 400
-    app.logger.info(f"/tell: status='{status}'")
+    op_result = OpResult()
+    # The Tell class will handle the full logic based on the request data
+    tell_op = Tell(study_name, data, op_result)
+    op_queue.put(tell_op)
+    mon2y_dist.server_stats.op_called()
 
-    try:
-        study = get_study(study_name)
-        if study is None:
-            app.logger.error(f"/tell: Study '{study_name}' not found")
-            return jsonify({"error": f"Study '{study_name}' not found"}), 404
-    except Exception as e:
-        app.logger.exception(f"/tell: Failed to load study '{study_name}'")
-        return jsonify({"error": f"Failed to load study: {e}"}), 500
+    # Poll for the result
+    start_time = time.time()
+    while not op_result.is_complete:
+        if time.time() - start_time > 30:  # 30-second timeout
+            mon2y_dist.server_stats.op_dropped()
+            app.logger.error(
+                f"/tell: Request timed out for study '{study_name}', trial {data.get('trial_number')}"
+            )
+            return jsonify({"error": "Request timed out"}), 504
 
-    user_data = data.get("user_data")
+        time.sleep(OP_POLL_MS / 1000.0)
 
-    trial_id = storage().get_trial_id_from_study_id_trial_number(
-        study._study_id, trial_number
+    if op_result.error:
+        mon2y_dist.server_stats.op_dropped()
+        app.logger.error(
+            f"/tell: Operation failed for study '{study_name}': {op_result.error}"
+        )
+        return jsonify({"error": f"Failed to tell study: {op_result.error}"}), 500
+
+    app.logger.info(
+        f"/tell: Successfully processed tell for study '{study_name}', trial {data.get('trial_number')}"
     )
-
-    if user_data:
-        try:
-            app.logger.info(
-                f"/tell: Setting user data for trial {trial_number} in study '{study_name}': {user_data}"
-            )
-            for key, value in user_data.items():
-                storage().set_trial_user_attr(trial_id, key, value)
-        except Exception as e:
-            app.logger.exception(
-                f"/tell: Failed to set user data for trial {trial_number} in study '{study_name}'"
-            )
-            return jsonify({"error": f"Failed to set user data: {e}"}), 500
-
-    if status == "succeed":
-        result = data.get("result")
-        if result is None:
-            app.logger.error("/tell: 'result' is required for status 'succeed'")
-            return jsonify({"error": "result is required for status 'succeed'"}), 400
-        try:
-            app.logger.info(
-                f"/tell: Reporting success for trial {trial_number} in study '{study_name}' with result: {result}"
-            )
-            study.tell(trial_number, values=result)
-            return jsonify({"status": "ok"})
-        except Exception as e:
-            app.logger.exception(
-                f"/tell: Failed to tell study '{study_name}' for trial {trial_number}"
-            )
-            return jsonify({"error": f"Failed to tell study: {e}"}), 500
-
-    elif status == "fail":
-        try:
-            app.logger.info(
-                f"/tell: Reporting fail for trial {trial_number} in study '{study_name}'"
-            )
-            study.tell(trial_number, state=optuna.trial.TrialState.FAIL)
-            return jsonify({"status": "ok"})
-        except Exception as e:
-            app.logger.exception(
-                f"/tell: Failed to tell study '{study_name}' for trial {trial_number}"
-            )
-            return jsonify({"error": f"Failed to tell study: {e}"}), 500
-
-    else:
-        app.logger.error(f"/tell: Invalid status '{status}'")
-        return jsonify({"error": "status must be 'succeed' or 'fail'"}), 400
+    return jsonify(op_result.result)
 
 
 @app.route("/heartbeat", methods=["POST"])
@@ -396,14 +363,14 @@ def heartbeat():
         app.logger.exception(f"/heartbeat: Failed to load study '{study_name}'")
         return jsonify({"error": f"Failed to load study: {e}"}), 500
 
-    storage = study._storage
-    if not isinstance(storage, optuna.storages.RDBStorage):
+    storage_obj = study._storage
+    if not isinstance(storage_obj, optuna.storages.RDBStorage):
         app.logger.error(
-            f"/heartbeat: Heartbeat is only supported for RDBStorage, but got {type(storage)}"
+            f"/heartbeat: Heartbeat is only supported for RDBStorage, but got {type(storage_obj)}"
         )
         return jsonify({"error": "Heartbeat is only supported for RDBStorage"}), 501
 
-    trial_id = storage.get_trial_id_from_study_id_trial_number(
+    trial_id = storage_obj.get_trial_id_from_study_id_trial_number(
         study._study_id, trial_number
     )
 
@@ -424,7 +391,7 @@ def heartbeat():
         app.logger.info(
             f"/heartbeat: Recording heartbeat for trial {trial_number} (id: {trial_id}) in study '{study_name}'"
         )
-        storage.record_heartbeat(trial_id)
+        storage_obj.record_heartbeat(trial_id)
         return jsonify({"status": "ok"})
     except Exception as e:
         app.logger.exception(
@@ -530,7 +497,7 @@ def get_open_studies():
     try:
         s3 = boto3.client("s3", region_name=S3_REGION)
         all_studies = optuna.study.get_all_study_summaries(
-            storage=STORAGE_URL, include_best_trial=False
+            storage=storage(), include_best_trial=False
         )
         open_studies = []
         for study_summary in all_studies:
@@ -627,6 +594,38 @@ def dist_status():
         return jsonify({"error": f"Failed to get dist status: {e}"}), 500
 
 
+def worker_thread_main():
+    """Main loop for worker threads processing Optuna operations."""
+    while True:
+        op = op_queue.get()
+        try:
+            study = get_study(op.study_name)
+            if study is None:
+                op.result_container.complete(
+                    error=ValueError(f"Study '{op.study_name}' not found")
+                )
+                continue
+
+            # The 'run' method on the op object will handle the specific logic
+            # for ask/tell and populate the result container.
+            op.run(study, storage())
+        except Exception as e:
+            app.logger.exception(f"Error processing operation in worker thread: {e}")
+            op.result_container.complete(error=e)
+
+
 def main():
-    mon2y_dist.server_stats.init(pending_ops)
+    # Initialize the server stats module (now without queue parameter)
+    mon2y_dist.server_stats.init()
+
+    # Start the worker threads
+    app.logger.info(f"Starting {MAX_OP_CONNECTIONS} worker threads.")
+    for i in range(MAX_OP_CONNECTIONS):
+        thread = threading.Thread(target=worker_thread_main, daemon=True, name=f"Worker-{i}")
+        thread.start()
+    
     app.run(host='0.0.0.0', port=5000)
+
+if __name__ == "__main__":
+    main()
+

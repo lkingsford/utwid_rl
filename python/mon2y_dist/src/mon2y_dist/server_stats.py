@@ -24,6 +24,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.scoping import scoped_session
 
+from . import op_queue
+
 LOGGER = logging.getLogger()
 
 # --- Database Setup ---
@@ -58,8 +60,6 @@ _dropped_calls: List[datetime.datetime] = []
 _lock = threading.Lock()
 _init_lock = threading.Lock()
 _started = False
-
-_pending_ops_queue = None
 
 
 def op_called():
@@ -107,7 +107,6 @@ def _tidy_ops():
 
 def _monitor_poll():
     """Periodically records server and process stats to the database."""
-    global _pending_ops_queue
     while True:
         time.sleep(30)
 
@@ -128,9 +127,7 @@ def _monitor_poll():
                 session.execute(stmt)
 
             # --- Record Process Status ---
-            queue_size = (
-                len(_pending_ops_queue) if _pending_ops_queue is not None else -1
-            )
+            queue_size = op_queue.op_queue.qsize()
 
             stmt = process_status_table.insert().values(
                 timestamp=now,
@@ -151,12 +148,9 @@ def _monitor_poll():
 # --- Public API ---
 
 
-def init(pending_ops_queue=None):
+def init():
     """Initializes the server stats module. Safe to call multiple times."""
-    global _started, _pending_ops_queue
-
-    if pending_ops_queue is not None:
-        _pending_ops_queue = pending_ops_queue
+    global _started
 
     with _init_lock:
         if _started:
