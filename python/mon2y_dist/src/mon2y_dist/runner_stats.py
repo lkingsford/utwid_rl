@@ -6,12 +6,12 @@ from collections import defaultdict
 from typing import Dict, NamedTuple, Optional
 
 import sqlalchemy
-from sqlalchemy.engine import Engine, make_url
-
 from mon2y_dist.db_models import (ensure_additional_tables_exist,
                                   trial_additional_data_table)
+from sqlalchemy.engine import Engine, make_url
 
 logger = logging.getLogger()
+
 
 class RunnerStats(NamedTuple):
     total_iterations: int
@@ -71,16 +71,18 @@ def runner_status(
         # We now retrieve data directly from the trial_additional_data table.
         query = """
         SELECT
-            t.trial_id,
             tad.runner_id,
-            tad.iterations,
             tad.process_id,
-            tad.ask_reply_time_ms
+            SUM(tad.iterations) AS total_iterations_sum,
+            SUM(tad.ask_reply_time_ms) AS total_ask_time_sum,
+            COUNT(t.trial_id) AS trial_count,
+            COUNT(CASE WHEN tad.ask_reply_time_ms IS NOT NULL THEN 1 ELSE NULL END) AS num_asks_count
         FROM trials t
         JOIN trial_additional_data tad ON t.trial_id = tad.trial_id
         WHERE
             t.datetime_complete BETWEEN :start_time AND :end_time
             AND t.state = 'COMPLETE'
+        GROUP BY tad.runner_id, tad.process_id
         """
 
         with engine.connect() as connection:
@@ -89,7 +91,9 @@ def runner_status(
                 {"start_time": start_time, "end_time": end_time},
             ).fetchall()
 
-        logger.info(f"Database query returned {len(rows)} trials. Processing stats...")
+        logger.info(
+            f"Database query returned {len(rows)} aggregated process stats. Processing final stats..."
+        )
 
         runner_stats_data = defaultdict(
             lambda: {
@@ -108,28 +112,34 @@ def runner_status(
                     continue
 
                 stats = runner_stats_data[runner_id]
-                stats["total_trials"] += 1
+                stats["total_iterations"] += row.total_iterations_sum or 0
+                stats["total_trials"] += row.trial_count or 0
 
-                # Iterations
-                if row.iterations is not None:  # Use is not None as 0 is a valid value
-                    stats["total_iterations"] += row.iterations
-
-                # Process ID
                 if row.process_id:
                     stats["processes"].add(row.process_id)
 
-                # Ask Time
-                if row.ask_reply_time_ms is not None:
-                    stats["total_ask_time"] += row.ask_reply_time_ms / 1000.0
-                    stats["num_asks"] += 1
+                stats["total_ask_time"] += row.total_ask_time_sum or 0.0
+                stats["num_asks"] += row.num_asks_count or 0
 
             except Exception as e:
-                logger.warning(f"Error processing trial_id {row.trial_id}: {e}")
+                logger.warning(
+                    f"Error processing aggregated row for runner_id {row.runner_id}, process_id {row.process_id}: {e}"
+                )
                 continue
-            
-            return RunnerStats(stats['total_iterations'], stats['total_trials'], stats['processes'], stats['total_ask_time'], stats['num_asks'])
 
+        processed_stats = {
+            rid: RunnerStats(
+                total_iterations=data["total_iterations"],
+                total_trials=data["total_trials"],
+                num_processes=len(data["processes"]),
+                total_ask_time=data["total_ask_time"] / 1000.0,  # Convert ms to seconds
+                num_asks=data["num_asks"],
+            )
+            for rid, data in runner_stats_data.items()
+        }
 
+        logger.info("Runner status processing complete.")
+        return RunnerStatus(runners=processed_stats)
 
     except sqlalchemy.exc.OperationalError as e:
         logger.error(f"Database Operational Error (Connection lost?): {e}")
