@@ -11,10 +11,12 @@ from typing import Any, Dict, Optional
 
 import optuna
 import optuna.exceptions
+import sqlalchemy
 from flask import Flask, jsonify, request
 
 import mon2y_dist.runner_stats
 import mon2y_dist.server_stats
+from mon2y_dist.db_models import study_run_details_table
 from mon2y_dist.op_queue import (MAX_OP_CONNECTIONS, OP_POLL_MS, Ask, OpResult,
                                  Tell, op_queue)
 
@@ -63,6 +65,22 @@ def storage():
             },
         )
     return _storage
+
+
+_ensure_tables_called = False
+
+
+def ensure_tables_if_needed():
+    """
+    Ensures that the additional tables are created in the database,
+    but only runs the check once per process.
+    """
+    global _ensure_tables_called
+    if not _ensure_tables_called:
+        app.logger.info("Running first-time table existence check...")
+        mon2y_dist.runner_stats.ensure_additional_tables_exist(storage().engine)
+        _ensure_tables_called = True
+        app.logger.info("Table existence check complete.")
 
 
 studies: Dict[str, optuna.Study] = {}
@@ -190,6 +208,50 @@ def create_study():
         )
         return jsonify({"error": f"Failed to set user attributes: {e}"}), 500
 
+    ensure_tables_if_needed()
+    # Upsert the study details into our new cache table
+    details = {
+        "study_id": study._study_id,
+        "study_name": study_name,
+        "status": "open",
+        "x86_manylinux_wheel_s3": user_attrs.get("x86_manylinux_wheel_s3"),
+        "arm_manylinux_wheel_s3": user_attrs.get("arm_manylinux_wheel_s3"),
+    }
+
+    # Use dialect-specific insert for cross-DB compatibility (SQLite/Postgres)
+    dialect = storage().engine.dialect.name
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        stmt = pg_insert(study_run_details_table).values(details)
+        stmt = stmt.on_conflict_do_update(index_elements=["study_id"], set_=details)
+    else:  # Assume sqlite
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        stmt = sqlite_insert(study_run_details_table).values(details)
+        stmt = stmt.on_conflict_do_update(index_elements=["study_id"], set_=details)
+
+    try:
+        with storage().engine.connect() as connection:
+            # Use a transaction with a commit
+            trans = connection.begin()
+            try:
+                connection.execute(stmt)
+                trans.commit()
+            except Exception:
+                trans.rollback()
+                raise
+
+        app.logger.info(
+            f"Upserted details for study '{study_name}' into study_run_details."
+        )
+    except Exception as e:
+        app.logger.exception(
+            f"Failed to upsert study details for '{study_name}': {e}"
+        )
+        # Continue anyway, as this is just a cache
+        pass
+
     return jsonify({"status": "ok", "study_name": study_name})
 
 
@@ -215,12 +277,28 @@ def set_status():
     if study is None:
         app.logger.error(f"/set_status: Study '{study_name}' not found")
         return jsonify({"error": f"Study '{study_name}' not found"}), 404
+
+    ensure_tables_if_needed()
     try:
-        app.logger.info(f"Setting user attr 'dist-status' to '{status}'")
-        study.set_user_attr("dist-status", status)
+        app.logger.info(
+            f"Setting status for study '{study_name}' to '{status}' in study_run_details."
+        )
+        stmt = (
+            sqlalchemy.update(study_run_details_table)
+            .where(study_run_details_table.c.study_id == study._study_id)
+            .values(status=status)
+        )
+        with storage().engine.connect() as connection:
+            trans = connection.begin()
+            try:
+                connection.execute(stmt)
+                trans.commit()
+            except Exception:
+                trans.rollback()
+                raise
     except Exception as e:
-        app.logger.exception(f"Failed to set user attribute: {e}")
-        return jsonify({"error": f"Failed to set user attribute: {e}"}), 500
+        app.logger.exception(f"Failed to set status for study '{study_name}': {e}")
+        return jsonify({"error": f"Failed to set status: {e}"}), 500
 
     return jsonify({"status": "ok"})
 
@@ -438,13 +516,28 @@ def update_wheel():
         app.logger.exception(f"Failed to upload to S3: {e}")
         return jsonify({"error": f"Failed to upload to S3: {e}"}), 500
 
+    ensure_tables_if_needed()
     user_attr_key = f"{platform}_wheel_s3"
     try:
-        app.logger.info(f"Setting user attr '{user_attr_key}' to '{s3_path}'")
-        study.set_user_attr(user_attr_key, s3_path)
+        app.logger.info(
+            f"Updating study_run_details for '{study_name}' with {user_attr_key} = {s3_path}"
+        )
+        stmt = (
+            sqlalchemy.update(study_run_details_table)
+            .where(study_run_details_table.c.study_id == study._study_id)
+            .values({user_attr_key: s3_path})
+        )
+        with storage().engine.connect() as connection:
+            trans = connection.begin()
+            try:
+                connection.execute(stmt)
+                trans.commit()
+            except Exception:
+                trans.rollback()
+                raise
     except Exception as e:
-        app.logger.exception(f"Failed to set user attribute: {e}")
-        return jsonify({"error": f"Failed to set user attribute: {e}"}), 500
+        app.logger.exception(f"Failed to update study_run_details: {e}")
+        return jsonify({"error": f"Failed to update study_run_details: {e}"}), 500
 
     return jsonify({"status": "ok", "s3_path": s3_path})
 
@@ -474,13 +567,28 @@ def remove_wheel():
         app.logger.error(f"/remove_wheel: Study '{study_name}' not found")
         return jsonify({"error": f"Study '{study_name}' not found"}), 404
 
+    ensure_tables_if_needed()
     user_attr_key = f"{platform}_wheel_s3"
     try:
-        app.logger.info(f"Setting user attr '{user_attr_key}' to None")
-        study.set_user_attr(user_attr_key, None)
+        app.logger.info(
+            f"Updating study_run_details for '{study_name}', setting {user_attr_key} to NULL"
+        )
+        stmt = (
+            sqlalchemy.update(study_run_details_table)
+            .where(study_run_details_table.c.study_id == study._study_id)
+            .values({user_attr_key: None})
+        )
+        with storage().engine.connect() as connection:
+            trans = connection.begin()
+            try:
+                connection.execute(stmt)
+                trans.commit()
+            except Exception:
+                trans.rollback()
+                raise
     except Exception as e:
-        app.logger.exception(f"Failed to set user attribute: {e}")
-        return jsonify({"error": f"Failed to set user attribute: {e}"}), 500
+        app.logger.exception(f"Failed to update study_run_details: {e}")
+        return jsonify({"error": f"Failed to update study_run_details: {e}"}), 500
 
     return jsonify({"status": "ok"})
 
@@ -488,45 +596,66 @@ def remove_wheel():
 @app.route("/open", methods=["GET"])
 def get_open_studies():
     app.logger.info("Received /open request")
+    ensure_tables_if_needed()
     try:
         s3 = boto3.client("s3", region_name=S3_REGION)
-        all_studies = optuna.study.get_all_study_summaries(
-            storage=storage(), include_best_trial=False
-        )
-        open_studies = []
-        for study_summary in all_studies:
-            if study_summary.user_attrs.get("dist-status") == "open":
-                user_attrs = study_summary.user_attrs.copy()
-                for attr_key in ("x86_manylinux_wheel_s3", "arm_manylinux_wheel_s3"):
-                    if s3_path := user_attrs.get(attr_key):
-                        if not s3_path.startswith("s3://"):
-                            app.logger.warning(
-                                f"Attribute '{attr_key}' for study '{study_summary.study_name}' does not contain a valid S3 path: {s3_path}. Skipping presigned URL generation."
-                            )
-                            continue
-                        try:
-                            bucket, key = s3_path.replace("s3://", "").split("/", 1)
-                            presigned_url = s3.generate_presigned_url(
-                                "get_object",
-                                Params={"Bucket": bucket, "Key": key},
-                                ExpiresIn=3600,  # 1 hour
-                            )
-                            app.logger.info(f"Presigned url is {presigned_url}")
-                            url_attr_key = attr_key.replace("_s3", "_url")
-                            user_attrs[url_attr_key] = presigned_url
-                            del user_attrs[attr_key]
-                        except Exception as e:
-                            app.logger.error(
-                                f"Failed to create presigned URL for {s3_path}: {e}"
-                            )
 
-                open_studies.append(
-                    {
-                        "study_id": study_summary._study_id,
-                        "study_name": study_summary.study_name,
-                        "user_attrs": user_attrs,
-                    }
+        # Query our fast cache table instead of slow get_all_study_summaries
+        stmt = sqlalchemy.select(study_run_details_table).where(
+            study_run_details_table.c.status == "open"
+        )
+        with storage().engine.connect() as connection:
+            open_studies_details = connection.execute(stmt).fetchall()
+        app.logger.info(
+            f"Found {len(open_studies_details)} open studies in study_run_details."
+        )
+
+        open_studies = []
+        for row in open_studies_details:
+            # We still need to load the study to get all user_attrs, but this is
+            # much faster than get_all_study_summaries for all studies.
+            study = get_study(row.study_name)
+            if not study:
+                app.logger.warning(
+                    f"Study '{row.study_name}' found in study_run_details but not in Optuna storage. Skipping."
                 )
+                continue
+
+            user_attrs = study.user_attrs.copy()
+            # The wheel paths from our table are the source of truth now.
+            user_attrs["x86_manylinux_wheel_s3"] = row.x86_manylinux_wheel_s3
+            user_attrs["arm_manylinux_wheel_s3"] = row.arm_manylinux_wheel_s3
+
+            for attr_key in ("x86_manylinux_wheel_s3", "arm_manylinux_wheel_s3"):
+                if s3_path := user_attrs.get(attr_key):
+                    if not s3_path.startswith("s3://"):
+                        app.logger.warning(
+                            f"Attribute '{attr_key}' for study '{row.study_name}' does not contain a valid S3 path: {s3_path}. Skipping presigned URL generation."
+                        )
+                        continue
+                    try:
+                        bucket, key = s3_path.replace("s3://", "").split("/", 1)
+                        presigned_url = s3.generate_presigned_url(
+                            "get_object",
+                            Params={"Bucket": bucket, "Key": key},
+                            ExpiresIn=3600,  # 1 hour
+                        )
+                        app.logger.info(f"Presigned url is {presigned_url}")
+                        url_attr_key = attr_key.replace("_s3", "_url")
+                        user_attrs[url_attr_key] = presigned_url
+                        del user_attrs[attr_key]
+                    except Exception as e:
+                        app.logger.error(
+                            f"Failed to create presigned URL for {s3_path}: {e}"
+                        )
+
+            open_studies.append(
+                {
+                    "study_id": row.study_id,
+                    "study_name": row.study_name,
+                    "user_attrs": user_attrs,
+                }
+            )
         return jsonify(open_studies)
     except Exception as e:
         app.logger.exception("Failed to get open studies")

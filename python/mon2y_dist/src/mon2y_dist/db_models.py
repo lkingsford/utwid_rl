@@ -36,9 +36,19 @@ trial_additional_data_table = sqlalchemy.Table(
     ),  # Use Text for JSON string to be compatible across DBs
 )
 
+study_run_details_table = sqlalchemy.Table(
+    "study_run_details",
+    metadata,
+    sqlalchemy.Column("study_id", sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column("study_name", sqlalchemy.String(255), nullable=False, unique=True, index=True),
+    sqlalchemy.Column("status", sqlalchemy.String(50), nullable=False, index=True),
+    sqlalchemy.Column("x86_manylinux_wheel_s3", sqlalchemy.String(1024)),
+    sqlalchemy.Column("arm_manylinux_wheel_s3", sqlalchemy.String(1024)),
+)
+
 
 def ensure_additional_tables_exist(engine: sqlalchemy.engine.Engine):
     """Ensures the additional tables (like trial_additional_data) are created."""
     logger.info("Ensuring additional tables exist...")
-    metadata.create_all(engine)
+    metadata.create_all(engine, checkfirst=True)
     logger.info("Additional tables ensured.")
