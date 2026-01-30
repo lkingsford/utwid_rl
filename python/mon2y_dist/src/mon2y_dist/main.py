@@ -1,27 +1,22 @@
 import datetime
-from datetime import timedelta
 import json
 import logging
 import os
-import sys
 import subprocess
+import sys
 import threading
 import time
+from datetime import timedelta
 from typing import Any, Dict, Optional
 
-from flask import Flask, jsonify, request
 import optuna
 import optuna.exceptions
+from flask import Flask, jsonify, request
+
 import mon2y_dist.runner_stats
 import mon2y_dist.server_stats
-from mon2y_dist.op_queue import (
-    op_queue,
-    Ask,
-    Tell,
-    OpResult,
-    MAX_OP_CONNECTIONS,
-    OP_POLL_MS,
-)
+from mon2y_dist.op_queue import (MAX_OP_CONNECTIONS, OP_POLL_MS, Ask, OpResult,
+                                 Tell, op_queue)
 
 try:
     import psutil
@@ -44,6 +39,8 @@ if app.logger.hasHandlers():
 app.logger.addHandler(handler)
 app.logger.setLevel(logging.INFO)
 
+app.logger.info(f"__name__ is {__name__}")
+
 S3_BUCKET = os.environ.get("S3_BUCKET", "mon2y")
 S3_REGION = os.environ.get("S3_REGION", "ap-southeast-2")
 
@@ -57,7 +54,14 @@ _storage = None
 def storage():
     global _storage
     if not _storage:
-        _storage = optuna.storages.get_storage(STORAGE_URL)
+        _storage = optuna.storages.RDBStorage(
+        url=STORAGE_URL,
+        engine_kwargs={
+            "pool_size": MAX_OP_CONNECTIONS,           # Must be >= MAX_OP_CONNECTIONS
+            "max_overflow": 10, 
+            "pool_pre_ping": True      # Essential for Postgres to recover from idle disconnects
+        }
+    )
     return _storage
 
 
@@ -221,6 +225,7 @@ def set_status():
 
 @app.route("/ask", methods=["POST"])
 def ask():
+    app.logger.info(f"__name__ is {__name__}")
     start_workers_if_needed()
     app.logger.info(f"Received /ask request from {request.remote_addr}")
     data = request.json
