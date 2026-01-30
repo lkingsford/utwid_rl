@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import queue
@@ -6,9 +7,13 @@ from typing import Any, Dict, List, Optional
 
 import flask
 import optuna
+from optuna.storages import RDBStorage
+
+from mon2y_dist.db_models import trial_additional_data_table
 
 LOGGER = flask.Flask("__main__.op_queue").logger
-LOGGER.setLevel(logging.DEBUG)
+LOGGER.setLevel(logging.INFO)  # Revert to INFO, was DEBUG for prior debugging
+
 
 # --- Queue Configuration ---
 
@@ -88,21 +93,70 @@ class Tell:
     def run(self, study: optuna.Study, storage: optuna.storages.BaseStorage):
         """Executes the tell operation and places the result in the container."""
         try:
-            trial_number = self.tell_data.get("trial_number")
+            trial_number = self.tell_data.get("trial_number") or -1
             status = self.tell_data.get("status")
-            user_data = self.tell_data.get("user_data")
+            user_data = self.tell_data.get("user_data") or {}
 
             LOGGER.debug(
                 f"Starting tell for {self.study_name} trial {trial_number}: {user_data}"
             )
 
-            if user_data:
-                storage.set_trial_user_attr(trial_number, "trial_data", user_data)
+            # --- Extract data for trial_additional_data table ---
+            _process_id = user_data.pop("process_id", None)
+            _iterations = user_data.pop("iterations", None)
+            _runner_id = user_data.pop("runner_id", None)
+            _ask_reply_time_ms = user_data.pop("ask_reply_time_ms", None)
+            _user_data_json = json.dumps(
+                user_data
+            )  # Remaining user_data as JSON string
 
+            # Ensure storage is RDBStorage to access _engine and other methods
+            if not isinstance(storage, RDBStorage):
+                error_msg = "Additional trial data can only be stored with RDBStorage."
+                LOGGER.error(error_msg)
+                self.result_container.complete(error=ValueError(error_msg))
+                return
+
+            # Get trial_id from trial_number
+            try:
+                # Use main.get_study to ensure study._study_id is correctly set (might not be if only `study` is passed)
+                # Or, if study is guaranteed to be a RDBStudy, then study._study_id is directly available.
+                # Assuming study._study_id is available here from the passed study object.
+                trial_id = storage.get_trial_id_from_study_id_trial_number(
+                    study._study_id, trial_number
+                )
+                if trial_id is None:
+                    error_msg = f"Trial {trial_number} not found in study {self.study_name} for additional data storage."
+                    LOGGER.error(error_msg)
+                    self.result_container.complete(error=ValueError(error_msg))
+                    return
+            except Exception as e:
+                LOGGER.error(f"Failed to get trial_id for trial {trial_number}: {e}")
+                self.result_container.complete(error=e)
+                return
+
+            # --- Insert into trial_additional_data table ---
+            with storage.engine.connect() as connection:
+                insert_stmt = trial_additional_data_table.insert().values(
+                    trial_id=trial_id,
+                    process_id=_process_id,
+                    iterations=_iterations,
+                    runner_id=_runner_id,
+                    ask_reply_time_ms=_ask_reply_time_ms,
+                    user_data_json=_user_data_json,
+                )
+                connection.execute(insert_stmt)
+                connection.commit()  # Commit the insert
+                LOGGER.debug(
+                    f"Inserted additional data for trial {trial_id} into trial_additional_data."
+                )
+
+            # --- Original study.tell logic ---
             if status == "succeed":
                 study.tell(trial_number, values=self.tell_data.get("result"))
             else:
                 study.tell(trial_number, state=optuna.trial.TrialState.FAIL)
+            LOGGER.debug(f"study.tell completed for trial {trial_number}.")
 
         except Exception as e:
             self.result_container.complete(error=e)

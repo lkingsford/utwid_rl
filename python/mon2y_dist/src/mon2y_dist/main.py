@@ -55,13 +55,13 @@ def storage():
     global _storage
     if not _storage:
         _storage = optuna.storages.RDBStorage(
-        url=STORAGE_URL,
-        engine_kwargs={
-            "pool_size": MAX_OP_CONNECTIONS,           # Must be >= MAX_OP_CONNECTIONS
-            "max_overflow": 10, 
-            "pool_pre_ping": True      # Essential for Postgres to recover from idle disconnects
-        }
-    )
+            url=STORAGE_URL,
+            engine_kwargs={
+                "pool_size": MAX_OP_CONNECTIONS,  # Must be >= MAX_OP_CONNECTIONS
+                "max_overflow": 10,
+                "pool_pre_ping": True,  # Essential for Postgres to recover from idle disconnects
+            },
+        )
     return _storage
 
 
@@ -131,7 +131,9 @@ def create_study():
             study_name=study_name,
             storage=storage(),
             directions=converted_directions if len(converted_directions) > 1 else None,
-            direction=converted_directions[0] if len(converted_directions) == 1 else None,
+            direction=(
+                converted_directions[0] if len(converted_directions) == 1 else None
+            ),
             load_if_exists=True,
         )
         app.logger.info(
@@ -195,7 +197,7 @@ def create_study():
 def set_status():
     app.logger.info(f"Received /set_status request from {request.remote_addr}")
     data = request.json
-    
+
     study_name = data.get("study_name")
     if not study_name:
         app.logger.error("/set_status: 'study_name' is required")
@@ -208,7 +210,7 @@ def set_status():
         return jsonify({"error": "'statu' is required"}), 400
     if status not in PERMITTED_STATUSES:
         return jsonify({"error": f"'status' must be one of {PERMITTED_STATUSES}"}), 400
-    
+
     study = get_study(study_name)
     if study is None:
         app.logger.error(f"/set_status: Study '{study_name}' not found")
@@ -243,7 +245,7 @@ def ask():
     if not distributions_json:
         app.logger.error("/ask: 'distributions' is required")
         return jsonify({"error": "distributions is required"}), 400
-    
+
     try:
         distributions = {
             param_name: optuna.distributions.json_to_distribution(
@@ -317,7 +319,7 @@ def tell():
     mon2y_dist.server_stats.op_called()
 
     # Poll for the result
-    return jsonify({"status":"enqueued"})
+    return jsonify({"status": "enqueued"})
 
 
 @app.route("/heartbeat", methods=["POST"])
@@ -389,7 +391,7 @@ def heartbeat():
 @app.route("/update_wheel", methods=["POST"])
 def update_wheel():
     app.logger.info(f"Received /update_wheel request from {request.remote_addr}")
-    
+
     study_name = request.args.get("study_name")
     if not study_name:
         app.logger.error("/update_wheel: 'study_name' is required")
@@ -401,7 +403,10 @@ def update_wheel():
         return jsonify({"error": "'platform' is required"}), 400
     if platform not in ["x86_manylinux", "arm_manylinux"]:
         app.logger.error(f"/update_wheel: Invalid 'platform' {platform}")
-        return jsonify({"error": "platform must be 'x86_manylinux' or 'arm_manylinux'"}), 400
+        return (
+            jsonify({"error": "platform must be 'x86_manylinux' or 'arm_manylinux'"}),
+            400,
+        )
 
     filename = request.args.get("filename")
     if not filename:
@@ -416,7 +421,7 @@ def update_wheel():
     if not S3_BUCKET:
         app.logger.error("/update_wheel: S3_BUCKET environment variable not set")
         return jsonify({"error": "Server is not configured for S3 uploads"}), 500
-    
+
     study = get_study(study_name)
     if study is None:
         app.logger.error(f"/update_wheel: Study '{study_name}' not found")
@@ -425,14 +430,14 @@ def update_wheel():
     s3 = boto3.client("s3", region_name=S3_REGION)
     s3_key = f"{study_name}/{filename}"
     s3_path = f"s3://{S3_BUCKET}/{s3_key}"
-    
+
     try:
         app.logger.info(f"Uploading wheel to {s3_path}")
         s3.put_object(Bucket=S3_BUCKET, Key=s3_key, Body=wheel_data)
     except Exception as e:
         app.logger.exception(f"Failed to upload to S3: {e}")
         return jsonify({"error": f"Failed to upload to S3: {e}"}), 500
-    
+
     user_attr_key = f"{platform}_wheel_s3"
     try:
         app.logger.info(f"Setting user attr '{user_attr_key}' to '{s3_path}'")
@@ -447,19 +452,22 @@ def update_wheel():
 @app.route("/remove_wheel", methods=["POST"])
 def remove_wheel():
     app.logger.info(f"Received /remove_wheel request from {request.remote_addr}")
-    
+
     study_name = request.args.get("study_name")
     if not study_name:
         app.logger.error("/remove_wheel: 'study_name' is required")
         return jsonify({"error": "'study_name' is required"}), 400
-    
+
     platform = request.args.get("platform")
     if not platform:
         app.logger.error("/remove_wheel: 'platform' is required")
         return jsonify({"error": "'platform' is required"}), 400
     if platform not in ["x86_manylinux", "arm_manylinux"]:
         app.logger.error(f"/remove_wheel: Invalid 'platform' {platform}")
-        return jsonify({"error": "platform must be 'x86_manylinux' or 'arm_manylinux'"}), 400
+        return (
+            jsonify({"error": "platform must be 'x86_manylinux' or 'arm_manylinux'"}),
+            400,
+        )
 
     study = get_study(study_name)
     if study is None:
@@ -473,7 +481,7 @@ def remove_wheel():
     except Exception as e:
         app.logger.exception(f"Failed to set user attribute: {e}")
         return jsonify({"error": f"Failed to set user attribute: {e}"}), 500
-        
+
     return jsonify({"status": "ok"})
 
 
@@ -526,7 +534,7 @@ def get_open_studies():
 
 
 def namedtuple_to_dict(obj):
-    if isinstance(obj, tuple) and hasattr(obj, '_asdict'):
+    if isinstance(obj, tuple) and hasattr(obj, "_asdict"):
         return {k: namedtuple_to_dict(v) for k, v in obj._asdict().items()}
     elif isinstance(obj, dict):
         return {k: namedtuple_to_dict(v) for k, v in obj.items()}
@@ -548,14 +556,19 @@ def get_runner_status():
                 start_time = datetime.datetime.fromisoformat(iso_start_time)
                 end_time = datetime.datetime.fromisoformat(iso_end_time)
             except ValueError:
-                return jsonify({"error": "Invalid ISO format for start_time or end_time"}), 400
+                return (
+                    jsonify({"error": "Invalid ISO format for start_time or end_time"}),
+                    400,
+                )
         else:
             time_seconds = int(request.args.get("time_seconds", 600))
             end_time = datetime.datetime.now()
             start_time = end_time - timedelta(seconds=time_seconds)
-        
-        status_output = mon2y_dist.runner_stats.runner_status(start_time, end_time, STORAGE_URL)
-        
+
+        status_output = mon2y_dist.runner_stats.runner_status(
+            start_time, end_time, STORAGE_URL
+        )
+
         return jsonify(namedtuple_to_dict(status_output))
     except Exception as e:
         app.logger.exception("Failed to get runner status")
@@ -567,14 +580,16 @@ def dist_status():
     app.logger.info("Received /dist_status request")
     try:
         entries = int(request.args.get("entries", 1))
-        
+
         server_stats_data = mon2y_dist.server_stats.server_stats(entries)
         process_stats_data = mon2y_dist.server_stats.process_stats(entries)
-        
-        return jsonify({
-            "server_stats": namedtuple_to_dict(server_stats_data),
-            "process_stats": namedtuple_to_dict(process_stats_data),
-        })
+
+        return jsonify(
+            {
+                "server_stats": namedtuple_to_dict(server_stats_data),
+                "process_stats": namedtuple_to_dict(process_stats_data),
+            }
+        )
     except Exception as e:
         app.logger.exception("Failed to get dist status")
         return jsonify({"error": f"Failed to get dist status: {e}"}), 500
@@ -599,29 +614,37 @@ def worker_thread_main():
             app.logger.exception(f"Error processing operation in worker thread: {e}")
             op.result_container.complete(error=e)
 
+
 _workers_started = False
 _worker_start_lock = threading.Lock()
+
 
 def start_workers_if_needed():
     """Starts the worker threads if they haven't been started for this process."""
     global _workers_started
     with _worker_start_lock:
         if not _workers_started:
-            app.logger.info(f"Starting {MAX_OP_CONNECTIONS} worker threads for PID {os.getpid()}.")
+            app.logger.info(
+                f"Starting {MAX_OP_CONNECTIONS} worker threads for PID {os.getpid()}."
+            )
             for i in range(MAX_OP_CONNECTIONS):
-                thread = threading.Thread(target=worker_thread_main, daemon=True, name=f"Worker-{i}")
+                thread = threading.Thread(
+                    target=worker_thread_main, daemon=True, name=f"Worker-{i}"
+                )
                 thread.start()
             _workers_started = True
+
 
 def main():
     # Initialize the server stats module (now without queue parameter)
     mon2y_dist.server_stats.init()
-    
-    # Note: Worker threads are now started lazily on the first request 
+    mon2y_dist.runner_stats.ensure_additional_tables_exist(storage().engine)
+
+    # Note: Worker threads are now started lazily on the first request
     # by start_workers_if_needed() to support pre-fork servers like Gunicorn.
-    
-    app.run(host='0.0.0.0', port=5000)
+
+    app.run(host="0.0.0.0", port=5000)
+
 
 if __name__ == "__main__":
     main()
-

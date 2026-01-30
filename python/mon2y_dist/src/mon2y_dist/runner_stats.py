@@ -8,21 +8,10 @@ from typing import Dict, NamedTuple, Optional
 import sqlalchemy
 from sqlalchemy.engine import Engine, make_url
 
-# --- 1. Logging Setup for Systemd/Journalctl ---
-# We configure a logger specific to this module that writes to STDOUT.
-# Gunicorn captures STDOUT, which Systemd then captures into journalctl.
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+from mon2y_dist.db_models import (ensure_additional_tables_exist,
+                                  trial_additional_data_table)
 
-# Check if handlers exist to avoid duplicate logs on reload
-if not logger.handlers:
-    handler = logging.StreamHandler(sys.stdout)
-    formatter = logging.Formatter(
-        "[%(asctime)s] [PID %(process)d] %(levelname)s - %(message)s"
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-
+logger = logging.getLogger()
 
 class RunnerStats(NamedTuple):
     total_iterations: int
@@ -79,17 +68,19 @@ def runner_status(
         engine = get_engine(storage_url)
 
         # --- 2. Optimized SQL Query ---
-        # We now retrieve the entire 'trial_data' JSON blob instead of individual attributes.
+        # We now retrieve data directly from the trial_additional_data table.
         query = """
         SELECT
             t.trial_id,
-            ua.value_json AS trial_data_json
-        FROM optuna_trials t
-        JOIN optuna_trial_user_attributes ua ON t.trial_id = ua.trial_id
+            tad.runner_id,
+            tad.iterations,
+            tad.process_id,
+            tad.ask_reply_time_ms
+        FROM trials t
+        JOIN trial_additional_data tad ON t.trial_id = tad.trial_id
         WHERE
             t.datetime_complete BETWEEN :start_time AND :end_time
             AND t.state = 'COMPLETE'
-            AND ua.key = 'trial_data'
         """
 
         with engine.connect() as connection:
@@ -112,15 +103,7 @@ def runner_status(
 
         for row in rows:
             try:
-                if not row.trial_data_json:
-                    logger.warning(
-                        f"trial_data_json is missing for trial_id: {row.trial_id}"
-                    )
-                    continue
-
-                trial_data = json.loads(row.trial_data_json)
-
-                runner_id = trial_data.get("runner_id")
+                runner_id = row.runner_id
                 if not runner_id:
                     continue
 
@@ -128,26 +111,25 @@ def runner_status(
                 stats["total_trials"] += 1
 
                 # Iterations
-                if "iterations" in trial_data:
-                    stats["total_iterations"] += trial_data["iterations"]
+                if row.iterations is not None:  # Use is not None as 0 is a valid value
+                    stats["total_iterations"] += row.iterations
 
                 # Process ID
-                if "process_id" in trial_data:
-                    stats["processes"].add(trial_data["process_id"])
+                if row.process_id:
+                    stats["processes"].add(row.process_id)
 
                 # Ask Time
-                if "ask_reply_time_ms" in trial_data:
-                    stats["total_ask_time"] += trial_data["ask_reply_time_ms"] / 1000.0
+                if row.ask_reply_time_ms is not None:
+                    stats["total_ask_time"] += row.ask_reply_time_ms / 1000.0
                     stats["num_asks"] += 1
 
-            except json.JSONDecodeError:
-                logger.warning(
-                    f"Failed to decode trial_data_json for trial_id: {row.trial_id}"
-                )
-                continue
             except Exception as e:
                 logger.warning(f"Error processing trial_id {row.trial_id}: {e}")
                 continue
+            
+            return RunnerStats(stats['total_iterations'], stats['total_trials'], stats['processes'], stats['total_ask_time'], stats['num_asks'])
+
+
 
     except sqlalchemy.exc.OperationalError as e:
         logger.error(f"Database Operational Error (Connection lost?): {e}")
