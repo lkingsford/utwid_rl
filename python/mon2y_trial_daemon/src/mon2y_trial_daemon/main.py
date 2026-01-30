@@ -1,4 +1,3 @@
-import uuid
 import argparse
 import logging
 import os
@@ -8,9 +7,10 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 import venv
-from typing import Any, Dict, Optional, NamedTuple, List, Set
 from enum import Enum
+from typing import Any, Dict, List, NamedTuple, Optional, Set
 from urllib.parse import urlparse
 
 try:
@@ -397,7 +397,7 @@ def main():
         active_available_studies = set(studies.keys()) & open_study_names
 
         if active_available_studies:
-            scale_to_set = args.processes // len(active_available_studies)
+            scale_to_set = max(1, args.processes // len(active_available_studies))
         else:
             scale_to_set = 0
 
