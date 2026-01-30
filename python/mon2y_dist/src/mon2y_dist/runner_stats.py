@@ -79,22 +79,17 @@ def runner_status(
         engine = get_engine(storage_url)
 
         # --- 2. Optimized SQL Query ---
-        # Instead of JOINING the huge attributes table 4 times (which causes locking/slowness),
-        # we scan it once and pivot the data using MAX(CASE...).
+        # We now retrieve the entire 'trial_data' JSON blob instead of individual attributes.
         query = """
         SELECT
             t.trial_id,
-            MAX(CASE WHEN ua.key = 'runner_id' THEN ua.value_json END) as runner_id,
-            MAX(CASE WHEN ua.key = 'iterations' THEN ua.value_json END) as iterations,
-            MAX(CASE WHEN ua.key = 'process_id' THEN ua.value_json END) as process_id,
-            MAX(CASE WHEN ua.key = 'ask_reply_time_ms' THEN ua.value_json END) as ask_time_ms
-        FROM trials t
-        JOIN trial_user_attributes ua ON t.trial_id = ua.trial_id
+            ua.value_json AS trial_data_json
+        FROM optuna_trials t
+        JOIN optuna_trial_user_attributes ua ON t.trial_id = ua.trial_id
         WHERE
             t.datetime_complete BETWEEN :start_time AND :end_time
             AND t.state = 'COMPLETE'
-            AND ua.key IN ('runner_id', 'iterations', 'process_id', 'ask_reply_time_ms')
-        GROUP BY t.trial_id
+            AND ua.key = 'trial_data'
         """
 
         with engine.connect() as connection:
@@ -116,12 +111,16 @@ def runner_status(
         )
 
         for row in rows:
-            # Safe JSON loading
             try:
-                # If runner_id is missing, skip
-                if not row.runner_id:
+                if not row.trial_data_json:
+                    logger.warning(
+                        f"trial_data_json is missing for trial_id: {row.trial_id}"
+                    )
                     continue
-                runner_id = json.loads(row.runner_id)
+
+                trial_data = json.loads(row.trial_data_json)
+
+                runner_id = trial_data.get("runner_id")
                 if not runner_id:
                     continue
 
@@ -129,35 +128,26 @@ def runner_status(
                 stats["total_trials"] += 1
 
                 # Iterations
-                if row.iterations:
-                    stats["total_iterations"] += json.loads(row.iterations)
+                if "iterations" in trial_data:
+                    stats["total_iterations"] += trial_data["iterations"]
 
                 # Process ID
-                if row.process_id:
-                    stats["processes"].add(json.loads(row.process_id))
+                if "process_id" in trial_data:
+                    stats["processes"].add(trial_data["process_id"])
 
                 # Ask Time
-                if row.ask_time_ms:
-                    stats["total_ask_time"] += json.loads(row.ask_time_ms) / 1000.0
+                if "ask_reply_time_ms" in trial_data:
+                    stats["total_ask_time"] += trial_data["ask_reply_time_ms"] / 1000.0
                     stats["num_asks"] += 1
 
             except json.JSONDecodeError:
-                logger.warning(f"Failed to decode JSON for trial_id: {row.trial_id}")
+                logger.warning(
+                    f"Failed to decode trial_data_json for trial_id: {row.trial_id}"
+                )
                 continue
-
-        processed_stats = {
-            rid: RunnerStats(
-                total_iterations=data["total_iterations"],
-                total_trials=data["total_trials"],
-                num_processes=len(data["processes"]),
-                total_ask_time=data["total_ask_time"],
-                num_asks=data["num_asks"],
-            )
-            for rid, data in runner_stats_data.items()
-        }
-
-        logger.info("Runner status processing complete.")
-        return RunnerStatus(runners=processed_stats)
+            except Exception as e:
+                logger.warning(f"Error processing trial_id {row.trial_id}: {e}")
+                continue
 
     except sqlalchemy.exc.OperationalError as e:
         logger.error(f"Database Operational Error (Connection lost?): {e}")
