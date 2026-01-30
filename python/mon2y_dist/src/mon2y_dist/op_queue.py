@@ -9,7 +9,10 @@ import flask
 import optuna
 from optuna.storages import RDBStorage
 
-from mon2y_dist.db_models import trial_additional_data_table
+from mon2y_dist.db_models import (
+    ensure_additional_tables_exist,
+    trial_additional_data_table,
+)
 
 LOGGER = flask.Flask("__main__.op_queue").logger
 LOGGER.setLevel(logging.INFO)  # Revert to INFO, was DEBUG for prior debugging
@@ -30,6 +33,8 @@ OP_POLL_MS = int(os.environ.get("OP_POLL_MS", 100))
 
 # The shared queue for pending Ask/Tell operations.
 op_queue = queue.Queue()
+
+_additional_tables_ensured_called = False
 
 
 @dataclass
@@ -93,6 +98,11 @@ class Tell:
     def run(self, study: optuna.Study, storage: optuna.storages.BaseStorage):
         """Executes the tell operation and places the result in the container."""
         try:
+            global _additional_tables_ensured_called
+            if not _additional_tables_ensured_called:
+                ensure_additional_tables_exist(storage.engine)
+                _additional_tables_ensured_called = True
+
             trial_number = self.tell_data.get("trial_number") or -1
             status = self.tell_data.get("status")
             user_data = self.tell_data.get("user_data") or {}
