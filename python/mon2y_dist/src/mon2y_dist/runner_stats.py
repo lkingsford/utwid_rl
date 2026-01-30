@@ -1,8 +1,27 @@
 import datetime
 import json
-from typing import Dict, NamedTuple
+import logging
+import sys
 from collections import defaultdict
+from typing import Dict, NamedTuple, Optional
+
 import sqlalchemy
+from sqlalchemy.engine import Engine, make_url
+
+# --- 1. Logging Setup for Systemd/Journalctl ---
+# We configure a logger specific to this module that writes to STDOUT.
+# Gunicorn captures STDOUT, which Systemd then captures into journalctl.
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Check if handlers exist to avoid duplicate logs on reload
+if not logger.handlers:
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter(
+        "[%(asctime)s] [PID %(process)d] %(levelname)s - %(message)s"
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 
 class RunnerStats(NamedTuple):
@@ -17,78 +36,135 @@ class RunnerStatus(NamedTuple):
     runners: Dict[str, RunnerStats]
 
 
+# Cache the engine to avoid recreating pools, but allow for reset
+_global_engine: Optional[Engine] = None
+
+
+def get_engine(storage_url: str) -> Engine:
+    """
+    Returns a configured SQLAlchemy engine with timeouts and health checks
+    to prevent freezing.
+    """
+    global _global_engine
+    if _global_engine:
+        return _global_engine
+
+    logger.info("Initializing new Database Engine...")
+
+    url = make_url(storage_url)
+    connect_args = {}
+
+    # Set a connection timeout (10s) so we error out instead of hanging forever
+    if url.get_backend_name() == "postgresql":
+        connect_args = {"options": "-csearch_path=public", "connect_timeout": 10}
+
+    # pool_pre_ping=True: The most important fix. It pings the DB before
+    # handing out a connection. If the DB closed the socket, it reconnects
+    # automatically instead of freezing/crashing.
+    _global_engine = sqlalchemy.create_engine(
+        url, connect_args=connect_args, pool_pre_ping=True, pool_recycle=3600
+    )
+    return _global_engine
+
+
 def runner_status(
     start_time: datetime.datetime, end_time: datetime.datetime, storage_url: str
 ) -> RunnerStatus:
     """
-    Calculates runner status within a given time window by querying the Optuna database.
-
-    Args:
-        start_time: The start of the time window.
-        end_time: The end of the time window.
-        storage_url: The connection string for the Optuna database.
-
-    Returns:
-        A RunnerStatus object containing statistics for each runner.
+    Calculates runner status using an optimized aggregation query.
     """
-    engine = sqlalchemy.create_engine(storage_url)
-    runner_stats = defaultdict(
-        lambda: {
-            "total_iterations": 0,
-            "total_trials": 0,
-            "processes": set(),
-            "total_ask_time": 0.0,
-            "num_asks": 0,
-        }
-    )
+    logger.info(f"Querying runner status from {start_time} to {end_time}")
 
-    query = """
-    SELECT
-        runner_id_attr.value_json AS runner_id,
-        iterations_attr.value_json AS iterations,
-        process_id_attr.value_json AS process_id,
-        ask_time_attr.value_json AS ask_time_ms
-    FROM trials
-    JOIN trial_user_attributes AS runner_id_attr ON trials.trial_id = runner_id_attr.trial_id AND runner_id_attr.key = 'runner_id'
-    JOIN trial_user_attributes AS iterations_attr ON trials.trial_id = iterations_attr.trial_id AND iterations_attr.key = 'iterations'
-    LEFT JOIN trial_user_attributes AS process_id_attr ON trials.trial_id = process_id_attr.trial_id AND process_id_attr.key = 'process_id'
-    LEFT JOIN trial_user_attributes AS ask_time_attr ON trials.trial_id = ask_time_attr.trial_id AND ask_time_attr.key = 'ask_reply_time_ms'
-    WHERE
-        trials.datetime_complete BETWEEN :start_time AND :end_time
-        AND trials.state = 'COMPLETE'
-    """
+    try:
+        engine = get_engine(storage_url)
 
-    with engine.connect() as connection:
-        result = connection.execute(
-            sqlalchemy.text(query),
-            {"start_time": start_time, "end_time": end_time},
+        # --- 2. Optimized SQL Query ---
+        # Instead of JOINING the huge attributes table 4 times (which causes locking/slowness),
+        # we scan it once and pivot the data using MAX(CASE...).
+        query = """
+        SELECT
+            t.trial_id,
+            MAX(CASE WHEN ua.key = 'runner_id' THEN ua.value_json END) as runner_id,
+            MAX(CASE WHEN ua.key = 'iterations' THEN ua.value_json END) as iterations,
+            MAX(CASE WHEN ua.key = 'process_id' THEN ua.value_json END) as process_id,
+            MAX(CASE WHEN ua.key = 'ask_reply_time_ms' THEN ua.value_json END) as ask_time_ms
+        FROM trials t
+        JOIN trial_user_attributes ua ON t.trial_id = ua.trial_id
+        WHERE
+            t.datetime_complete BETWEEN :start_time AND :end_time
+            AND t.state = 'COMPLETE'
+            AND ua.key IN ('runner_id', 'iterations', 'process_id', 'ask_reply_time_ms')
+        GROUP BY t.trial_id
+        """
+
+        with engine.connect() as connection:
+            rows = connection.execute(
+                sqlalchemy.text(query),
+                {"start_time": start_time, "end_time": end_time},
+            ).fetchall()
+
+        logger.info(f"Database query returned {len(rows)} trials. Processing stats...")
+
+        runner_stats_data = defaultdict(
+            lambda: {
+                "total_iterations": 0,
+                "total_trials": 0,
+                "processes": set(),
+                "total_ask_time": 0.0,
+                "num_asks": 0,
+            }
         )
-        for row in result:
-            runner_id = json.loads(row.runner_id)
-            if not runner_id:
+
+        for row in rows:
+            # Safe JSON loading
+            try:
+                # If runner_id is missing, skip
+                if not row.runner_id:
+                    continue
+                runner_id = json.loads(row.runner_id)
+                if not runner_id:
+                    continue
+
+                stats = runner_stats_data[runner_id]
+                stats["total_trials"] += 1
+
+                # Iterations
+                if row.iterations:
+                    stats["total_iterations"] += json.loads(row.iterations)
+
+                # Process ID
+                if row.process_id:
+                    stats["processes"].add(json.loads(row.process_id))
+
+                # Ask Time
+                if row.ask_time_ms:
+                    stats["total_ask_time"] += json.loads(row.ask_time_ms) / 1000.0
+                    stats["num_asks"] += 1
+
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to decode JSON for trial_id: {row.trial_id}")
                 continue
 
-            stats = runner_stats[runner_id]
-            stats["total_iterations"] += json.loads(row.iterations or "0")
-            stats["total_trials"] += 1
+        processed_stats = {
+            rid: RunnerStats(
+                total_iterations=data["total_iterations"],
+                total_trials=data["total_trials"],
+                num_processes=len(data["processes"]),
+                total_ask_time=data["total_ask_time"],
+                num_asks=data["num_asks"],
+            )
+            for rid, data in runner_stats_data.items()
+        }
 
-            if row.process_id:
-                stats["processes"].add(json.loads(row.process_id))
-            
-            if row.ask_time_ms:
-                stats["total_ask_time"] += json.loads(row.ask_time_ms) / 1000.0  # Convert ms to seconds
-                stats["num_asks"] += 1
+        logger.info("Runner status processing complete.")
+        return RunnerStatus(runners=processed_stats)
 
-
-    processed_stats = {
-        runner_id: RunnerStats(
-            total_iterations=stats["total_iterations"],
-            total_trials=stats["total_trials"],
-            num_processes=len(stats["processes"]),
-            total_ask_time=stats["total_ask_time"],
-            num_asks=stats["num_asks"],
-        )
-        for runner_id, stats in runner_stats.items()
-    }
-
-    return RunnerStatus(runners=processed_stats)
+    except sqlalchemy.exc.OperationalError as e:
+        logger.error(f"Database Operational Error (Connection lost?): {e}")
+        # Explicitly dispose engine to force a reconnect next time
+        if _global_engine:
+            _global_engine.dispose()
+        raise
+    except Exception as e:
+        logger.exception(f"Unexpected error in runner_status: {e}")
+        raise
