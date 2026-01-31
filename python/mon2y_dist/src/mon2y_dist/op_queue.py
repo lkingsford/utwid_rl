@@ -1,3 +1,4 @@
+import gc
 import json
 import logging
 import os
@@ -9,10 +10,8 @@ import flask
 import optuna
 from optuna.storages import RDBStorage
 
-from mon2y_dist.db_models import (
-    ensure_additional_tables_exist,
-    trial_additional_data_table,
-)
+from mon2y_dist.db_models import (ensure_additional_tables_exist,
+                                  trial_additional_data_table)
 
 LOGGER = flask.Flask("__main__.op_queue").logger
 LOGGER.setLevel(logging.INFO)  # Revert to INFO, was DEBUG for prior debugging
@@ -85,6 +84,7 @@ class Ask:
             self.result_container.complete(result=result_data)
         except Exception as e:
             self.result_container.complete(error=e)
+        gc.collect()
 
 
 class Tell:
@@ -171,3 +171,5 @@ class Tell:
         except Exception as e:
             self.result_container.complete(error=e)
             raise
+
+        gc.collect()

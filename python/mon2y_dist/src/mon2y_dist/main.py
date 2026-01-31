@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 from datetime import timedelta
+from functools import lru_cache
 from typing import Any, Dict, Optional
 
 import optuna
@@ -86,13 +87,14 @@ def ensure_tables_if_needed():
 studies: Dict[str, optuna.Study] = {}
 
 
+# The lru_cache decorator provides a bounded, thread-safe cache.
+# This prevents the memory leak while keeping performance high for active studies.
+@lru_cache(maxsize=32)
 def get_study(study_name) -> Optional[optuna.Study]:
-    app.logger.info(f"Loading study '{study_name}' from storage")
+    app.logger.info(f"Loading study '{study_name}' from storage (cache miss)")
     try:
-        # Always load from storage to prevent memory leaks from caching Study objects.
-        # This is the most direct fix for the observed memory leak.
         study = optuna.load_study(study_name=study_name, storage=storage())
-        app.logger.info(f"Study '{study_name}' loaded successfully from storage.")
+        app.logger.info(f"Study '{study_name}' loaded and cached successfully.")
         return study
     except KeyError:
         app.logger.warning(f"Study '{study_name}' not found in storage.")
@@ -669,6 +671,41 @@ def namedtuple_to_dict(obj):
         return [namedtuple_to_dict(elem) for elem in obj]
     else:
         return obj
+
+
+@app.route("/runner_status_timeseries", methods=["GET"])
+def get_runner_status_timeseries_endpoint():
+    app.logger.info("Received /runner_status_timeseries request")
+    try:
+        iso_start_time = request.args.get("start_time")
+        iso_end_time = request.args.get("end_time")
+        bucket_seconds = int(request.args.get("bucket_seconds", 10))
+
+        if iso_start_time and iso_end_time:
+            try:
+                start_time = datetime.datetime.fromisoformat(iso_start_time)
+                end_time = datetime.datetime.fromisoformat(iso_end_time)
+            except ValueError:
+                return (
+                    jsonify({"error": "Invalid ISO format for start_time or end_time"}),
+                    400,
+                )
+        else:
+            time_seconds = int(request.args.get("time_seconds", 600))
+            end_time = datetime.datetime.now()
+            start_time = end_time - timedelta(seconds=time_seconds)
+
+        status_output = mon2y_dist.runner_stats.get_runner_status_timeseries(
+            start_time=start_time,
+            end_time=end_time,
+            storage_url=STORAGE_URL,
+            bucket_seconds=bucket_seconds,
+        )
+
+        return jsonify(namedtuple_to_dict(status_output))
+    except Exception as e:
+        app.logger.exception("Failed to get runner status timeseries")
+        return jsonify({"error": f"Failed to get runner status timeseries: {e}"}), 500
 
 
 @app.route("/runner_status", methods=["GET"])
