@@ -160,44 +160,61 @@ def create_study():
         )
         return jsonify({"error": f"Failed to create or load study: {e}"}), 500
 
+    user_attrs = {
+        "dist-status": "open",
+        "iterations": iterations,
+    }
+
     x86_s3_path = None
     x86_wheel_filename = data.get("x86_manylinux_wheel_s3")
     if x86_wheel_filename:
         x86_s3_path = f"s3://{S3_BUCKET}/{x86_wheel_filename}"
+        user_attrs["x86_manylinux_wheel_s3"] = x86_s3_path
         app.logger.info(f"Constructed x86 wheel S3 path: {x86_s3_path}")
 
     arm_s3_path = None
     arm_wheel_filename = data.get("arm_manylinux_wheel_s3")
     if arm_wheel_filename:
         arm_s3_path = f"s3://{S3_BUCKET}/{arm_wheel_filename}"
+        user_attrs["arm_manylinux_wheel_s3"] = arm_s3_path
         app.logger.info(f"Constructed arm wheel S3 path: {arm_s3_path}")
 
     module = data.get("module")
     if not module:
         app.logger.error("/create_study: Invalid Request, expected 'module'")
         return jsonify({"error": "Invalid Request, expected 'module'"}), 400
+    user_attrs["module"] = module
 
     function = data.get("function")
     if not function:
         app.logger.error("/create_study: Invalid Request, expected 'function'")
         return jsonify({"error": "Invalid Request, expected 'function'"}), 400
+    user_attrs["function"] = function
 
     params = data.get("params")
+    if params:
+        user_attrs["params"] = json.dumps(params)
 
-    # study.set_user_attr calls have been removed as per the "user_attr is dead" directive
+    try:
+        for key, value in user_attrs.items():
+            study.set_user_attr(key, value)
+        app.logger.info(
+            f"/create_study: Set user attributes for study '{study_name}': {user_attrs}"
+        )
+    except Exception as e:
+        app.logger.exception(
+            f"/create_study: Failed to set user attributes for study '{study_name}'"
+        )
+        return jsonify({"error": f"Failed to set user attributes: {e}"}), 500
 
     ensure_tables_if_needed()
-    # Upsert the study details into our new cache table
+    # Upsert the study details that are tracked in our fast cache table.
     details = {
         "study_id": study._study_id,
         "study_name": study_name,
         "status": "open",
         "x86_manylinux_wheel_s3": x86_s3_path,
         "arm_manylinux_wheel_s3": arm_s3_path,
-        "iterations": iterations,
-        "module": module,
-        "function": function,
-        "params": json.dumps(params) if params else None,
     }
 
     # Use dialect-specific insert for cross-DB compatibility (SQLite/Postgres)
@@ -343,26 +360,10 @@ def ask():
         )
         return jsonify({"error": f"Failed to ask for trial: {op_result.error}"}), 500
 
-    # "user_attr is dead", so get iterations from our new cache table.
-    try:
-        from sqlalchemy import select
-
-        stmt = select(study_run_details_table.c.iterations).where(
-            study_run_details_table.c.study_name == study_name
-        )
-        with storage().engine.connect() as connection:
-            iterations = connection.execute(stmt).scalar_one_or_none()
-        op_result.result["iterations"] = iterations
-        if iterations is None:
-            app.logger.warning(
-                f"Iterations for study '{study_name}' was NULL in the study_run_details table."
-            )
-
-    except Exception as e:
-        app.logger.exception(
-            f"Failed to get iterations for study '{study_name}' from cache table."
-        )
-        return jsonify({"error": f"Failed to get iterations for study: {e}"}), 500
+    # The result from Ask.run already contains trial number and params
+    # We just need to add the iterations from the study attributes
+    study = get_study(study_name)
+    op_result.result["iterations"] = study.user_attrs.get("iterations")
 
     app.logger.info(
         f"/ask: Processed trial {op_result.result['trial_number']} for study '{study_name}' with params: {op_result.result['params']}"
@@ -611,22 +612,20 @@ def get_open_studies():
 
         open_studies = []
         for row in open_studies_details:
-            # Build the user_attrs dict directly from our cache table,
-            # completely avoiding the slow Study object and its user_attrs.
-            user_attrs = {
-                "dist-status": row.status,
-                "iterations": row.iterations,
-                "module": row.module,
-                "function": row.function,
-                "params": json.loads(row.params) if row.params else None,
-            }
+            # We still need to load the study to get all user_attrs, but this is
+            # much faster than get_all_study_summaries for all studies.
+            study = get_study(row.study_name)
+            if not study:
+                app.logger.warning(
+                    f"Study '{row.study_name}' found in study_run_details but not in Optuna storage. Skipping."
+                )
+                continue
 
-            # Generate presigned URLs from the S3 paths in our table
-            for attr_key, s3_path in [
-                ("x86_manylinux_wheel_s3", row.x86_manylinux_wheel_s3),
-                ("arm_manylinux_wheel_s3", row.arm_manylinux_wheel_s3),
-            ]:
-                if s3_path:
+            user_attrs = study.user_attrs.copy()
+
+            # Generate presigned URLs from the S3 paths in user_attrs
+            for attr_key in ("x86_manylinux_wheel_s3", "arm_manylinux_wheel_s3"):
+                if s3_path := user_attrs.get(attr_key):
                     if not s3_path.startswith("s3://"):
                         app.logger.warning(
                             f"Attribute '{attr_key}' for study '{row.study_name}' does not contain a valid S3 path: {s3_path}. Skipping presigned URL generation."
@@ -642,6 +641,7 @@ def get_open_studies():
                         app.logger.info(f"Presigned url is {presigned_url}")
                         url_attr_key = attr_key.replace("_s3", "_url")
                         user_attrs[url_attr_key] = presigned_url
+                        del user_attrs[attr_key]
                     except Exception as e:
                         app.logger.error(
                             f"Failed to create presigned URL for {s3_path}: {e}"
