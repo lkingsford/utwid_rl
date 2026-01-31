@@ -41,13 +41,8 @@ def get_pid_color(pid):
 
 
 # --- Data Storage ---
-# Runner Stats
-runner_timestamps = deque(maxlen=int(TIME_WINDOW_MINUTES * 60 / POLL_INTERVAL_SECONDS))
-iterations_data = {}
-trials_data = {}
-processes_data = {}
-ask_time_data = {}
-overall_ask_time_data = deque(maxlen=runner_timestamps.maxlen)
+# Runner Stats (new simplified structure)
+runner_data = {}  # Store timeseries data directly: {runner_id: [{"timestamp": ts, ...}]}
 
 # Distribution Stats
 dist_timestamps = deque(maxlen=DIST_STATUS_MAX_LEN)
@@ -75,32 +70,20 @@ app.layout = html.Div(
 
 
 # --- Data Fetching Functions ---
-def get_runner_status_historical(start_time, end_time):
+def get_runner_status_timeseries(start_time, end_time):
     try:
         response = requests.get(
-            f"{DIST_URI}/runner_status",
+            f"{DIST_URI}/runner_status_timeseries",
             params={
                 "start_time": start_time.isoformat(),
                 "end_time": end_time.isoformat(),
+                "bucket_seconds": 10,  # Match the 10s suggestion
             },
         )
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching historical runner data: {e}")
-        return None
-
-
-def get_runner_status_latest():
-    try:
-        response = requests.get(
-            f"{DIST_URI}/runner_status",
-            params={"time_seconds": TIME_WINDOW_MINUTES * 60},
-        )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching latest runner data: {e}")
+        print(f"Error fetching runner timeseries data: {e}")
         return None
 
 
@@ -115,43 +98,20 @@ def get_dist_status(entries=1):
 
 
 # --- Data Processing Functions ---
-def update_runner_data(data, timestamp=None):
-    effective_timestamp = timestamp or datetime.now()
-    runner_timestamps.append(effective_timestamp)
-    active_runners = set(data.get("runners", {}).keys())
-    all_runners = set(iterations_data.keys()) | active_runners
-    total_ask_time_in_window, total_asks_in_window = 0, 0
-
-    for runner in all_runners:
-        stats = data.get("runners", {}).get(runner, {})
-        if runner not in iterations_data:
-            padding = [None] * (len(runner_timestamps) - 1)
-            iterations_data[runner] = deque(padding, maxlen=runner_timestamps.maxlen)
-            trials_data[runner] = deque(padding, maxlen=runner_timestamps.maxlen)
-            processes_data[runner] = deque(padding, maxlen=runner_timestamps.maxlen)
-            ask_time_data[runner] = deque(padding, maxlen=runner_timestamps.maxlen)
-
-        iterations_data[runner].append(
-            (stats.get("total_iterations") or 0) / TIME_WINDOW_MINUTES
-        )
-        trials_data[runner].append(
-            (stats.get("total_trials") or 0) / TIME_WINDOW_MINUTES
-        )
-        processes_data[runner].append(stats.get("num_processes"))
-
-        total_ask_time, num_asks = stats.get("total_ask_time"), stats.get("num_asks")
-        if num_asks and num_asks > 0:
-            ask_time_data[runner].append(total_ask_time / num_asks)
-            total_ask_time_in_window += total_ask_time
-            total_asks_in_window += num_asks
-        else:
-            ask_time_data[runner].append(None)
-
-    overall_ask_time_data.append(
-        total_ask_time_in_window / total_asks_in_window
-        if total_asks_in_window > 0
-        else None
-    )
+def update_runner_data(data):
+    """
+    Processes the timeseries data from the /runner_status_timeseries endpoint.
+    """
+    global runner_data
+    # The new API response is the source of truth
+    runners_ts_data = data.get("runners", {})
+    
+    # Convert timestamps from ISO strings to datetime objects
+    for runner_id, points in runners_ts_data.items():
+        for point in points:
+            point["timestamp"] = datetime.fromisoformat(point["timestamp"])
+    
+    runner_data = runners_ts_data
 
 
 def update_dist_data(data):
@@ -202,24 +162,14 @@ def update_dist_data(data):
 
 # --- Historical Data Initialization ---
 def initialize_runner_data():
-    if iterations_data:
+    if runner_data:
         return
     print("Initializing runner stats with historical data...")
     now = datetime.now()
     start_of_window = now - timedelta(minutes=TIME_WINDOW_MINUTES)
-
-    historical_poll_points = []
-    current_poll_point = start_of_window
-    while current_poll_point <= now:
-        historical_poll_points.append(current_poll_point)
-        current_poll_point += timedelta(seconds=POLL_INTERVAL_SECONDS)
-
-    for poll_time in historical_poll_points:
-        data = get_runner_status_historical(
-            poll_time - timedelta(minutes=TIME_WINDOW_MINUTES), poll_time
-        )
-        if data:
-            update_runner_data(data, timestamp=poll_time)
+    data = get_runner_status_timeseries(start_of_window, now)
+    if data:
+        update_runner_data(data)
     print("Runner stats initialization complete.")
 
 
@@ -231,29 +181,24 @@ def initialize_dist_data():
     if not data:
         return
     # Data is newest first, reverse to process oldest first
-    data["server_stats"].reverse()
-    data["process_stats"].reverse()
+    if "server_stats" in data:
+        data["server_stats"].reverse()
+    if "process_stats" in data:
+        data["process_stats"].reverse()
     update_dist_data(data)
     print("Distribution stats initialization complete.")
 
 
 # --- Graph Creation Functions ---
-def create_runner_figure(data_dict, title, yaxis_title):
+def create_runner_figure(metric_key, title, yaxis_title):
     fig = go.Figure()
-    for runner, data in data_dict.items():
-        if not runner_timestamps or not data:
+    for runner_id, points in runner_data.items():
+        if not points:
             continue
-        df = pd.DataFrame(
-            {"timestamp": list(runner_timestamps), "value": list(data)}
-        ).set_index("timestamp")
-        df_1min = df.rolling("1min").mean()
+        timestamps = [p["timestamp"] for p in points]
+        values = [p[metric_key] for p in points]
         fig.add_trace(
-            go.Scatter(
-                x=df_1min.index,
-                y=df_1min["value"],
-                mode="lines",
-                name=f"{runner} (1 min avg)",
-            )
+            go.Scatter(x=timestamps, y=values, mode="lines", name=runner_id)
         )
     fig.update_layout(
         title=title, xaxis_title="Time", yaxis_title=yaxis_title, showlegend=True
@@ -375,49 +320,45 @@ initialize_dist_data()
     Output("graphs-container", "children"), [Input("interval-component", "n_intervals")]
 )
 def update_graphs(n):
-    if n > 0:
-        runner_data = get_runner_status_latest()
-        if runner_data:
-            update_runner_data(runner_data)
+    # Fetch fresh data on every poll
+    now = datetime.now()
+    start_of_window = now - timedelta(minutes=TIME_WINDOW_MINUTES)
+    runner_ts_data = get_runner_status_timeseries(start_of_window, now)
+    if runner_ts_data:
+        update_runner_data(runner_ts_data)
+
+    # Dist data is polled less frequently and uses its own logic
+    if n > 0: # Only poll dist status after initial load
         dist_data = get_dist_status()
         if dist_data:
             update_dist_data(dist_data)
 
-    if not iterations_data and not cpu_data:
+    if not runner_data and not cpu_data:
         return html.Div("No data available. Waiting for the first poll...")
 
     runner_graphs = [
         dcc.Graph(
             id="iterations-graph",
             figure=create_runner_figure(
-                iterations_data, "Average Iterations per Minute", "Iterations/min"
+                "iterations_per_minute", "Iterations per Minute", "Iterations/min"
             ),
         ),
         dcc.Graph(
             id="trials-graph",
             figure=create_runner_figure(
-                trials_data, "Average Trials per Minute", "Trials/min"
+                "trials_per_minute", "Trials per Minute", "Trials/min"
             ),
         ),
         dcc.Graph(
             id="processes-graph",
             figure=create_runner_figure(
-                processes_data, "Active Runner Processes", "Count"
+                "num_processes", "Active Runner Processes", "Count"
             ),
         ),
         dcc.Graph(
             id="ask-time-graph",
             figure=create_runner_figure(
-                ask_time_data, "Average Ask Time per Runner", "Seconds"
-            ),
-        ),
-        dcc.Graph(
-            id="overall-ask-time-graph",
-            figure=create_single_series_figure(
-                overall_ask_time_data,
-                runner_timestamps,
-                "Overall Average Ask Time",
-                "Seconds",
+                "avg_ask_time_s", "Average Ask Time per Runner", "Seconds"
             ),
         ),
     ]

@@ -3,7 +3,7 @@ import json
 import logging
 import sys
 from collections import defaultdict
-from typing import Dict, NamedTuple, Optional
+from typing import Dict, List, NamedTuple, Optional
 
 import sqlalchemy
 from mon2y_dist.db_models import (ensure_additional_tables_exist,
@@ -23,6 +23,19 @@ class RunnerStats(NamedTuple):
 
 class RunnerStatus(NamedTuple):
     runners: Dict[str, RunnerStats]
+
+
+class RunnerTimeseriesPoint(NamedTuple):
+    timestamp: datetime.datetime
+    iterations_per_minute: float
+    trials_per_minute: float
+    num_processes: int
+    avg_ask_time_s: float
+
+
+class RunnerTimeseries(NamedTuple):
+    # Maps a runner_id to a list of its stats over time
+    runners: Dict[str, List[RunnerTimeseriesPoint]]
 
 
 # Cache the engine to avoid recreating pools, but allow for reset
@@ -54,6 +67,98 @@ def get_engine(storage_url: str) -> Engine:
         url, connect_args=connect_args, pool_pre_ping=True, pool_recycle=3600
     )
     return _global_engine
+
+
+def get_runner_status_timeseries(
+    start_time: datetime.datetime,
+    end_time: datetime.datetime,
+    storage_url: str,
+    bucket_seconds: int = 10,
+) -> RunnerTimeseries:
+    """
+    Calculates runner status over time, aggregated into time buckets.
+    """
+    logger.info(
+        f"Querying runner status timeseries from {start_time} to {end_time} with {bucket_seconds}s buckets"
+    )
+    engine = get_engine(storage_url)
+    dialect = engine.dialect.name
+
+    # --- Dialect-Specific Time Bucketing ---
+    if dialect == "postgresql":
+        time_bucket_expr = f"time_bucket(interval '{bucket_seconds} seconds', t.datetime_complete)"
+    else:  # Assume SQLite
+        # Manual time bucketing for SQLite
+        time_bucket_expr = f"datetime(CAST(strftime('%s', t.datetime_complete) AS INTEGER) / {bucket_seconds} * {bucket_seconds}, 'unixepoch')"
+
+    query = f"""
+    WITH runner_buckets AS (
+        SELECT
+            {time_bucket_expr} AS time_bucket,
+            tad.runner_id,
+            tad.process_id,
+            SUM(tad.iterations) AS total_iterations,
+            SUM(tad.ask_reply_time_ms) AS total_ask_time_ms,
+            COUNT(t.trial_id) AS num_trials,
+            COUNT(CASE WHEN tad.ask_reply_time_ms IS NOT NULL THEN 1 ELSE NULL END) AS num_asks
+        FROM trials t
+        JOIN trial_additional_data tad ON t.trial_id = tad.trial_id
+        WHERE
+            t.datetime_complete BETWEEN :start_time AND :end_time
+            AND t.state = 'COMPLETE'
+            AND tad.runner_id IS NOT NULL
+        GROUP BY time_bucket, tad.runner_id, tad.process_id
+    )
+    SELECT
+        time_bucket,
+        runner_id,
+        SUM(total_iterations) as total_iterations,
+        SUM(num_trials) as total_trials,
+        COUNT(DISTINCT process_id) as num_processes,
+        SUM(total_ask_time_ms) / SUM(num_asks) as avg_ask_time_ms
+    FROM runner_buckets
+    WHERE num_asks > 0
+    GROUP BY time_bucket, runner_id
+    ORDER BY time_bucket, runner_id
+    """
+
+    try:
+        with engine.connect() as connection:
+            rows = connection.execute(
+                sqlalchemy.text(query),
+                {
+                    "start_time": start_time,
+                    "end_time": end_time,
+                },
+            ).fetchall()
+
+        timeseries_data = defaultdict(list)
+        for row in rows:
+            ts = (
+                datetime.datetime.fromisoformat(row.time_bucket)
+                if isinstance(row.time_bucket, str)
+                else row.time_bucket
+            )
+            point = RunnerTimeseriesPoint(
+                timestamp=ts,
+                iterations_per_minute=(((row.total_iterations or 0) / bucket_seconds) * 60),
+                trials_per_minute=(((row.total_trials or 0) / bucket_seconds) * 60),
+                num_processes=row.num_processes or 0,
+                avg_ask_time_s=(row.avg_ask_time_ms or 0) / 1000.0,
+            )
+            timeseries_data[row.runner_id].append(point)
+
+        logger.info(f"Timeseries query returned {len(rows)} data points.")
+        return RunnerTimeseries(runners=timeseries_data)
+
+    except sqlalchemy.exc.OperationalError as e:
+        logger.error(f"Database Operational Error in timeseries query: {e}")
+        if _global_engine:
+            _global_engine.dispose()
+        raise
+    except Exception as e:
+        logger.exception(f"Unexpected error in get_runner_status_timeseries: {e}")
+        raise
 
 
 def runner_status(
