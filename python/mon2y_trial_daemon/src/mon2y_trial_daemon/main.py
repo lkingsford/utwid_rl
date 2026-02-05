@@ -1,4 +1,5 @@
 import argparse
+import boto3
 import logging
 import os
 import platform
@@ -28,6 +29,29 @@ def get_cpu_arch() -> str | None:
         return "arm"
     else:
         return None
+
+
+def uri_from_ec2() -> Optional[str]:
+    ec2 = boto3.client("ec2", region_name="us-east-1")
+
+    response = ec2.describe_instances(
+        Filters=[
+            {"Name": "tag:Role", "Values": ["dist"]},
+            {"Name": "instance-state-name", "Values": ["running"]},
+        ]
+    )
+
+    private_ips = []
+
+    for reservation in response["Reservations"]:
+        for instance in reservation["Instances"]:
+            private_ips.append(instance["PrivateIpAddress"])
+
+    if not (private_ips):
+        logging.warn("Distribution server not found")
+        return None
+
+    return private_ips[0]
 
 
 def download_from_url(url: str, target_dir: str) -> str | None:
@@ -317,7 +341,8 @@ def main():
     studies: Dict[str, Study] = {}
     noted_as_incompatible: Set[str] = set()
 
-    dist_uri = os.environ.get("DIST_URI", "http://localhost:5000")
+    dist_uri = os.environ.get("DIST_URI") or uri_from_ec2() or "http://localhost:5000"
+
     while True:
         logging.info("Polling for open studies...")
         try:
