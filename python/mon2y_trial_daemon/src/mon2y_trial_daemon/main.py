@@ -46,6 +46,12 @@ def main():
         default=default_processes,
         help="Trial runner processes",
     )
+    parser.add_argument(
+        "--halt_after_idle_time",
+        type=int,
+        default=0,
+        help="Time in minutes that the daemon can be idle before the system is halted. Default to 0 (don't halt).",
+    )
     args = parser.parse_args()
 
     if args.verbose == 0:

@@ -63,6 +63,32 @@ class TrialDaemon:
         self.runner_id = str(uuid.uuid4())[:8]
         self.studies: Dict[str, Study] = {}
         self.noted_as_incompatible: Set[str] = set()
+        self.last_activity_time = time.time()
+
+    def _halt_instance(self):
+        """Terminates the EC2 instance this daemon is running on."""
+        logging.info("Halting instance due to idle time.")
+        try:
+            # Get instance ID from metadata
+            instance_id_url = "http://169.254.169.254/latest/meta-data/instance-id"
+            response = requests.get(instance_id_url, timeout=5)
+            response.raise_for_status()
+            instance_id = response.text
+
+            # Get region from metadata
+            region_url = "http://169.254.169.254/latest/meta-data/placement/region"
+            response = requests.get(region_url, timeout=5)
+            response.raise_for_status()
+            region = response.text
+
+            logging.info(f"Terminating instance {instance_id} in region {region}.")
+            ec2 = boto3.client("ec2", region_name=region)
+            ec2.terminate_instances(InstanceIds=[instance_id])
+
+        except requests.RequestException as e:
+            logging.error(f"Could not get EC2 metadata: {e}")
+        except Exception as e:
+            logging.error(f"Failed to terminate instance: {e}")
 
     def run(self):
         logging.info(f"Starting trial daemon with PID {os.getpid()}")
@@ -167,5 +193,21 @@ class TrialDaemon:
 
             for study_name in active_available_studies:
                 self.studies[study_name].scale(scale_to_set, WHEELS_DIR)
+
+            # Check for idle and halt if necessary
+            total_running_workers = sum(
+                len(study.current_running()) for study in self.studies.values()
+            )
+
+            if total_running_workers > 0:
+                self.last_activity_time = time.time()
+            elif self.args.halt_after_idle_time > 0:
+                idle_time_seconds = time.time() - self.last_activity_time
+                idle_time_minutes = idle_time_seconds / 60
+                logging.debug(f"System idle for {idle_time_minutes:.2f} minutes.")
+                if idle_time_minutes > self.args.halt_after_idle_time:
+                    self._halt_instance()
+                    # We can break here as the instance is terminating
+                    break
 
             time.sleep(POLL_INTERVAL)
