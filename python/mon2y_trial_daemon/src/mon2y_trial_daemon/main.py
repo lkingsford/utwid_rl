@@ -52,6 +52,18 @@ def main():
         default=0,
         help="Time in minutes that the daemon can be idle before the system is halted. Default to 0 (don't halt).",
     )
+    parser.add_argument(
+        "--halt-after",
+        type=int,
+        default=0,
+        help="Time in minutes that the daemon can run before the system is halted. Default to 0 (don't halt).",
+    )
+    parser.add_argument(
+        "--halt-grace",
+        type=int,
+        default=120,
+        help="Time in seconds to wait for runners to finish before halting. Default to 120.",
+    )
     args = parser.parse_args()
 
     if args.verbose == 0:

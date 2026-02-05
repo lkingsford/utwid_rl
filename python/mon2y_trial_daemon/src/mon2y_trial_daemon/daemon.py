@@ -64,10 +64,32 @@ class TrialDaemon:
         self.studies: Dict[str, Study] = {}
         self.noted_as_incompatible: Set[str] = set()
         self.last_activity_time = time.time()
+        self.start_time = time.time()
+        self.is_shutting_down = False
+
+    def _initiate_graceful_shutdown(self, reason: str):
+        """Initiates a graceful shutdown of all runners, then halts the instance."""
+        if self.is_shutting_down:
+            return
+
+        logging.info(f"Initiating graceful shutdown: {reason}")
+        self.is_shutting_down = True
+
+        # Shut down all runners
+        logging.info("Scaling all studies to 0 runners.")
+        for study in self.studies.values():
+            study.scale(0, "wheels")  # wheels_dir is not used when scaling to 0
+
+        # Wait for the grace period
+        logging.info(f"Waiting for grace period of {self.args.halt_grace} seconds.")
+        time.sleep(self.args.halt_grace)
+
+        # Halt the instance
+        self._halt_instance()
 
     def _halt_instance(self):
         """Terminates the EC2 instance this daemon is running on."""
-        logging.info("Halting instance due to idle time.")
+        logging.info("Halting instance.")
         try:
             # Get instance ID from metadata
             instance_id_url = "http://169.254.169.254/latest/meta-data/instance-id"
@@ -109,6 +131,9 @@ class TrialDaemon:
         )
 
         while True:
+            if self.is_shutting_down:
+                break
+
             logging.info("Polling for open studies...")
             try:
                 response = requests.get(f"{dist_uri}/open", timeout=10)
@@ -194,7 +219,15 @@ class TrialDaemon:
             for study_name in active_available_studies:
                 self.studies[study_name].scale(scale_to_set, WHEELS_DIR)
 
-            # Check for idle and halt if necessary
+            # Check for halt conditions
+            if self.args.halt_after > 0:
+                elapsed_minutes = (time.time() - self.start_time) / 60
+                if elapsed_minutes > self.args.halt_after:
+                    self._initiate_graceful_shutdown(
+                        f"Halt time of {self.args.halt_after} minutes reached."
+                    )
+                    break  # Exit loop as we are shutting down
+
             total_running_workers = sum(
                 len(study.current_running()) for study in self.studies.values()
             )
@@ -206,8 +239,9 @@ class TrialDaemon:
                 idle_time_minutes = idle_time_seconds / 60
                 logging.debug(f"System idle for {idle_time_minutes:.2f} minutes.")
                 if idle_time_minutes > self.args.halt_after_idle_time:
-                    self._halt_instance()
-                    # We can break here as the instance is terminating
-                    break
+                    self._initiate_graceful_shutdown(
+                        f"Idle time of {self.args.halt_after_idle_time} minutes reached."
+                    )
+                    break  # Exit loop as we are shutting down
 
             time.sleep(POLL_INTERVAL)
