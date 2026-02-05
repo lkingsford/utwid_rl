@@ -139,6 +139,7 @@ cat > "$HBA" <<EOF
 local   all             postgres                                peer
 local   all             ${DB_USER}                               peer
 local   all             ${SERVICE_USER}                          peer
+host optuna  ec2-user peer
 local   all             all                                     peer
 host    all             all             127.0.0.1/32            reject
 host    all             all             ::1/128                 reject

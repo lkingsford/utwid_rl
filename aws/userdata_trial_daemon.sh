@@ -7,7 +7,6 @@ VENV_DIR="$APP_DIR/venv"
 S3_BUCKET="mon2y"
 # This should be replaced with the actual wheel filename or a script to find the latest
 DAEMON_WHEEL="mon2y/mon2y_trial_daemon-0.1.0-py3-none-any.whl"
-DIST_URI="dist.mon2y.local"
 
 # Install dependencies
 dnf install -y python3.13 gcc awscli
