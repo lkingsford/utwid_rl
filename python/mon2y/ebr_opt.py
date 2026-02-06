@@ -995,116 +995,119 @@ def trial_worker(
     dist_uri = os.environ.get("DIST_URI", "http://localhost:5000")
     distributions = dists()
 
-    while True:
-        trial_start_time = time.perf_counter()  # Start of total trial time
-        try:
-            logging.debug(f"Worker for study '{study_name}' reading socket")
-            msg = comm_socket.recv(1024)
-            if msg == b"done":
-                logging.info(
-                    f"Worker for study '{study_name}' received 'done' message."
-                )
+    try:
+        while True:
+            trial_start_time = time.perf_counter()  # Start of total trial time
+            try:
+                logging.debug(f"Worker for study '{study_name}' reading socket")
+                msg = comm_socket.recv(1024)
+                if msg == b"done":
+                    logging.info(
+                        f"Worker for study '{study_name}' received 'done' message."
+                    )
+                    break
+            except (BlockingIOError, InterruptedError):
+                logging.debug(f"Worker for study '{study_name}' has no incoming messages.")
+                pass
+            except Exception:
+                logging.exception(f"Worker for study '{study_name}' failed to recv.")
                 break
-        except (BlockingIOError, InterruptedError):
-            logging.debug(f"Worker for study '{study_name}' has no incoming messages.")
-            pass
-        except Exception:
-            logging.exception(f"Worker for study '{study_name}' failed to recv.")
-            break
 
-        try:
-            logging.info(f"Asking for trial for study '{study_name}'")
-            json_dists = {}
-            for name, dist in distributions.items():
-                dist_name = dist.__class__.__name__
-                attributes = dist._asdict()
-                json_dists[name] = {"name": dist_name, "attributes": attributes}
-            ask_payload = {"study_name": study_name, "distributions": json_dists}
+            try:
+                logging.info(f"Asking for trial for study '{study_name}'")
+                json_dists = {}
+                for name, dist in distributions.items():
+                    dist_name = dist.__class__.__name__
+                    attributes = dist._asdict()
+                    json_dists[name] = {"name": dist_name, "attributes": attributes}
+                ask_payload = {"study_name": study_name, "distributions": json_dists}
 
-            ask_request_start_time = time.perf_counter()  # Start of /ask reply time
-            response = requests.post(f"{dist_uri}/ask", json=ask_payload, timeout=30)
-            ask_reply_end_time = time.perf_counter()  # End of /ask reply time
-            ask_reply_time_ms = (ask_reply_end_time - ask_request_start_time) * 1000
+                ask_request_start_time = time.perf_counter()  # Start of /ask reply time
+                response = requests.post(f"{dist_uri}/ask", json=ask_payload, timeout=30)
+                ask_reply_end_time = time.perf_counter()  # End of /ask reply time
+                ask_reply_time_ms = (ask_reply_end_time - ask_request_start_time) * 1000
 
-            response.raise_for_status()
-            ask_data = response.json()
-            trial_number = ask_data["trial_number"]
-            trial_params = ask_data["params"]
-            target_iterations = force_iterations or ask_data["iterations"]
-            logging.info(f"Received trial {trial_number} for study '{study_name}'")
-            logging.debug(f"Trial data: {ask_data}")
+                response.raise_for_status()
+                ask_data = response.json()
+                trial_number = ask_data["trial_number"]
+                trial_params = ask_data["params"]
+                target_iterations = force_iterations or ask_data["iterations"]
+                logging.info(f"Received trial {trial_number} for study '{study_name}'")
+                logging.debug(f"Trial data: {ask_data}")
 
-            study_params = params
-            all_params = {**study_params, **trial_params}
+                study_params = params
+                all_params = {**study_params, **trial_params}
 
-            explore_start_time = time.perf_counter()  # Start of explore run time
-            results, hyperparams = start_trial(
-                params=all_params,
-                threads=threads,
-                iterations=target_iterations,
-            )
-            explore_end_time = time.perf_counter()  # End of explore run time
-            explore_time_ms = (explore_end_time - explore_start_time) * 1000
+                explore_start_time = time.perf_counter()  # Start of explore run time
+                results, hyperparams = start_trial(
+                    params=all_params,
+                    threads=threads,
+                    iterations=target_iterations,
+                )
+                explore_end_time = time.perf_counter()  # End of explore run time
+                explore_time_ms = (explore_end_time - explore_start_time) * 1000
 
-            status = "succeed"
-            if params.get("single_study", False):
-                result_values = results["total_loss"]
-            else:
-                result_values = results["losses"]
+                status = "succeed"
+                if params.get("single_study", False):
+                    result_values = results["total_loss"]
+                else:
+                    result_values = results["losses"]
 
-        except Exception as e:
-            logging.exception(f"Trial failed for study '{study_name}': {e}")
-            status = "fail"
-            result_values = None
-            hyperparams = {}
-            results = {}
-            ask_reply_time_ms = 0  # Default if error occurs before it's calculated
-            explore_time_ms = 0  # Default if error occurs before it's calculated
-            # Wait before retrying
-            time.sleep(5)
-            continue
+            except Exception as e:
+                logging.exception(f"Trial failed for study '{study_name}': {e}")
+                status = "fail"
+                result_values = None
+                hyperparams = {}
+                results = {}
+                ask_reply_time_ms = 0  # Default if error occurs before it's calculated
+                explore_time_ms = 0  # Default if error occurs before it's calculated
+                # Wait before retrying
+                time.sleep(5)
+                continue
 
-        trial_end_time = time.perf_counter()  # End of total trial time
-        total_trial_time_ms = (trial_end_time - trial_start_time) * 1000
+            trial_end_time = time.perf_counter()  # End of total trial time
+            total_trial_time_ms = (trial_end_time - trial_start_time) * 1000
 
-        logging.info(
-            f"Trial {trial_number} for study '{study_name}' timings: total={total_trial_time_ms:.2f}ms, explore={explore_time_ms:.2f}ms, ask_reply={ask_reply_time_ms:.2f}ms"
-        )
-
-        user_data: Dict[str, Any] = {
-            "process_id": process_id,
-            "total_trial_time_ms": total_trial_time_ms,
-            "explore_time_ms": explore_time_ms,
-            "ask_reply_time_ms": ask_reply_time_ms,
-        }
-        if runner_id:
-            user_data["runner_id"] = runner_id
-        if "iterations" in results:
-            user_data["iterations"] = results["iterations"]
-        if "bonds" in hyperparams:
-            user_data["bonds"] = hyperparams["bonds"]
-
-        tell_payload: Dict[str, Any] = {
-            "study_name": study_name,
-            "trial_number": trial_number,
-            "status": status,
-        }
-        if status == "succeed":
-            tell_payload["result"] = result_values
-        if user_data:
-            tell_payload["user_data"] = user_data
-
-        try:
             logging.info(
-                f"Telling result for trial {trial_number} in study '{study_name}'"
+                f"Trial {trial_number} for study '{study_name}' timings: total={total_trial_time_ms:.2f}ms, explore={explore_time_ms:.2f}ms, ask_reply={ask_reply_time_ms:.2f}ms"
             )
-            response = requests.post(f"{dist_uri}/tell", json=tell_payload, timeout=30)
-            response.raise_for_status()
-            logging.info(f"Successfully told result for trial {trial_number}")
-            if tell_socket:
-                tell_socket.send(b"told")
-        except requests.RequestException as e:
-            logging.exception(f"Failed to tell result for trial {trial_number}: {e}")
 
-        # The loop will now repeat, asking for the next trial
+            user_data: Dict[str, Any] = {
+                "process_id": process_id,
+                "total_trial_time_ms": total_trial_time_ms,
+                "explore_time_ms": explore_time_ms,
+                "ask_reply_time_ms": ask_reply_time_ms,
+            }
+            if runner_id:
+                user_data["runner_id"] = runner_id
+            if "iterations" in results:
+                user_data["iterations"] = results["iterations"]
+            if "bonds" in hyperparams:
+                user_data["bonds"] = hyperparams["bonds"]
+
+            tell_payload: Dict[str, Any] = {
+                "study_name": study_name,
+                "trial_number": trial_number,
+                "status": status,
+            }
+            if status == "succeed":
+                tell_payload["result"] = result_values
+            if user_data:
+                tell_payload["user_data"] = user_data
+
+            try:
+                logging.info(
+                    f"Telling result for trial {trial_number} in study '{study_name}'"
+                )
+                response = requests.post(f"{dist_uri}/tell", json=tell_payload, timeout=30)
+                response.raise_for_status()
+                logging.info(f"Successfully told result for trial {trial_number}")
+                if tell_socket:
+                    tell_socket.send(b"told")
+            except requests.RequestException as e:
+                logging.exception(f"Failed to tell result for trial {trial_number}: {e}")
+    finally:
+        comm_socket.close()
+        if tell_socket:
+            tell_socket.close()
 

@@ -70,6 +70,10 @@ class Study:
             )
         self._runners: List[TrialRunner] = []
 
+    def get_runners(self) -> List[TrialRunner]:
+        """Returns the list of all runners for this study."""
+        return self._runners
+
     def executable(self, wheels_dir: str) -> str:
         """Gets the python interpreter to use, creating a new venv if needed"""
         if self._executable:

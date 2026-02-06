@@ -233,7 +233,7 @@ class TrialDaemon:
             
             all_runners = []
             for study in list(self.studies.values()): # Use list() to avoid issues if studies are removed
-                all_runners.extend(study._runners)
+                all_runners.extend(study.get_runners())
             
             active_workers_reported = False
             for runner in all_runners:
