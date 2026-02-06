@@ -64,6 +64,12 @@ def main():
         default=120,
         help="Time in seconds to wait for runners to finish before halting. Default to 120.",
     )
+    parser.add_argument(
+        "--treat-worker-as-idle-after",
+        type=int,
+        default=0,
+        help="Time in minutes without a 'tell' to treat a worker as idle. Default to 0 (don't treat as idle).",
+    )
     args = parser.parse_args()
 
     if args.verbose == 0:

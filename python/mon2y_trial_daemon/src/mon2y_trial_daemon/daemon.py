@@ -228,19 +228,33 @@ class TrialDaemon:
                     )
                     break  # Exit loop as we are shutting down
 
-            total_running_workers = sum(
-                len(study.current_running()) for study in self.studies.values()
-            )
+            # Determine if any workers are truly active based on their 'tell' reports
+            idle_threshold_seconds = self.args.treat_worker_as_idle_after * 60
+            
+            all_runners = []
+            for study in list(self.studies.values()): # Use list() to avoid issues if studies are removed
+                all_runners.extend(study._runners)
+            
+            active_workers_reported = False
+            for runner in all_runners:
+                runner.check_for_tell() # Process any incoming messages
+                if runner.is_active(idle_threshold_seconds):
+                    active_workers_reported = True
+                    break # At least one active worker is enough
 
-            if total_running_workers > 0:
+            if active_workers_reported:
                 self.last_activity_time = time.time()
             elif self.args.halt_after_idle_time > 0:
                 idle_time_seconds = time.time() - self.last_activity_time
                 idle_time_minutes = idle_time_seconds / 60
-                logging.debug(f"System idle for {idle_time_minutes:.2f} minutes.")
+                logging.debug(
+                    f"System idle for {idle_time_minutes:.2f} minutes, "
+                    f"no active workers reported for {self.args.treat_worker_as_idle_after} minutes."
+                )
                 if idle_time_minutes > self.args.halt_after_idle_time:
                     self._initiate_graceful_shutdown(
-                        f"Idle time of {self.args.halt_after_idle_time} minutes reached."
+                        f"Idle time of {self.args.halt_after_idle_time} minutes reached "
+                        f"with no active workers reported for {self.args.treat_worker_as_idle_after} minutes."
                     )
                     break  # Exit loop as we are shutting down
 

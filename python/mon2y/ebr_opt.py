@@ -981,21 +981,29 @@ def trial_worker(
     force_iterations: int | None,
     params: Dict[str, Any],
     runner_id: Optional[str] = None,
+    tell_socket_fd: Optional[int] = None,
 ):
     # This function runs in a separate process
     process_id = os.getpid()
     comm_socket = socket.fromfd(comm_socket_fd, socket.AF_UNIX, socket.SOCK_STREAM)
     comm_socket.setblocking(False)
+
+    tell_socket = None
+    if tell_socket_fd is not None:
+        tell_socket = socket.fromfd(tell_socket_fd, socket.AF_UNIX, socket.SOCK_STREAM)
+
     dist_uri = os.environ.get("DIST_URI", "http://localhost:5000")
     distributions = dists()
 
     while True:
-        trial_start_time = time.perf_counter() # Start of total trial time
+        trial_start_time = time.perf_counter()  # Start of total trial time
         try:
             logging.debug(f"Worker for study '{study_name}' reading socket")
             msg = comm_socket.recv(1024)
             if msg == b"done":
-                logging.info(f"Worker for study '{study_name}' received 'done' message.")
+                logging.info(
+                    f"Worker for study '{study_name}' received 'done' message."
+                )
                 break
         except (BlockingIOError, InterruptedError):
             logging.debug(f"Worker for study '{study_name}' has no incoming messages.")
@@ -1012,10 +1020,10 @@ def trial_worker(
                 attributes = dist._asdict()
                 json_dists[name] = {"name": dist_name, "attributes": attributes}
             ask_payload = {"study_name": study_name, "distributions": json_dists}
-            
-            ask_request_start_time = time.perf_counter() # Start of /ask reply time
+
+            ask_request_start_time = time.perf_counter()  # Start of /ask reply time
             response = requests.post(f"{dist_uri}/ask", json=ask_payload, timeout=30)
-            ask_reply_end_time = time.perf_counter() # End of /ask reply time
+            ask_reply_end_time = time.perf_counter()  # End of /ask reply time
             ask_reply_time_ms = (ask_reply_end_time - ask_request_start_time) * 1000
 
             response.raise_for_status()
@@ -1029,13 +1037,13 @@ def trial_worker(
             study_params = params
             all_params = {**study_params, **trial_params}
 
-            explore_start_time = time.perf_counter() # Start of explore run time
+            explore_start_time = time.perf_counter()  # Start of explore run time
             results, hyperparams = start_trial(
                 params=all_params,
                 threads=threads,
                 iterations=target_iterations,
             )
-            explore_end_time = time.perf_counter() # End of explore run time
+            explore_end_time = time.perf_counter()  # End of explore run time
             explore_time_ms = (explore_end_time - explore_start_time) * 1000
 
             status = "succeed"
@@ -1050,16 +1058,18 @@ def trial_worker(
             result_values = None
             hyperparams = {}
             results = {}
-            ask_reply_time_ms = 0 # Default if error occurs before it's calculated
-            explore_time_ms = 0 # Default if error occurs before it's calculated
+            ask_reply_time_ms = 0  # Default if error occurs before it's calculated
+            explore_time_ms = 0  # Default if error occurs before it's calculated
             # Wait before retrying
             time.sleep(5)
             continue
-        
-        trial_end_time = time.perf_counter() # End of total trial time
+
+        trial_end_time = time.perf_counter()  # End of total trial time
         total_trial_time_ms = (trial_end_time - trial_start_time) * 1000
 
-        logging.info(f"Trial {trial_number} for study '{study_name}' timings: total={total_trial_time_ms:.2f}ms, explore={explore_time_ms:.2f}ms, ask_reply={ask_reply_time_ms:.2f}ms")
+        logging.info(
+            f"Trial {trial_number} for study '{study_name}' timings: total={total_trial_time_ms:.2f}ms, explore={explore_time_ms:.2f}ms, ask_reply={ask_reply_time_ms:.2f}ms"
+        )
 
         user_data: Dict[str, Any] = {
             "process_id": process_id,
@@ -1085,12 +1095,16 @@ def trial_worker(
             tell_payload["user_data"] = user_data
 
         try:
-            logging.info(f"Telling result for trial {trial_number} in study '{study_name}'")
+            logging.info(
+                f"Telling result for trial {trial_number} in study '{study_name}'"
+            )
             response = requests.post(f"{dist_uri}/tell", json=tell_payload, timeout=30)
             response.raise_for_status()
             logging.info(f"Successfully told result for trial {trial_number}")
+            if tell_socket:
+                tell_socket.send(b"told")
         except requests.RequestException as e:
             logging.exception(f"Failed to tell result for trial {trial_number}: {e}")
-        
+
         # The loop will now repeat, asking for the next trial
 
