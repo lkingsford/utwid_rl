@@ -22,6 +22,9 @@ except ImportError:
 from .runner import RunnerDetails, TrialRunner
 from .study import Study, StudyError
 
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(logging.DEBUG)
+
 
 def get_cpu_arch() -> str | None:
     machine = platform.machine()
@@ -50,16 +53,17 @@ def uri_from_ec2() -> Optional[str]:
             private_ips.append(instance["PrivateIpAddress"])
 
     if not (private_ips):
-        logging.warn("Distribution server not found")
+        LOGGER.warn("Distribution server not found")
         return None
 
     return f"http://{private_ips[0]}:5000/"
 
 
 class TrialDaemon:
-    def __init__(self, args, log_level):
+    def __init__(self, args, log_level, dist_uri: str):
         self.args = args
         self.log_level = log_level
+        self.dist_uri = dist_uri
         self.runner_id = str(uuid.uuid4())[:8]
         self.studies: Dict[str, Study] = {}
         self.noted_as_incompatible: Set[str] = set()
@@ -72,16 +76,17 @@ class TrialDaemon:
         if self.is_shutting_down:
             return
 
-        logging.info(f"Initiating graceful shutdown: {reason}")
+        LOGGER.debug(f"Initiating graceful shutdown for reason: {reason} #GEMADD")
+        LOGGER.info(f"Initiating graceful shutdown: {reason}")
         self.is_shutting_down = True
 
         # Shut down all runners
-        logging.info("Scaling all studies to 0 runners.")
+        LOGGER.info("Scaling all studies to 0 runners.")
         for study in self.studies.values():
             study.scale(0, "wheels")  # wheels_dir is not used when scaling to 0
 
         # Wait for the grace period
-        logging.info(f"Waiting for grace period of {self.args.halt_grace} seconds.")
+        LOGGER.info(f"Waiting for grace period of {self.args.halt_grace} seconds.")
         time.sleep(self.args.halt_grace)
 
         # Halt the instance
@@ -90,7 +95,7 @@ class TrialDaemon:
 
     def _halt_instance(self):
         """Terminates the EC2 instance this daemon is running on."""
-        logging.info("Halting instance.")
+        LOGGER.info("Halting instance.")
         try:
             # Get instance ID from metadata
             instance_id_url = "http://169.254.169.254/latest/meta-data/instance-id"
@@ -104,158 +109,184 @@ class TrialDaemon:
             response.raise_for_status()
             region = response.text
 
-            logging.info(f"Terminating instance {instance_id} in region {region}.")
+            LOGGER.info(f"Terminating instance {instance_id} in region {region}.")
             ec2 = boto3.client("ec2", region_name=region)
             ec2.terminate_instances(InstanceIds=[instance_id])
 
         except requests.RequestException as e:
-            logging.error(f"Could not get EC2 metadata: {e}")
+            LOGGER.error(f"Could not get EC2 metadata: {e}")
         except Exception as e:
-            logging.error(f"Failed to terminate instance: {e}")
+            LOGGER.error(f"Failed to terminate instance: {e}")
 
     def run(self):
-        logging.info(f"Starting trial daemon with PID {os.getpid()}")
+        LOGGER.info(f"Starting trial daemon with PID {os.getpid()}")
 
-        POLL_INTERVAL = 30
+        poll_interval = self.args.poll_interval
         WHEELS_DIR = "wheels"
         os.makedirs(WHEELS_DIR, exist_ok=True)
 
+        self.last_activity_time = time.time()
+        self.start_time = self.last_activity_time
+
         cpu_arch = get_cpu_arch()
         if not cpu_arch:
-            logging.error(f"Unsupported CPU architecture: {platform.machine()}")
+            LOGGER.error(f"Unsupported CPU architecture: {platform.machine()}")
             sys.exit(1)
-        logging.info(f"Detected CPU architecture: {cpu_arch}")
+        LOGGER.info(f"Detected CPU architecture: {cpu_arch}")
         wheel_url_attr = f"{cpu_arch}_manylinux_wheel_url"
 
-        dist_uri = (
-            os.environ.get("DIST_URI") or uri_from_ec2() or "http://localhost:5000"
-        )
-
         while True:
-            if self.is_shutting_down:
-                break
-
-            logging.info("Polling for open studies...")
             try:
-                response = requests.get(f"{dist_uri}/open", timeout=10)
-                response.raise_for_status()
-                open_studies = response.json()
-            except requests.RequestException as e:
-                logging.error(f"Failed to get open studies: {e}")
-                time.sleep(POLL_INTERVAL)
-                continue
+                if self.is_shutting_down:
+                    LOGGER.warning("Breaking from run() loop")
+                    break
 
-            open_studies_by_name = {s["study_name"]: s for s in open_studies}
-            open_study_names = set(open_studies_by_name)
+                LOGGER.info("Polling for open studies...")
+                try:
+                    response = requests.get(f"{self.dist_uri}/open", timeout=10)
+                    response.raise_for_status()
+                    open_studies = response.json()
+                except requests.RequestException as e:
+                    LOGGER.error(f"Failed to get open studies: {e}")
+                    time.sleep(poll_interval)
+                    continue
 
-            for study_name in open_study_names:
-                if study_name not in self.studies:
-                    study_info = open_studies_by_name[study_name]
-                    user_attrs = study_info["user_attrs"]
+                open_studies_by_name = {s["study_name"]: s for s in open_studies}
+                open_study_names = set(open_studies_by_name)
 
-                    if wheel_url_attr not in user_attrs and not self.args.current_venv:
-                        if study_name not in self.noted_as_incompatible:
-                            logging.debug(
-                                f"No compatible wheel found for study '{study_name}' on {cpu_arch} architecture."
+                for study_name in open_study_names:
+                    if study_name not in self.studies:
+                        study_info = open_studies_by_name[study_name]
+                        user_attrs = study_info["user_attrs"]
+
+                        if (
+                            wheel_url_attr not in user_attrs
+                            and not self.args.current_venv
+                        ):
+                            if study_name not in self.noted_as_incompatible:
+                                LOGGER.debug(
+                                    f"No compatible wheel found for study '{study_name}' on {cpu_arch} architecture."
+                                )
+                                self.noted_as_incompatible.add(study_name)
+                            continue
+
+                        wheel_url = user_attrs.get(wheel_url_attr)
+                        if wheel_url:
+                            LOGGER.info(
+                                f"Found new open study '{study_name}' with compatible wheel."
                             )
-                            self.noted_as_incompatible.add(study_name)
-                        continue
+                        else:
+                            LOGGER.info(f"Found new open study '{study_name}'.")
 
-                    wheel_url = user_attrs.get(wheel_url_attr)
-                    if wheel_url:
-                        logging.info(
-                            f"Found new open study '{study_name}' with compatible wheel."
+                        runner_details = RunnerDetails(
+                            study_name=study_name,
+                            module=user_attrs.get("module"),
+                            function=user_attrs.get("function"),
+                            threads=self.args.threads,
+                            force_iterations=self.args.force_iterations,
+                            params=user_attrs.get("params", {}),
+                            runner_id=self.runner_id,
                         )
-                    else:
-                        logging.info(f"Found new open study '{study_name}'.")
 
-                    runner_details = RunnerDetails(
-                        study_name=study_name,
-                        module=user_attrs.get("module"),
-                        function=user_attrs.get("function"),
-                        threads=self.args.threads,
-                        force_iterations=self.args.force_iterations,
-                        params=user_attrs.get("params", {}),
-                        runner_id=self.runner_id,
+                        try:
+                            self.studies[study_name] = Study(
+                                dist_uri=self.dist_uri,
+                                wheel_uri=wheel_url,
+                                runner_details=runner_details,
+                                use_current_env=self.args.current_venv,
+                                log_level=self.log_level,
+                            )
+                        except (ValueError, StudyError) as e:
+                            LOGGER.exception(e)
+                            LOGGER.info(f"Continuing. Study {study_name} not created.")
+
+                for study in self.studies.values():
+                    study.cleanup()
+
+                LOGGER.info(
+                    f"Active runner #: { {study_name: len(study.current_running())  for study_name, study in self.studies.items() if study_name in open_study_names} }"
+                )
+
+                running_study_names = {
+                    study_name
+                    for study_name, study in self.studies.items()
+                    if len(study.current_running()) > 0
+                }
+
+                studies_to_stop = running_study_names - open_study_names
+                for study_name in studies_to_stop:
+                    if study_name in self.studies:
+                        self.studies[study_name].scale(0, WHEELS_DIR)
+
+                active_available_studies = set(self.studies.keys()) & open_study_names
+
+                if active_available_studies:
+                    scale_to_set = max(
+                        1, self.args.processes // len(active_available_studies)
                     )
+                else:
+                    scale_to_set = 0
 
-                    try:
-                        self.studies[study_name] = Study(
-                            wheel_uri=wheel_url,
-                            runner_details=runner_details,
-                            use_current_env=self.args.current_venv,
-                            log_level=self.log_level,
+                for study_name in active_available_studies:
+                    self.studies[study_name].scale(scale_to_set, WHEELS_DIR)
+
+                # Check for halt conditions
+                if self.args.halt_after > 0:
+                    elapsed_minutes = (time.time() - self.start_time) / 60
+                    LOGGER.info("elapsed_minutes %s", elapsed_minutes)
+                    if elapsed_minutes > self.args.halt_after:
+                        self._initiate_graceful_shutdown(
+                            f"Halt time of {self.args.halt_after} minutes reached."
                         )
-                    except (ValueError, StudyError) as e:
-                        logging.exception(e)
-                        logging.info(f"Continuing. Study {study_name} not created.")
+                        break  # Exit loop as we are shutting down
 
-            for study in self.studies.values():
-                study.cleanup()
+                # Determine if any workers are truly active based on their 'tell' reports
+                idle_threshold_seconds = self.args.treat_worker_as_idle_after * 60
 
-            logging.info(
-                f"Active runner #: { {study_name: len(study.current_running())  for study_name, study in self.studies.items() if study_name in open_study_names} }"
-            )
-
-            running_study_names = {
-                study_name
-                for study_name, study in self.studies.items()
-                if len(study.current_running()) > 0
-            }
-
-            studies_to_stop = running_study_names - open_study_names
-            for study_name in studies_to_stop:
-                if study_name in self.studies:
-                    self.studies[study_name].scale(0, WHEELS_DIR)
-
-            active_available_studies = set(self.studies.keys()) & open_study_names
-
-            if active_available_studies:
-                scale_to_set = max(
-                    1, self.args.processes // len(active_available_studies)
-                )
-            else:
-                scale_to_set = 0
-
-            for study_name in active_available_studies:
-                self.studies[study_name].scale(scale_to_set, WHEELS_DIR)
-
-            # Check for halt conditions
-            if self.args.halt_after > 0:
-                elapsed_minutes = (time.time() - self.start_time) / 60
-                if elapsed_minutes > self.args.halt_after:
-                    self._initiate_graceful_shutdown(
-                        f"Halt time of {self.args.halt_after} minutes reached."
+                active_workers_reported = False
+                for runner in self.all_runners():
+                    runner.check_for_tell()  # Process any incoming messages
+                    LOGGER.debug(
+                        f"Runner '{runner.runner_details.study_name}' last_tell_time: {runner.last_tell_time} #GEMADD"
                     )
-                    break  # Exit loop as we are shutting down
-
-            # Determine if any workers are truly active based on their 'tell' reports
-            idle_threshold_seconds = self.args.treat_worker_as_idle_after * 60
-
-            active_workers_reported = False
-            for runner in self.all_runners():
-                runner.check_for_tell()  # Process any incoming messages
-                if runner.is_active(idle_threshold_seconds):
-                    active_workers_reported = True
-                    break  # At least one active worker is enough
-
-            if active_workers_reported:
-                self.last_activity_time = time.time()
-            elif self.args.halt_after_idle_time > 0:
-                idle_time_seconds = time.time() - self.last_activity_time
-                idle_time_minutes = idle_time_seconds / 60
-                logging.debug(
-                    f"System idle for {idle_time_minutes:.2f} minutes, "
-                    f"no active workers reported for {self.args.treat_worker_as_idle_after} minutes."
-                )
-                if idle_time_minutes > self.args.halt_after_idle_time:
-                    self._initiate_graceful_shutdown(
-                        f"Idle time of {self.args.halt_after_idle_time} minutes reached "
-                        f"with no active workers reported for {self.args.treat_worker_as_idle_after} minutes."
+                    LOGGER.debug(
+                        f"Checking if runner for study '{runner.runner_details.study_name}' is active with idle_threshold_seconds={idle_threshold_seconds} #GEMADD"
                     )
-                    break  # Exit loop as we are shutting down
+                    if runner.is_active(idle_threshold_seconds):
+                        LOGGER.debug(
+                            f"Active worker found for study '{runner.runner_details.study_name}' #GEMADD"
+                        )
+                        active_workers_reported = True
+                        break  # At least one active worker is enough
 
-            time.sleep(POLL_INTERVAL)
+                LOGGER.debug(
+                    f"Finished checking all runners. active_workers_reported: {active_workers_reported} #GEMADD"
+                )
+                if active_workers_reported:
+                    self.last_activity_time = time.time()
+                elif self.args.halt_after_idle_time > 0:
+                    idle_time_seconds = time.time() - self.last_activity_time
+                    LOGGER.debug(
+                        f"Current idle_time_seconds: {idle_time_seconds:.2f}, configured halt_after_idle_time (seconds): {self.args.halt_after_idle_time * 60:.2f} #GEMADD"
+                    )
+                    LOGGER.debug(
+                        f"System idle for {idle_time_seconds:.2f} seconds, "
+                        f"no active workers reported for {self.args.treat_worker_as_idle_after} minutes."
+                    )
+                    if idle_time_seconds > self.args.halt_after_idle_time * 60:
+                        self._initiate_graceful_shutdown(
+                            f"Idle time of {self.args.halt_after_idle_time} minutes reached "
+                            f"with no active workers reported for {self.args.treat_worker_as_idle_after} minutes."
+                        )
+                        break  # Exit loop as we are shutting down
+
+                time.sleep(poll_interval)
+            except Exception as e:
+                LOGGER.exception(e)
+                # Ensure the daemon doesn't just spin on an error
+                time.sleep(
+                    poll_interval
+                )  # Add a small delay to prevent rapid-fire error logging
 
     def all_runners(self) -> Generator[TrialRunner]:
         for study in self.studies.values():
@@ -263,6 +294,8 @@ class TrialDaemon:
                 yield runner
 
     def force_shutdown(self):
+        LOGGER.warning("Starting Forced Shutdown")
         self.is_shutting_down = True
         for runner in self.all_runners():
             runner.kill()
+        self.studies.clear()

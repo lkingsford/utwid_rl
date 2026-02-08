@@ -10,8 +10,10 @@ import flask
 import optuna
 from optuna.storages import RDBStorage
 
-from mon2y_dist.db_models import (ensure_additional_tables_exist,
-                                  trial_additional_data_table)
+from mon2y_dist.db_models import (
+    ensure_additional_tables_exist,
+    trial_additional_data_table,
+)
 
 LOGGER = flask.Flask("__main__.op_queue").logger
 LOGGER.setLevel(logging.INFO)  # Revert to INFO, was DEBUG for prior debugging
@@ -97,15 +99,23 @@ class Tell:
 
     def run(self, study: optuna.Study, storage: optuna.storages.BaseStorage):
         """Executes the tell operation and places the result in the container."""
+        LOGGER.info(f"Tell.run received data: {self.tell_data}")
         try:
             global _additional_tables_ensured_called
             if not _additional_tables_ensured_called:
                 ensure_additional_tables_exist(storage.engine)
                 _additional_tables_ensured_called = True
 
-            trial_number = self.tell_data.get("trial_number") or -1
+            trial_number = self.tell_data.get("trial_number")
+            if trial_number is None:
+                error_msg = "Missing 'trial_number' in tell data."
+                LOGGER.error(error_msg)
+                self.result_container.complete(error=ValueError(error_msg))
+                return
             status = self.tell_data.get("status")
             user_data = self.tell_data.get("user_data") or {}
+
+
 
             LOGGER.debug(
                 f"Starting tell for {self.study_name} trial {trial_number}: {user_data}"
@@ -166,7 +176,12 @@ class Tell:
                 study.tell(trial_number, values=self.tell_data.get("result"))
             else:
                 study.tell(trial_number, state=optuna.trial.TrialState.FAIL)
-            LOGGER.debug(f"study.tell completed for trial {trial_number}.")
+
+            # Explicitly commit the transaction to ensure visibility across processes
+            with storage.engine.connect() as connection:
+                connection.commit()
+
+            LOGGER.info(f"study.tell completed for trial {trial_number}.")
 
         except Exception as e:
             self.result_container.complete(error=e)

@@ -54,11 +54,13 @@ class NoWheelException(StudyError):
 class Study:
     def __init__(
         self,
+        dist_uri: str,
         wheel_uri: Optional[str],
         runner_details: RunnerDetails,
         use_current_env: bool = False,
         log_level: int = logging.INFO,
     ):
+        self.dist_uri = dist_uri
         self.wheel_uri = wheel_uri
         self.use_current_env = use_current_env
         self._executable: Optional[str] = None
@@ -134,7 +136,10 @@ class Study:
             for _ in range(to_add):
                 self._runners.append(
                     TrialRunner(
-                        self.executable(wheels_dir), self.runner_details, self.log_level
+                        executable=self.executable(wheels_dir), 
+                        runner_details=self.runner_details, 
+                        log_level=self.log_level,
+                        dist_uri=self.dist_uri
                     )
                 )
 

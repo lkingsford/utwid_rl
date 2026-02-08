@@ -49,7 +49,7 @@ S3_REGION = os.environ.get("S3_REGION", "ap-southeast-2")
 
 DEFAULT_ITERATIONS = 10000
 
-STORAGE_URL = os.environ.get("OPTUNA_STORAGE") or "sqlite:///db.sqlite3"
+DEFAULT_STORAGE_URL = os.environ.get("OPTUNA_STORAGE") or "sqlite:///db.sqlite3"
 
 _storage = None
 
@@ -58,7 +58,7 @@ def storage():
     global _storage
     if not _storage:
         _storage = optuna.storages.RDBStorage(
-            url=STORAGE_URL,
+            url=app.config.get("STORAGE_URL") or DEFAULT_STORAGE_URL,
             engine_kwargs={
                 "pool_size": MAX_OP_CONNECTIONS,  # Must be >= MAX_OP_CONNECTIONS
                 "max_overflow": 10,
@@ -763,6 +763,7 @@ def worker_thread_main():
     """Main loop for worker threads processing Optuna operations."""
     while True:
         op = op_queue.get()
+        logging.info('op_queue pop - {}', op)
         try:
             study = get_study(op.study_name)
             if study is None:

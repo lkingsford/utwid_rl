@@ -1,4 +1,5 @@
 import logging
+import os
 import socket
 import subprocess
 import time
@@ -70,9 +71,10 @@ class TrialRunner:
 
     def __init__(
         self,
-        python_executable: str,
+        executable: str,
         runner_details: RunnerDetails,
         log_level: int,
+        dist_uri: str,
     ):
         self._parent_sock, self._child_sock = socket.socketpair()
         self.tell_report_sock, self.child_tell_report_sock = socket.socketpair()
@@ -81,6 +83,7 @@ class TrialRunner:
         self._stop_sent: bool = False
         self._started: bool = False
         self.last_tell_time = time.time()
+        self.runner_details = runner_details
 
         log_level_str = logging.getLevelName(log_level)
         command = (
@@ -99,12 +102,18 @@ class TrialRunner:
         logging.debug(
             f"Executing command for study '{runner_details.study_name}': {command}"
         )
+        
+        # Pass the dist_uri to the subprocess via environment variable
+        env = os.environ.copy()
+        env["DIST_URI"] = dist_uri
+
         self._process = subprocess.Popen(
             [
-                python_executable,
+                executable,
                 "-c",
                 command,
             ],
             pass_fds=[self._child_sock.fileno(), self.child_tell_report_sock.fileno()],
+            env=env,
         )
         self._started = True

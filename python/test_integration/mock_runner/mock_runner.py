@@ -66,6 +66,9 @@ def mock_trial_worker(
     dist_uri = os.environ.get("DIST_URI", "http://localhost:5000")
     distributions = get_distributions()
 
+    stop_after = params.get("stop_after")
+    ask_count = 0
+
     try:
         while True:
             # Check for shutdown message from daemon
@@ -79,6 +82,24 @@ def mock_trial_worker(
             except Exception as e:
                 logging.error(f"Error on comm_socket: {e}")
                 break
+
+            # If stop_after is set and we've reached the limit, go idle
+            if stop_after is not None and ask_count >= stop_after:
+                logging.info(f"Mock worker for study '{study_name}' reached stop_after={stop_after}. Going idle.")
+                while True:
+                    # Keep checking for shutdown message
+                    try:
+                        msg = comm_socket.recv(1024)
+                        if msg == MSG_DONE:
+                            logging.info(f"Mock worker for study '{study_name}' received 'done' while idle.")
+                            break
+                    except BlockingIOError:
+                        pass
+                    except Exception as e:
+                        logging.error(f"Error on comm_socket while idle: {e}")
+                        break
+                    time.sleep(1) # Simulate idle work
+                break # Exit the main loop after breaking from inner idle loop
 
             # Ask for a trial
             ask_payload = {
@@ -95,6 +116,8 @@ def mock_trial_worker(
                 ask_data = response.json()
                 trial_number = ask_data["trial_number"]
                 trial_params = ask_data["params"]
+                ask_count += 1
+                logging.debug(f"Mock worker ask_count: {ask_count}")
             except Exception as e:
                 logging.error(f"Mock worker failed to /ask: {e}")
                 time.sleep(1)
@@ -135,3 +158,4 @@ def mock_trial_worker(
         comm_socket.close()
         if tell_socket:
             tell_socket.close()
+

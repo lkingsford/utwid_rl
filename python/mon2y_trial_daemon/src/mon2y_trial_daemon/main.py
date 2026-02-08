@@ -3,7 +3,7 @@ import logging
 import os
 import sys
 
-from .daemon import TrialDaemon
+from .daemon import TrialDaemon, uri_from_ec2
 
 
 def main():
@@ -47,7 +47,13 @@ def main():
         help="Trial runner processes",
     )
     parser.add_argument(
-        "--halt_after_idle_time",
+        "--poll-interval",
+        type=int,
+        default=30,
+        help="Time in seconds between polling the distribution server",
+    )
+    parser.add_argument(
+        "--halt-after-idle-time",
         type=int,
         default=0,
         help="Time in minutes that the daemon can be idle before the system is halted. Default to 0 (don't halt).",
@@ -91,7 +97,9 @@ def main():
         level=log_level,
     )
 
-    daemon = TrialDaemon(args, log_level)
+    dist_uri = os.environ.get("DIST_URI") or uri_from_ec2() or "http://localhost:5000"
+
+    daemon = TrialDaemon(args, log_level, dist_uri)
     daemon.run()
 
 
