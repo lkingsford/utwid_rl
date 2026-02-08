@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 import uuid
-from typing import Dict, Optional, Set
+from typing import Dict, Optional, Set, Generator
 
 try:
     import boto3
@@ -19,7 +19,7 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
     import requests
 
-from .runner import RunnerDetails
+from .runner import RunnerDetails, TrialRunner
 from .study import Study, StudyError
 
 
@@ -85,7 +85,8 @@ class TrialDaemon:
         time.sleep(self.args.halt_grace)
 
         # Halt the instance
-        self._halt_instance()
+        if self.args.halt_instance_after_stopping:
+            self._halt_instance()
 
     def _halt_instance(self):
         """Terminates the EC2 instance this daemon is running on."""
@@ -230,17 +231,13 @@ class TrialDaemon:
 
             # Determine if any workers are truly active based on their 'tell' reports
             idle_threshold_seconds = self.args.treat_worker_as_idle_after * 60
-            
-            all_runners = []
-            for study in list(self.studies.values()): # Use list() to avoid issues if studies are removed
-                all_runners.extend(study.get_runners())
-            
+
             active_workers_reported = False
-            for runner in all_runners:
-                runner.check_for_tell() # Process any incoming messages
+            for runner in self.all_runners():
+                runner.check_for_tell()  # Process any incoming messages
                 if runner.is_active(idle_threshold_seconds):
                     active_workers_reported = True
-                    break # At least one active worker is enough
+                    break  # At least one active worker is enough
 
             if active_workers_reported:
                 self.last_activity_time = time.time()
@@ -259,3 +256,13 @@ class TrialDaemon:
                     break  # Exit loop as we are shutting down
 
             time.sleep(POLL_INTERVAL)
+
+    def all_runners(self) -> Generator[TrialRunner]:
+        for study in self.studies.values():
+            for runner in study.current_running():
+                yield runner
+
+    def force_shutdown(self):
+        self.is_shutting_down = True
+        for runner in self.all_runners():
+            runner.kill()

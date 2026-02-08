@@ -65,6 +65,12 @@ def main():
         help="Time in seconds to wait for runners to finish before halting. Default to 120.",
     )
     parser.add_argument(
+        "--halt-instance",
+        type=bool,
+        default=False,
+        help="Halt EC2 instance after shutting down",
+    )
+    parser.add_argument(
         "--treat-worker-as-idle-after",
         type=int,
         default=0,
