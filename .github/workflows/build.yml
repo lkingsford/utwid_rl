@@ -1,0 +1,116 @@
+name: Build and Release Rust Binaries
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'x-*'
+
+jobs:
+  build_binaries:
+    name: Build ${{ matrix.target }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            archive_ext: tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+          - os: macos-14
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+
+    - name: Get package info from Cargo.toml
+      id: get_info
+      run: |
+        PACKAGE_NAME=$(grep '^name' Cargo.toml | head -n 1 | sed 's/name = "\(.*\)"/\1/')
+        VERSION=$(grep '^version' Cargo.toml | head -n 1 | sed 's/version = "\(.*\)"/\1/')
+        echo "package_name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Install Rust target
+      run: rustup target add ${{ matrix.target }}
+
+    - name: Build binary
+      run: cargo build --release --target ${{ matrix.target }}
+
+    - name: Package binary
+      id: package
+      run: |
+        BIN_NAME=${{ steps.get_info.outputs.package_name }}
+        VERSION=${{ steps.get_info.outputs.version }}
+        TARGET=${{ matrix.target }}
+        DEV_SUFFIX=".dev${{ github.run_number }}"
+        DIST_DIR=dist
+
+        mkdir -p $DIST_DIR
+
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          BIN_PATH=target/$TARGET/release/$BIN_NAME.exe
+          ARCHIVE_NAME="$BIN_NAME-$VERSION$DEV_SUFFIX-$TARGET.zip"
+          powershell Compress-Archive $BIN_PATH "$DIST_DIR/$ARCHIVE_NAME"
+        else
+          BIN_PATH=target/$TARGET/release/$BIN_NAME
+          ARCHIVE_NAME="$BIN_NAME-$VERSION$DEV_SUFFIX-$TARGET.tar.gz"
+          tar -czf "$DIST_DIR/$ARCHIVE_NAME" -C "$(dirname $BIN_PATH)" "$(basename $BIN_PATH)"
+        fi
+
+        echo "archive_name=$ARCHIVE_NAME" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Upload artifact to S3
+      run: |
+        aws s3 cp dist/${{ steps.package.outputs.archive_name }} \
+          s3://utwid/binaries/${{ steps.package.outputs.archive_name }}
+      shell: bash
+
+    - name: Save S3 path
+      run: |
+        echo "s3://utwid/binaries/${{ steps.package.outputs.archive_name }}" > s3-path.txt
+      shell: bash
+
+    - name: Upload S3 path artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: s3-path-${{ matrix.os }}-${{ matrix.target }}
+        path: s3-path.txt
+
+  collect_s3_paths:
+    name: Collect and output S3 paths
+    runs-on: ubuntu-latest
+    needs: build_binaries
+    steps:
+    - name: Download all S3 path artifacts
+      uses: actions/download-artifact@v4
+
+    - name: Output S3 paths
+      run: |
+        echo "S3 paths for all binaries:"
+        find . -name s3-path.txt -exec cat {} +
+      shell: bash
