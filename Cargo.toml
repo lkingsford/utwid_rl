@@ -1,5 +1,5 @@
 [package]
-name = "mon2y_rs"
+name = "utwid_rl"
 version = "0.1.0"
 edition = "2021"
 
@@ -19,9 +19,5 @@ test-env-log = "0.2.8"
 
 
 [[bin]]
-name = "bench"
-path = "src/bench.rs"
-
-[[bin]]
-name = "arena"
-path = "src/arena.rs"
+name = "utwid_rl"
+path = "src/utwid.rs"

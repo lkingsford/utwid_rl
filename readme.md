@@ -1,5 +1,10 @@
-# mon2y_rs
+# UNTIL THE WORK IS DONE
 
-# Description
+## What is it?
 
-A project for me to learn rust, by implementing a generic monty carlo tree search algorithm with some games. Please don't judge the code too harshly: it literally is a learning project (which, I'm willing to to in public, in case it's of use to anybody else).
+An attempt at a 7DRL
+
+## What are we starting with?
+
+A pretty sexy monty carlo algorithm written for another project.
+
