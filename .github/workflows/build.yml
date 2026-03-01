@@ -50,8 +50,17 @@ jobs:
     - name: Install Rust target
       run: rustup target add ${{ matrix.target }}
 
+    - name: Install Rust cross
+      run: cargo install cross --locked
+
     - name: Build binary
-      run: cargo build --release --target ${{ matrix.target }}
+      run: |
+        if [[ "${{ runner.os }}" == "Linux" ]]; then
+          cross build --release --target ${{ matrix.target }}
+        else
+          cargo build --release --target ${{ matrix.target }}
+        fi
+      shell: bash
 
     - name: Package binary
       id: package
@@ -63,7 +72,6 @@ jobs:
         DIST_DIR=dist
 
         mkdir -p $DIST_DIR
-
         if [[ "${{ runner.os }}" == "Windows" ]]; then
           BIN_PATH=target/$TARGET/release/$BIN_NAME.exe
           ARCHIVE_NAME="$BIN_NAME-$VERSION$DEV_SUFFIX-$TARGET.zip"
