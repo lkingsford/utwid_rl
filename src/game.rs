@@ -1,5 +1,6 @@
 use crate::mon2y::game::{Action, State};
 use std::io;
+
 pub trait Game {
     type StateType: State<ActionType = Self::ActionType> + 'static + Send + Sync;
     type ActionType: Action<StateType = Self::StateType> + 'static + Send + Sync;
