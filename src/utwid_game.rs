@@ -145,32 +145,33 @@ impl Board {
         cardinal: bool,
         diagonal: bool,
     ) -> Vec<UtwidAction> {
-        let mut directions = Vec::new();
-        if cardinal {
-            directions.extend(vec![
-                (UtwidAction::N, (from_x, from_y - 1)),
-                (UtwidAction::S, (from_x, from_y + 1)),
-                (UtwidAction::E, (from_x - 1, from_y)),
-                (UtwidAction::W, (from_x - 1, from_y)),
-            ])
-        };
-        if diagonal {
-            directions.extend(vec![
-                (UtwidAction::NE, (from_x - 1, from_y - 1)),
-                (UtwidAction::NW, (from_x + 1, from_y + 1)),
-                (UtwidAction::SE, (from_x - 1, from_y + 1)),
-                (UtwidAction::SW, (from_x + 1, from_y + 1)),
-            ])
-        };
+        let cardinal_dirs = [
+            (UtwidAction::N, 0isize, -1),
+            (UtwidAction::S, 0, 1),
+            (UtwidAction::E, 1, 0),
+            (UtwidAction::W, -1, 0),
+        ];
 
-        directions
+        let diagonal_dirs = [
+            (UtwidAction::NE, 1, -1),
+            (UtwidAction::NW, -1, -1),
+            (UtwidAction::SE, 1, 1),
+            (UtwidAction::SW, -1, 1),
+        ];
+
+        cardinal_dirs
             .iter()
-            .filter(|(_, coords)| {
-                self.get(coords.0, coords.1)
+            .filter(|_| cardinal)
+            .chain(diagonal_dirs.iter().filter(|_| diagonal))
+            .filter_map(|(action, dx, dy)| {
+                let x = from_x.checked_add_signed(*dx)?;
+                let y = from_y.checked_add_signed(*dy)?;
+
+                self.get(x, y)
                     .traits
                     .contains(&TileTrait::Walkable)
+                    .then_some(*action)
             })
-            .map(|(action, _)| action.clone())
             .collect()
     }
 }
