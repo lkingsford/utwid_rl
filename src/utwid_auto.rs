@@ -8,6 +8,7 @@ use game::Game;
 use mon2y::{calculate_best_turn, BestTurnPolicy};
 use std::{collections::HashMap, time::Instant};
 use utwid_rl::utwid_game;
+use utwid_rl::utwid_game::{ActorTrait, TileTrait};
 
 use crossterm::{
     cursor::MoveTo,
@@ -19,8 +20,8 @@ use crossterm::{
 
 use std::io::{stdout, Stdout, Write};
 
-const DRAW_BOARD_X: u16 = 0;
-const DRAW_BOARD_Y: u16 = 0;
+const DRAW_BOARD_X: u16 = 3;
+const DRAW_BOARD_Y: u16 = 3;
 
 fn draw_board(stdout: &mut Stdout, state: utwid_game::UtwidState) {
     for iy in 0..state.board.height {
@@ -30,18 +31,20 @@ fn draw_board(stdout: &mut Stdout, state: utwid_game::UtwidState) {
                 .actors
                 .values()
                 .find(|actor| actor.x == ix && actor.y == iy)
-                .and_then(|actor| actor.console_repr);
+                .and_then(|actor| actor.console_repr());
+
             queue!(
                 stdout,
                 Print(if let Some(actor_repr) = actor_repr {
                     actor_repr
+                } else if let Some(tile_repr) =
+                    state.board.geography[(ix + iy * state.board.width) as usize].console_repr()
+                {
+                    tile_repr
                 } else {
-                    state.board.geography[(ix + iy * state.board.width) as usize]
-                        .console_repr
-                        .clone()
+                    ' '
                 })
-            )
-            .unwrap()
+            );
         }
     }
 }
