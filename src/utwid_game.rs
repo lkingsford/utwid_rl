@@ -34,15 +34,13 @@ impl State for UtwidState {
     type ActionType = UtwidAction;
 
     fn permitted_actions(&self) -> Vec<Self::ActionType> {
-        let permitted_actions = Vec::new();
         let next_actor = self.actors.get(&self.to_act).unwrap();
-        let available_moves = self.board.permitted_moves(
+        self.board.permitted_moves(
             next_actor.x,
             next_actor.y,
             next_actor.traits.contains(&ActorTrait::CardinalMove),
             next_actor.traits.contains(&ActorTrait::DiagonalMove),
-        );
-        permitted_actions
+        )
     }
 
     fn next_actor(&self) -> Actor<Self::ActionType> {
@@ -76,7 +74,28 @@ impl Action for UtwidAction {
     type StateType = UtwidState;
 
     fn execute(&self, state: &Self::StateType) -> Self::StateType {
-        unimplemented!()
+        let to_act = state.actors.get(&state.to_act).unwrap();
+
+        match self {
+            UtwidAction::N
+            | UtwidAction::S
+            | UtwidAction::E
+            | UtwidAction::E
+            | UtwidAction::NE
+            | UtwidAction::NW
+            | UtwidAction::SE
+            | UtwidAction::SW => self.execute_move(state),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl UtwidAction {
+    fn execute_move(&self, state: &UtwidState) -> UtwidState {
+        let mut state = state.clone();
+        let mut to_act = state.actors.get_mut(&state.to_act).unwrap();
+        (to_act.x, to_act.y) = apply_dir(to_act.x, to_act.y, self.clone());
+        state
     }
 }
 
@@ -119,6 +138,34 @@ pub struct Board {
     pub height: usize,
 }
 
+fn cardinal_dirs() -> Vec<(UtwidAction, isize, isize)> {
+    vec![
+        (UtwidAction::N, 0, -1),
+        (UtwidAction::S, 0, 1),
+        (UtwidAction::E, 1, 0),
+        (UtwidAction::W, -1, 0),
+    ]
+}
+
+fn diagonal_dirs() -> Vec<(UtwidAction, isize, isize)> {
+    vec![
+        (UtwidAction::NE, 1, -1),
+        (UtwidAction::NW, -1, -1),
+        (UtwidAction::SE, 1, 1),
+        (UtwidAction::SW, -1, 1),
+    ]
+}
+
+fn apply_dir(x: usize, y: usize, direction: UtwidAction) -> (usize, usize) {
+    let (_, rx, ry) = cardinal_dirs()
+        .iter()
+        .chain(diagonal_dirs().iter())
+        .find(|(action, _, _)| action == &direction)
+        .unwrap()
+        .clone();
+    (x - rx as usize, y - ry as usize)
+}
+
 impl Board {
     pub fn new() -> Self {
         let width: usize = 11;
@@ -145,24 +192,10 @@ impl Board {
         cardinal: bool,
         diagonal: bool,
     ) -> Vec<UtwidAction> {
-        let cardinal_dirs = [
-            (UtwidAction::N, 0isize, -1),
-            (UtwidAction::S, 0, 1),
-            (UtwidAction::E, 1, 0),
-            (UtwidAction::W, -1, 0),
-        ];
-
-        let diagonal_dirs = [
-            (UtwidAction::NE, 1, -1),
-            (UtwidAction::NW, -1, -1),
-            (UtwidAction::SE, 1, 1),
-            (UtwidAction::SW, -1, 1),
-        ];
-
-        cardinal_dirs
+        cardinal_dirs()
             .iter()
             .filter(|_| cardinal)
-            .chain(diagonal_dirs.iter().filter(|_| diagonal))
+            .chain(diagonal_dirs().iter().filter(|_| diagonal))
             .filter_map(|(action, dx, dy)| {
                 let x = from_x.checked_add_signed(*dx)?;
                 let y = from_y.checked_add_signed(*dy)?;
