@@ -26,13 +26,20 @@ fn draw_board(stdout: &mut Stdout, state: utwid_game::UtwidState) {
     for iy in 0..state.board.height {
         queue!(stdout, MoveTo(DRAW_BOARD_X, (DRAW_BOARD_Y + iy as u16)));
         for ix in 0..state.board.width {
+            let actor_repr = state
+                .actors
+                .values()
+                .find(|actor| actor.x == ix && actor.y == iy)
+                .and_then(|actor| actor.console_repr);
             queue!(
                 stdout,
-                Print(
+                Print(if let Some(actor_repr) = actor_repr {
+                    actor_repr
+                } else {
                     state.board.geography[(ix + iy * state.board.width) as usize]
                         .console_repr
                         .clone()
-                )
+                })
             )
             .unwrap()
         }
@@ -40,11 +47,7 @@ fn draw_board(stdout: &mut Stdout, state: utwid_game::UtwidState) {
 }
 
 fn main() -> std::io::Result<()> {
-    let state = utwid_game::UtwidState {
-        current_level: 0,
-        board: utwid_game::Board::new(),
-        actors: HashMap::from([]),
-    };
+    let state = utwid_game::UtwidState::new();
 
     let board = utwid_game::Board::new();
     let mut stdout = stdout();

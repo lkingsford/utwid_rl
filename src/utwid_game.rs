@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::mon2y::game::{Action, Actor, State};
 use crate::mon2y::Reward;
 
-type ActorId = u64;
+type ActorId = usize; // If I keep using this code, this might need to be u64, or something else
 
 #[derive(Clone)]
 pub struct UtwidState {
@@ -12,7 +12,21 @@ pub struct UtwidState {
     pub actors: HashMap<ActorId, GameActor>,
 }
 
-impl UtwidState {}
+impl UtwidState {
+    pub fn new() -> UtwidState {
+        UtwidState {
+            current_level: 0,
+            board: Board::new(),
+            actors: HashMap::from([(0, GameActor::YouActor())]),
+        }
+    }
+
+    // Urgh - I don't know if I should be using an index here...
+    pub fn add_actor(&mut self, actor: GameActor) -> ActorId {
+        self.actors.insert(self.actors.len(), actor);
+        self.actors.len() - 1
+    }
+}
 
 impl State for UtwidState {
     type ActionType = UtwidAction;
@@ -42,14 +56,9 @@ pub enum UtwidAction {
 impl Action for UtwidAction {
     type StateType = UtwidState;
 
-    fn execute(&self, _state: &Self::StateType) -> Self::StateType {
+    fn execute(&self, state: &Self::StateType) -> Self::StateType {
         unimplemented!()
     }
-}
-
-#[derive(Clone)]
-pub struct GameActor {
-    pub console_repr: Option<Tile>,
 }
 
 #[derive(Clone)]
@@ -86,6 +95,23 @@ impl Board {
             geography,
             width,
             height,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct GameActor {
+    pub console_repr: Option<char>,
+    pub x: u8,
+    pub y: u8,
+}
+
+impl GameActor {
+    fn YouActor() -> GameActor {
+        GameActor {
+            console_repr: Option::Some('@'),
+            x: 1,
+            y: 3,
         }
     }
 }
