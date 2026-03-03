@@ -10,28 +10,40 @@ use std::time::Instant;
 use utwid_rl::utwid_game;
 
 use crossterm::{
-    event, execute,
+    cursor::MoveTo,
+    event, execute, queue,
     style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
+    terminal::{Clear, ClearType},
     ExecutableCommand,
 };
-use std::io::{stdout, Write};
+
+use std::io::{stdout, Stdout, Write};
+
+const DRAW_BOARD_X: u16 = 0;
+const DRAW_BOARD_Y: u16 = 0;
+
+fn draw_board(stdout: &mut Stdout, board: utwid_game::Board) {
+    for iy in 0..board.height {
+        queue!(stdout, MoveTo(DRAW_BOARD_X, (DRAW_BOARD_Y + iy as u16)));
+        for ix in 0..board.width {
+            queue!(
+                stdout,
+                Print(
+                    board.geography[(ix + iy * board.width) as usize]
+                        .console_repr
+                        .clone()
+                )
+            )
+            .unwrap()
+        }
+    }
+}
 
 fn main() -> std::io::Result<()> {
-    // using the macro
-    execute!(
-        stdout(),
-        SetForegroundColor(Color::Blue),
-        SetBackgroundColor(Color::Red),
-        Print("Styled text here."),
-        ResetColor
-    )?;
-
-    // or using functions
-    stdout()
-        .execute(SetForegroundColor(Color::Blue))?
-        .execute(SetBackgroundColor(Color::Red))?
-        .execute(Print("Styled text here."))?
-        .execute(ResetColor)?;
+    let board = utwid_game::Board::new();
+    let mut stdout = stdout();
+    queue!(stdout, Clear(ClearType::All));
+    draw_board(&mut stdout, board);
 
     Ok(())
 }

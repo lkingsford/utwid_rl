@@ -44,33 +44,40 @@ impl Action for UtwidAction {
 
 #[derive(Clone)]
 pub struct Tile {
-    walkable: bool,
-    actors: Vec<Actor<UtwidAction>>,
-    console_repr: char,
+    pub walkable: bool,
+    pub actors: Vec<Actor<UtwidAction>>,
+    pub console_repr: char,
 }
 
 pub struct Board {
-    geography: Vec<Tile>,
-    width: u8,
-    height: u8,
+    pub geography: Vec<Tile>,
+    pub width: u8,
+    pub height: u8,
 }
 
 impl Board {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let width: u8 = 11;
         let height: u8 = 11;
-        let geography = vec![
+        let mut geography = vec![
             Tile {
                 walkable: true,
                 actors: vec![],
-                console_repr: '.'
+                console_repr: '.',
             };
             (width * height) as usize
         ];
+        for ix in 5..11 {
+            geography[(width * 7 + ix) as usize] = Tile {
+                walkable: false,
+                actors: vec![],
+                console_repr: '#',
+            }
+        }
         Board {
             geography,
-            width: width,
-            height: height,
+            width,
+            height,
         }
     }
 }
