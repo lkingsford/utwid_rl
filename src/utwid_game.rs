@@ -1,10 +1,15 @@
+use std::collections::HashMap;
+
 use crate::mon2y::game::{Action, Actor, State};
 use crate::mon2y::Reward;
 
+type ActorId = u64;
+
 #[derive(Clone)]
 pub struct UtwidState {
-    current_level: u8,
-    geography: Vec<Tile>,
+    pub current_level: u8,
+    pub board: Board,
+    pub actors: HashMap<ActorId, GameActor>,
 }
 
 impl UtwidState {}
@@ -43,12 +48,17 @@ impl Action for UtwidAction {
 }
 
 #[derive(Clone)]
+pub struct GameActor {
+    pub console_repr: Option<Tile>,
+}
+
+#[derive(Clone)]
 pub struct Tile {
     pub walkable: bool,
-    pub actors: Vec<Actor<UtwidAction>>,
     pub console_repr: char,
 }
 
+#[derive(Clone)]
 pub struct Board {
     pub geography: Vec<Tile>,
     pub width: u8,
@@ -62,7 +72,6 @@ impl Board {
         let mut geography = vec![
             Tile {
                 walkable: true,
-                actors: vec![],
                 console_repr: '.',
             };
             (width * height) as usize
@@ -70,7 +79,6 @@ impl Board {
         for ix in 5..11 {
             geography[(width * 7 + ix) as usize] = Tile {
                 walkable: false,
-                actors: vec![],
                 console_repr: '#',
             }
         }
