@@ -3,6 +3,9 @@ use std::collections::{HashMap, HashSet};
 use crate::mon2y::game::{Action, Actor, State};
 use crate::mon2y::Reward;
 
+use rand::rngs::ThreadRng;
+use rand::{Rng, RngExt};
+
 type ActorId = usize; // If I keep using this code, this might need to be u64, or something else
 
 #[derive(Clone)]
@@ -15,9 +18,10 @@ pub struct UtwidState {
 
 impl UtwidState {
     pub fn new() -> UtwidState {
+        let mut rng = rand::rng();
         UtwidState {
             current_level: 0,
-            board: Board::new(),
+            board: Board::new(0, &mut rng),
             actors: HashMap::from([(0, GameActor::YouActor())]),
             to_act: 0,
         }
@@ -95,7 +99,23 @@ impl UtwidAction {
         let mut state = state.clone();
         let mut to_act = state.actors.get_mut(&state.to_act).unwrap();
         (to_act.x, to_act.y) = apply_dir(to_act.x, to_act.y, self.clone());
-        state
+        if to_act.traits.contains(&ActorTrait::Human) {
+            let tile = state.board.get(to_act.x, to_act.y);
+
+            tile.traits
+                .iter()
+                .find_map(|trait_| match trait_ {
+                    TileTrait::Stairs => self.execute_stairs(&state, &tile, &to_act),
+                    _ => state,
+                })
+                .or_else({ state })
+        } else {
+            state
+        }
+    }
+
+    fn execute_stairs(&self, state: &UtwidState, tile: &Tile, to_act: &GameActor) -> UtwidState {
+        state.clone()
     }
 }
 
@@ -103,6 +123,7 @@ impl UtwidAction {
 pub enum TileTrait {
     Walkable,
     ConsoleRepr(char),
+    Stairs,
 }
 
 #[derive(Clone)]
@@ -120,6 +141,16 @@ impl Tile {
     fn wall() -> Tile {
         Tile {
             traits: HashSet::from([TileTrait::Walkable, TileTrait::ConsoleRepr('#')]),
+        }
+    }
+
+    fn stair() -> Tile {
+        Tile {
+            traits: HashSet::from([
+                TileTrait::Stairs,
+                TileTrait::Walkable,
+                TileTrait::ConsoleRepr('>'),
+            ]),
         }
     }
 
@@ -167,13 +198,16 @@ fn apply_dir(x: usize, y: usize, direction: UtwidAction) -> (usize, usize) {
 }
 
 impl Board {
-    pub fn new() -> Self {
+    pub fn new(level: usize, rng: &mut ThreadRng) -> Self {
         let width: usize = 11;
         let height: usize = 11;
         let mut geography = vec![Tile::floor(); (width * height) as usize];
         for ix in 5..11 {
             geography[width * 8 + ix] = Tile::wall()
         }
+        let stair_location = (rng.random_range(0..width), rng.random_range(0..height));
+        geography[stair_location.0 + width * stair_location.1] = Tile::stair({ rng });
+
         Board {
             geography,
             width,
