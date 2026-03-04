@@ -3,12 +3,15 @@ mod games;
 mod mon2y;
 mod test;
 
-use utwid_rl::utwid_game;
+use utwid_rl::{
+    mon2y::{calculate_best_turn, game::Action},
+    utwid_game::{self, GameState},
+};
 
 use crossterm::{
     cursor::MoveTo,
     queue,
-    style::{Print},
+    style::Print,
     terminal::{Clear, ClearType},
 };
 
@@ -44,8 +47,25 @@ fn draw_board(stdout: &mut Stdout, state: utwid_game::UtwidState) -> std::io::Re
     Ok(())
 }
 
+const HUMAN_ITERATIONS: usize = 10000;
+const THREADS: usize = 2;
+const EXPLORATION_CONSTANT: f64 = 1.4142135623730951; // sqrt(2.0)
+
 fn main() -> std::io::Result<()> {
-    let state = utwid_game::UtwidState::new();
+    let mut state = utwid_game::UtwidState::new();
+
+    while matches!(state.game_state, GameState::Ongoing) {
+        let next_act = calculate_best_turn(
+            HUMAN_ITERATIONS,
+            None,
+            THREADS,
+            &state,
+            utwid_rl::mon2y::BestTurnPolicy::MostVisits,
+            EXPLORATION_CONSTANT,
+            false,
+        );
+        state = next_act.execute(state);
+    }
 
     let mut stdout = stdout();
     queue!(stdout, Clear(ClearType::All))?;
