@@ -1,8 +1,7 @@
 use super::game::{Action, Actor, State};
 use core::panic;
 use log::{trace, warn};
-use rand::rngs::ThreadRng;
-use rand::Rng;
+use rand::prelude::*;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
@@ -334,7 +333,7 @@ where
                         let u: f64 = (parent_visits.ln() / visit_count).sqrt();
                         // Random used to break ties
                         // Todo: Cache the rng
-                        let r: f64 = rand::thread_rng().gen::<f64>() * RANDOM_FACTOR;
+                        let r: f64 = rand::rng().random::<f64>() * RANDOM_FACTOR;
                         let ucb: f64 = q + constant * u + r;
                         trace!(
                             "UCB action: {:?}, value_sum: {}, visit_count: {}, parent_visits: {}, q: {}, u: {}, c: {} ucb: {}",

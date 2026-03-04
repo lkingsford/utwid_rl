@@ -4,7 +4,7 @@ use super::weighted_random::weighted_random;
 use super::Reward;
 use core::panic;
 use log::trace;
-use rand::{Rng, thread_rng};
+use rand::prelude::*;
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug, PartialEq)]
@@ -156,7 +156,7 @@ where
     }
 
     pub fn play_out(&self, state: StateType) -> Vec<Reward> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let mut cur_state = Box::new(state.clone());
 
@@ -166,7 +166,7 @@ where
                     let permitted_actions = cur_state.permitted_actions();
 
                     let action: ActionType =
-                        permitted_actions[rng.gen_range(0..permitted_actions.len())].clone();
+                        permitted_actions[rng.random_range(0..permitted_actions.len())].clone();
                     cur_state = Box::new(action.execute(&cur_state));
                 }
                 Actor::GameAction(actions) => {

@@ -5,9 +5,7 @@ use std::rc::Rc;
 use crate::mon2y::game::{Action, Actor, State};
 use crate::mon2y::Reward;
 
-use rand::rngs::ThreadRng;
-use rand::thread_rng;
-use rand::Rng;
+use rand::prelude::*;
 
 type ActorId = usize; // If I keep using this code, this might need to be u64, or something else
 
@@ -17,24 +15,17 @@ pub struct UtwidState {
     pub board: Board,
     pub actors: HashMap<ActorId, GameActor>,
     pub to_act: ActorId,
-    pub rng: Rc<RefCell<ThreadRng>>,
 }
 
 impl UtwidState {
     pub fn new() -> UtwidState {
-        let rng_rc = Rc::new(RefCell::new(thread_rng()));
-
-        let board = {
-            let mut rng_borrow = rng_rc.borrow_mut();
-            Board::new(0, &mut *rng_borrow)
-        };
+        let board = { Board::new(0, &mut rand::rng()) };
 
         UtwidState {
             current_level: 0,
             board: board, // Use the pre-created board
             actors: HashMap::from([(0, GameActor::you_actor())]),
             to_act: 0,
-            rng: rng_rc,
         }
     }
 
@@ -130,7 +121,10 @@ impl UtwidAction {
     }
 
     fn execute_stairs(&self, state: &UtwidState, _tile: &Tile, _to_act: &GameActor) -> UtwidState {
-        state.clone()
+        let mut new_state = state.clone();
+        new_state.board = Board::new(state.current_level + 1, &mut state.board.rng.clone());
+        let actor = new_state.actors.get(&0).unwrap();
+        new_state
     }
 }
 
@@ -182,6 +176,7 @@ pub struct Board {
     pub geography: Vec<Tile>,
     pub width: usize,
     pub height: usize,
+    pub rng: ThreadRng,
 }
 
 fn cardinal_dirs() -> Vec<(UtwidAction, isize, isize)> {
@@ -220,13 +215,15 @@ impl Board {
         for ix in 5..11 {
             geography[width * 8 + ix] = Tile::wall()
         }
-        let stair_location = (rng.gen_range(0..width), rng.gen_range(0..height));
+        let stair_location = (rng.random_range(0..width), rng.random_range(0..height));
         geography[stair_location.0 + width * stair_location.1] = Tile::stair();
 
+        let rng = rng.clone();
         Board {
             geography,
             width,
             height,
+            rng,
         }
     }
 
