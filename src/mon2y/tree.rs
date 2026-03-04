@@ -4,7 +4,7 @@ use super::weighted_random::weighted_random;
 use super::Reward;
 use core::panic;
 use log::trace;
-use rand::Rng;
+use rand::{Rng, thread_rng};
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug, PartialEq)]

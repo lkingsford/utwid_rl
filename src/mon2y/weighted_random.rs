@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::{Rng, thread_rng};
 
 pub fn weighted_random<T>(items: Vec<(T, u32)>) -> T {
     let total_weight: u32 = items.iter().map(|(_, weight)| weight).sum();
