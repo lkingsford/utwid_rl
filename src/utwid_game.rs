@@ -16,6 +16,8 @@ pub enum GameState {
     Lost,
 }
 
+const YOU_ID: usize = 0;
+
 #[derive(Clone)]
 pub struct UtwidState {
     pub current_level: usize,
@@ -23,6 +25,8 @@ pub struct UtwidState {
     pub actors: HashMap<ActorId, GameActor>,
     pub to_act: ActorId,
     pub game_state: GameState,
+    pub turn_order: Vec<ActorId>,
+    pub turn_number: usize,
 }
 
 impl UtwidState {
@@ -35,13 +39,17 @@ impl UtwidState {
             actors: HashMap::from([(0, GameActor::you_actor())]),
             to_act: 0,
             game_state: GameState::Ongoing,
+            turn_number: 0,
+            turn_order: vec![0],
         }
     }
 
     // Urgh - I don't know if I should be using an index here...
     pub fn add_actor(&mut self, actor: GameActor) -> ActorId {
         self.actors.insert(self.actors.len(), actor);
-        self.actors.len() - 1
+        let id = self.actors.len() - 1;
+        self.turn_order.push(id);
+        id
     }
 
     pub fn mon2y_high_actor_id(&self) -> u8 {
@@ -106,7 +114,11 @@ impl State for UtwidState {
     fn reward(&self) -> Vec<Reward> {
         let max_actor_id = self.mon2y_high_actor_id() as usize;
         match self.game_state {
-            GameState::Ongoing => vec![0.0; max_actor_id + 1],
+            GameState::Ongoing => vec![
+                1.0 + self.current_level as f64 / 20.0
+                    - self.turn_number as f64 / 10000.0;
+                max_actor_id + 1
+            ],
             GameState::Lost => [vec![-1.0], vec![1.0; max_actor_id]].concat(),
             GameState::Won => [vec![1.0], vec![-1.0; max_actor_id]].concat(),
         }
@@ -131,7 +143,7 @@ impl Action for UtwidAction {
     type StateType = UtwidState;
 
     fn execute(&self, state: &Self::StateType) -> Self::StateType {
-        match self {
+        let mut new_state = match self {
             UtwidAction::N
             | UtwidAction::S
             | UtwidAction::E
@@ -139,8 +151,21 @@ impl Action for UtwidAction {
             | UtwidAction::NW
             | UtwidAction::SE
             | UtwidAction::SW => self.execute_move(state),
+            UtwidAction::Wait => state.clone(),
             _ => unimplemented!(),
+        };
+        if state
+            .actors
+            .get(&state.to_act)
+            .unwrap()
+            .traits
+            .contains(&ActorTrait::Human)
+        {
+            new_state.turn_number += 1;
         }
+        new_state.to_act = new_state.turn_order.pop().unwrap();
+        new_state.turn_order.push(state.to_act);
+        new_state
     }
 }
 
