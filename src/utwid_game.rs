@@ -43,6 +43,28 @@ impl UtwidState {
         self.actors.insert(self.actors.len(), actor);
         self.actors.len() - 1
     }
+
+    pub fn mon2y_high_actor_id(&self) -> u8 {
+        self.actors
+            .iter()
+            .map(|actor| {
+                actor
+                    .1
+                    .traits
+                    .iter()
+                    .map(|_trait| match _trait {
+                        ActorTrait::Mon2y {
+                            tree_id,
+                            iterations,
+                        } => tree_id.clone(),
+                        _ => 0,
+                    })
+                    .max()
+                    .unwrap_or(0)
+            })
+            .max()
+            .unwrap_or(0)
+    }
 }
 
 impl State for UtwidState {
@@ -59,15 +81,35 @@ impl State for UtwidState {
     }
 
     fn next_actor(&self) -> Actor<Self::ActionType> {
-        unimplemented!()
+        let next_actor = self.actors.get(&self.to_act).unwrap();
+        next_actor
+            .traits
+            .iter()
+            .find_map(|_trait| match _trait {
+                ActorTrait::Human => Some(Actor::Player(0)),
+                ActorTrait::Mon2y {
+                    tree_id,
+                    iterations,
+                } => Some(Actor::Player(*tree_id)),
+                _ => None,
+            })
+            .unwrap()
     }
 
     fn terminal(&self) -> bool {
-        unimplemented!()
+        match self.game_state {
+            GameState::Ongoing => true,
+            _ => false,
+        }
     }
 
     fn reward(&self) -> Vec<Reward> {
-        unimplemented!()
+        let max_actor_id = self.mon2y_high_actor_id() as usize;
+        match self.game_state {
+            GameState::Ongoing => vec![0.0; max_actor_id + 1],
+            GameState::Lost => [vec![-1.0], vec![1.0; max_actor_id]].concat(),
+            GameState::Won => [vec![1.0], vec![-1.0; max_actor_id]].concat(),
+        }
     }
 }
 
@@ -285,7 +327,7 @@ impl Board {
 #[derive(Clone, PartialEq, PartialOrd, Eq, Hash)]
 pub enum ActorTrait {
     Human,
-    Mon2y { iterations: usize },
+    Mon2y { tree_id: u8, iterations: usize },
     CardinalMove,
     DiagonalMove,
     Wait,
@@ -297,7 +339,6 @@ pub struct GameActor {
     pub x: usize,
     pub y: usize,
     pub traits: HashSet<ActorTrait>,
-    pub actor: Actor<UtwidState>,
 }
 
 impl GameActor {
@@ -330,7 +371,10 @@ impl GameActor {
             y: 7,
             traits: HashSet::from([
                 ActorTrait::ConsoleRepr('&'),
-                ActorTrait::Mon2y { iterations: 1000 },
+                ActorTrait::Mon2y {
+                    tree_id: 1,
+                    iterations: 1000,
+                },
                 ActorTrait::CardinalMove,
                 ActorTrait::DiagonalMove,
                 ActorTrait::Wait,
