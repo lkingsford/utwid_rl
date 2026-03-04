@@ -10,11 +10,19 @@ use rand::prelude::*;
 type ActorId = usize; // If I keep using this code, this might need to be u64, or something else
 
 #[derive(Clone)]
+pub enum GameState {
+    Ongoing,
+    Won,
+    Lost,
+}
+
+#[derive(Clone)]
 pub struct UtwidState {
     pub current_level: usize,
     pub board: Board,
     pub actors: HashMap<ActorId, GameActor>,
     pub to_act: ActorId,
+    pub game_state: GameState,
 }
 
 impl UtwidState {
@@ -26,6 +34,7 @@ impl UtwidState {
             board: board, // Use the pre-created board
             actors: HashMap::from([(0, GameActor::you_actor())]),
             to_act: 0,
+            game_state: GameState::Ongoing,
         }
     }
 
@@ -112,6 +121,7 @@ impl UtwidAction {
                 .iter()
                 .find_map(|trait_| match trait_ {
                     TileTrait::Stairs => Some(self.execute_stairs(&new_state, &tile, actor_ref)),
+                    TileTrait::Win => Some(self.execute_win(&new_state)),
                     _ => None,
                 })
                 .unwrap_or(new_state)
@@ -126,6 +136,12 @@ impl UtwidAction {
         let actor = new_state.actors.get(&0).unwrap();
         new_state
     }
+
+    fn execute_win(&self, state: &UtwidState) -> UtwidState {
+        let mut new_state = state.clone();
+        new_state.game_state = GameState::Won;
+        new_state
+    }
 }
 
 #[derive(Clone, PartialEq, PartialOrd, Eq, Hash)]
@@ -133,6 +149,7 @@ pub enum TileTrait {
     Walkable,
     ConsoleRepr(char),
     Stairs,
+    Win,
 }
 
 #[derive(Clone)]
@@ -160,6 +177,12 @@ impl Tile {
                 TileTrait::Walkable,
                 TileTrait::ConsoleRepr('>'),
             ]),
+        }
+    }
+
+    fn win() -> Tile {
+        Tile {
+            traits: HashSet::from([TileTrait::ConsoleRepr('W'), TileTrait::Win]),
         }
     }
 
@@ -216,7 +239,11 @@ impl Board {
             geography[width * 8 + ix] = Tile::wall()
         }
         let stair_location = (rng.random_range(0..width), rng.random_range(0..height));
-        geography[stair_location.0 + width * stair_location.1] = Tile::stair();
+        geography[stair_location.0 + width * stair_location.1] = if (_level < 10) {
+            Tile::stair()
+        } else {
+            Tile::win()
+        };
 
         let rng = rng.clone();
         Board {
@@ -270,6 +297,7 @@ pub struct GameActor {
     pub x: usize,
     pub y: usize,
     pub traits: HashSet<ActorTrait>,
+    pub actor: Actor<UtwidState>,
 }
 
 impl GameActor {
