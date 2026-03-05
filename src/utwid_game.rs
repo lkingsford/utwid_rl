@@ -148,6 +148,7 @@ impl Action for UtwidAction {
             UtwidAction::N
             | UtwidAction::S
             | UtwidAction::E
+            | UtwidAction::W
             | UtwidAction::NE
             | UtwidAction::NW
             | UtwidAction::SE
@@ -289,13 +290,19 @@ fn diagonal_dirs() -> Vec<(UtwidAction, isize, isize)> {
 }
 
 fn apply_dir(x: usize, y: usize, direction: UtwidAction) -> (usize, usize) {
-    let (_, rx, ry) = cardinal_dirs()
+    let (_, dx, dy) = cardinal_dirs()
         .iter()
         .chain(diagonal_dirs().iter())
         .find(|(action, _, _)| action == &direction)
         .unwrap()
         .clone();
-    (x - rx as usize, y - ry as usize)
+
+    // Perform arithmetic with isize to handle negative deltas correctly
+    let new_x = (x as isize + dx);
+    let new_y = (y as isize + dy);
+
+    // These should always be non-negative due to prior filtering by permitted_moves
+    (new_x as usize, new_y as usize)
 }
 
 impl Board {
@@ -338,13 +345,17 @@ impl Board {
             .filter(|_| cardinal)
             .chain(diagonal_dirs().iter().filter(|_| diagonal))
             .filter_map(|(action, dx, dy)| {
-                let x = from_x.checked_add_signed(*dx)?;
-                let y = from_y.checked_add_signed(*dy)?;
+                let x = from_x as isize + *dx as isize;
+                let y = from_y as isize + *dy as isize;
 
-                self.get(x, y)
-                    .traits
-                    .contains(&TileTrait::Walkable)
-                    .then_some(*action)
+                if x >= 0 && (x as usize) < self.width && y >= 0 && (y as usize) < self.height {
+                    self.get(x as usize, y as usize)
+                        .traits
+                        .contains(&TileTrait::Walkable)
+                        .then_some(*action)
+                } else {
+                    None
+                }
             })
             .collect()
     }
