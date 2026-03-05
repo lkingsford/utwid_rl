@@ -15,7 +15,7 @@ use crossterm::{
     terminal::{Clear, ClearType},
 };
 
-use std::io::{stdout, Stdout};
+use std::io::{stdout, Stdout, Write};
 
 const DRAW_BOARD_X: u16 = 3;
 const DRAW_BOARD_Y: u16 = 3;
@@ -47,12 +47,13 @@ fn draw_board(stdout: &mut Stdout, state: utwid_game::UtwidState) -> std::io::Re
     Ok(())
 }
 
-const HUMAN_ITERATIONS: usize = 10000;
-const THREADS: usize = 2;
+const HUMAN_ITERATIONS: usize = 100000;
+const THREADS: usize = 4;
 const EXPLORATION_CONSTANT: f64 = 1.4142135623730951; // sqrt(2.0)
 
 fn main() -> std::io::Result<()> {
     let mut state = utwid_game::UtwidState::new();
+    let mut stdout = stdout();
 
     while matches!(state.game_state, GameState::Ongoing) {
         let next_act = calculate_best_turn(
@@ -65,11 +66,10 @@ fn main() -> std::io::Result<()> {
             false,
         );
         state = next_act.execute(&state);
+        queue!(stdout, Clear(ClearType::All))?;
+        draw_board(&mut stdout, state.clone())?;
+        stdout.flush();
     }
-
-    let mut stdout = stdout();
-    queue!(stdout, Clear(ClearType::All))?;
-    draw_board(&mut stdout, state)?;
 
     Ok(())
 }
