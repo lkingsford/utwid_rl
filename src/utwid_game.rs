@@ -1,11 +1,11 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
 use crate::mon2y::game::{Action, Actor, State};
 use crate::mon2y::Reward;
 
 use rand::prelude::*;
+use rand::rngs::Xoshiro256PlusPlus;
 
 type ActorId = usize; // If I keep using this code, this might need to be u64, or something else
 
@@ -31,7 +31,8 @@ pub struct UtwidState {
 
 impl UtwidState {
     pub fn new() -> UtwidState {
-        let board = { Board::new(0, &mut rand::rng()) };
+        let mut rng = rand::make_rng();
+        let board = { Board::new(0, &mut rng) };
 
         UtwidState {
             current_level: 0,
@@ -266,7 +267,7 @@ pub struct Board {
     pub geography: Vec<Tile>,
     pub width: usize,
     pub height: usize,
-    pub rng: ThreadRng,
+    pub rng: SmallRng,
 }
 
 fn cardinal_dirs() -> Vec<(UtwidAction, isize, isize)> {
@@ -298,7 +299,7 @@ fn apply_dir(x: usize, y: usize, direction: UtwidAction) -> (usize, usize) {
 }
 
 impl Board {
-    pub fn new(_level: usize, rng: &mut ThreadRng) -> Self {
+    pub fn new(_level: usize, rng: &mut SmallRng) -> Self {
         let width: usize = 11;
         let height: usize = 11;
         let mut geography = vec![Tile::floor(); (width * height) as usize];

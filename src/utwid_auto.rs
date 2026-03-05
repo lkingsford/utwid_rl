@@ -59,12 +59,12 @@ fn main() -> std::io::Result<()> {
             HUMAN_ITERATIONS,
             None,
             THREADS,
-            &state,
+            state.clone(),
             utwid_rl::mon2y::BestTurnPolicy::MostVisits,
             EXPLORATION_CONSTANT,
             false,
         );
-        state = next_act.execute(state);
+        state = next_act.execute(&state);
     }
 
     let mut stdout = stdout();
