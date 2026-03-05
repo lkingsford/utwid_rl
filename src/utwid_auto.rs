@@ -1,7 +1,11 @@
+use clap::Parser;
+use env_logger::fmt::Formatter;
+use log::Record;
 mod game;
 mod games;
 mod mon2y;
 mod test;
+use std::{fs, thread};
 
 use utwid_rl::{
     mon2y::{calculate_best_turn, game::Action},
@@ -47,15 +51,40 @@ fn draw_board(stdout: &mut Stdout, state: utwid_game::UtwidState) -> std::io::Re
     Ok(())
 }
 
-const HUMAN_ITERATIONS: usize = 100000;
-const THREADS: usize = 4;
+const HUMAN_ITERATIONS: usize = 50000;
+const THREADS: usize = 6;
 const EXPLORATION_CONSTANT: f64 = 1.4142135623730951; // sqrt(2.0)
 
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg()]
+    config_file: Vec<String>,
+    #[command(flatten)]
+    verbose: clap_verbosity_flag::Verbosity,
+}
 fn main() -> std::io::Result<()> {
+    let args = Args::parse();
+    env_logger::Builder::new()
+        .format(|buf: &mut Formatter, record: &Record| {
+            let thread_id = thread::current().id();
+            let timestamp = buf.timestamp_millis();
+            writeln!(
+                buf,
+                "[{}] [Thread: {:?}] [{}] - {}",
+                timestamp,
+                thread_id,
+                record.level(),
+                record.args()
+            )
+        })
+        .filter_level(args.verbose.log_level_filter())
+        .init();
+
     let mut state = utwid_game::UtwidState::new();
     let mut stdout = stdout();
 
-    while matches!(state.game_state, GameState::Ongoing) {
+    while matches!(state.game_state, GameState::Ongoing | GameState::Checkpoint) {
         let next_act = calculate_best_turn(
             HUMAN_ITERATIONS,
             None,

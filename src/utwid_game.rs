@@ -14,6 +14,7 @@ pub enum GameState {
     Ongoing,
     Won,
     Lost,
+    Checkpoint,
 }
 
 const YOU_ID: usize = 0;
@@ -106,22 +107,23 @@ impl State for UtwidState {
     }
 
     fn terminal(&self) -> bool {
-        match self.game_state {
-            GameState::Ongoing => true,
-            _ => false,
-        }
+        !matches!(self.game_state, GameState::Ongoing)
     }
 
     fn reward(&self) -> Vec<Reward> {
         let max_actor_id = self.mon2y_high_actor_id() as usize;
         match self.game_state {
-            GameState::Ongoing => vec![
-                1.0 + self.current_level as f64 / 20.0
-                    - self.turn_number as f64 / 10000.0;
-                max_actor_id + 1
-            ],
+            GameState::Ongoing | GameState::Checkpoint => [
+                vec![1.0 + self.current_level as f64 / 20.0],
+                vec![-0.5; max_actor_id],
+            ]
+            .concat(),
             GameState::Lost => [vec![-1.0], vec![1.0; max_actor_id]].concat(),
-            GameState::Won => [vec![1.0], vec![-1.0; max_actor_id]].concat(),
+            GameState::Won => [
+                vec![1.0 - self.turn_number as f64 / 100000.0],
+                vec![-1.0; max_actor_id],
+            ]
+            .concat(),
         }
     }
 }
@@ -165,6 +167,11 @@ impl Action for UtwidAction {
         {
             new_state.turn_number += 1;
         }
+        if matches!(state.game_state, GameState::Checkpoint)
+            && matches!(new_state.game_state, GameState::Checkpoint)
+        {
+            new_state.game_state = GameState::Ongoing;
+        }
         new_state.to_act = new_state.turn_order.pop().unwrap();
         new_state.turn_order.push(state.to_act);
         new_state
@@ -201,6 +208,7 @@ impl UtwidAction {
 
     fn execute_stairs(&self, state: &UtwidState, _tile: &Tile, _to_act: &GameActor) -> UtwidState {
         let mut new_state = state.clone();
+        new_state.game_state = GameState::Checkpoint;
         new_state.board = Board::new(state.current_level + 1, &mut state.board.rng.clone());
         let actor = new_state.actors.get(&0).unwrap();
         new_state
@@ -235,7 +243,7 @@ impl Tile {
 
     fn wall() -> Tile {
         Tile {
-            traits: HashSet::from([TileTrait::Walkable, TileTrait::ConsoleRepr('#')]),
+            traits: HashSet::from([TileTrait::ConsoleRepr('#')]),
         }
     }
 
