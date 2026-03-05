@@ -184,25 +184,23 @@ where
         nodes: Vec<Arc<RwLock<Node<StateType, ActionType>>>>,
         reward: Vec<Reward>,
     ) {
-        let mut previous_node = nodes[0].clone();
-        for node in nodes[1..].iter() {
-            {
-                let actor = {
-                    let read_previous = previous_node.read().unwrap();
-                    if let Node::Expanded { .. } = &*read_previous {
-                        read_previous.state().next_actor()
-                    } else {
-                        panic!("Attempting to propagate to a placeholder node");
-                    }
-                };
+        for node_arc in nodes.iter() {
+            let (actor, is_expanded) = {
+                let node = node_arc.read().unwrap();
+                if let Node::Expanded { state, .. } = &*node {
+                    (state.next_actor(), true)
+                } else {
+                    (Actor::Player(0), false) // Actor doesn't matter, won't be visited
+                }
+            };
 
-                let mut cur_node = node.write().unwrap();
+            if is_expanded {
+                let mut cur_node = node_arc.write().unwrap();
                 cur_node.visit(match actor {
                     Actor::Player(player_id) => *reward.get(player_id as usize).unwrap_or(&0.0),
                     _ => 0.0,
                 })
             }
-            previous_node = node.clone();
         }
     }
 
