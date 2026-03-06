@@ -31,12 +31,14 @@ pub struct UtwidState {
     pub turn_number: usize,
     pub short_circuit_at_turns: Option<usize>,
     pub ai_turn_weight: f64,
+    pub spawn_rng: SmallRng,
 }
 
 impl UtwidState {
     pub fn new() -> UtwidState {
-        let mut rng = rand::make_rng();
-        let board = { Board::new(0, &mut rng) };
+        let mut board_rng = rand::make_rng();
+        let mut spawn_rng = rand::make_rng();
+        let board = { Board::new(0, &mut board_rng) };
 
         UtwidState {
             current_level: 0,
@@ -48,6 +50,7 @@ impl UtwidState {
             turn_order: vec![0],
             short_circuit_at_turns: None,
             ai_turn_weight: 0.0,
+            spawn_rng,
         }
     }
 
@@ -79,6 +82,29 @@ impl UtwidState {
             })
             .max()
             .unwrap_or(0)
+    }
+
+    fn suggest_spawn(&mut self) -> (usize, usize) {
+        let mut result: Option<(usize, usize)> = None;
+        while result.is_none() {
+            let (x, y) = (
+                self.spawn_rng.random_range(0..self.board.width),
+                self.spawn_rng.random_range(0..self.board.height),
+            );
+            result = if self.actor_in_space(x, y).is_some() {
+                None
+            } else {
+                Some((x, y))
+            }
+        }
+        result.unwrap()
+    }
+
+    fn actor_in_space(&self, x: usize, y: usize) -> Option<&GameActor> {
+        self.actors
+            .iter()
+            .map(|actor| actor.1)
+            .find(|actor| actor.x == x && actor.y == y)
     }
 }
 
@@ -188,6 +214,15 @@ impl Action for UtwidAction {
                     new_state.game_state = GameState::Mon2yShortcircuit;
                 }
             }
+
+            if (new_state.turn_number % 11) == 0 {
+                let spawn = new_state.suggest_spawn();
+                new_state.add_actor(GameActor::are_actor(spawn.0, spawn.1));
+            }
+            if (new_state.turn_number % 13) == 0 {
+                let spawn = new_state.suggest_spawn();
+                new_state.add_actor(GameActor::them_actor(spawn.0, spawn.1));
+            }
         }
         if matches!(state.game_state, GameState::Checkpoint)
             && matches!(new_state.game_state, GameState::Checkpoint)
@@ -205,17 +240,39 @@ impl UtwidAction {
         let mut new_state = state.clone();
         let actor_id = new_state.to_act;
 
-        let actor = new_state.actors.get_mut(&actor_id).unwrap();
-        let new_coords = apply_dir(actor.x, actor.y, *self);
+        let (new_coords, damage) = {
+            let actor = new_state.actors.get_mut(&actor_id).unwrap();
+            (
+                apply_dir(actor.x, actor.y, *self),
+                actor
+                    .traits
+                    .iter()
+                    .map(|trait_| match trait_ {
+                        ActorTrait::Attack { damage } => (*damage).clone() as isize,
+                        _ => 0,
+                    })
+                    .sum::<isize>()
+                    * -1,
+            )
+        };
 
-        let actor_on_space = state
+        for actor in new_state
+            .actors
+            .iter_mut()
+            .map(|actor| actor.1)
+            .filter(|actor| actor.x == new_coords.0 && actor.y == new_coords.1)
+        {
+            actor.modify_health(damage);
+        }
+
+        if new_state
             .actors
             .iter()
             .map(|actor| actor.1)
-            .find(|actor| actor.x == new_coords.0 && actor.y == new_coords.1);
-        if actor_on_space.is_some() {
-            // attack
-        } else {
+            .find(|actor| actor.x == new_coords.0 && actor.y == new_coords.1)
+            .is_none()
+        {
+            let actor = new_state.actors.get_mut(&actor_id).unwrap();
             (actor.x, actor.y) = new_coords;
         }
 
@@ -512,7 +569,7 @@ impl GameActor {
                 },
                 ActorTrait::CardinalMove,
                 ActorTrait::Health(2),
-                ActorTrait::ConsoleRepr('t'),
+                ActorTrait::ConsoleRepr('r'),
             ]),
         }
     }
