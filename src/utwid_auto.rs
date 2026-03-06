@@ -51,6 +51,34 @@ fn draw_board(stdout: &mut Stdout, state: utwid_game::UtwidState) -> std::io::Re
     Ok(())
 }
 
+fn draw_monsters(stdout: &mut Stdout, state: &utwid_game::UtwidState) -> std::io::Result<()> {
+    for (i, actor_id) in state.turn_order.iter().enumerate() {
+        if let Some(actor) = state.actors.get(actor_id) {
+            queue!(
+                stdout,
+                MoveTo(DRAW_MONSTER_X, DRAW_MONSTER_Y + i as u16),
+                Print(format!(
+                    "{} ({}, {}) - {}",
+                    actor.console_repr().unwrap_or(' '),
+                    actor.x,
+                    actor.y,
+                    actor.traits.iter().find_map(|t| {
+                        if let utwid_game::ActorTrait::Health(h) = t {
+                            Some(*h)
+                        } else {
+                            None
+                        }
+                    }).unwrap_or(0)
+                ))
+            )?;
+        }
+    }
+    Ok(())
+}
+
+const DRAW_MONSTER_X: u16 = 20;
+const DRAW_MONSTER_Y: u16 = 2;
+
 const HUMAN_ITERATIONS: usize = 10000;
 const THREADS: usize = 6;
 const EXPLORATION_CONSTANT: f64 = 1.4142135623730951; // sqrt(2.0)
@@ -89,6 +117,7 @@ fn main() -> std::io::Result<()> {
     while matches!(state.game_state, GameState::Ongoing | GameState::Checkpoint) {
         queue!(stdout, Clear(ClearType::All))?;
         draw_board(&mut stdout, state.clone())?;
+        draw_monsters(&mut stdout, &state)?;
         stdout.flush();
         let next_act = calculate_best_turn(
             {

@@ -9,7 +9,7 @@ use rand::rngs::Xoshiro256PlusPlus;
 
 type ActorId = usize; // If I keep using this code, this might need to be u64, or something else
 
-#[derive(Clone, std::fmt::Debug)]
+#[derive(Clone, std::fmt::Debug, PartialEq)]
 pub enum GameState {
     Ongoing,
     Won,
@@ -231,27 +231,57 @@ impl Action for UtwidAction {
         }
 
         // Bring out yer dead!
+        let mut dead_actor_ids: Vec<ActorId> = Vec::new();
         for (actor_id, actor) in new_state
             .actors
-            .clone() // Necessary?
             .iter()
             .filter(|actor| actor.1.traits.contains(&ActorTrait::Dead))
         {
-            new_state.actors.remove(&actor_id);
+            dead_actor_ids.push(*actor_id);
             if actor.traits.contains(&ActorTrait::Human) {
                 new_state.game_state = GameState::Lost;
             }
-            // This feels inefficient
-            new_state.turn_order = new_state
-                .turn_order
-                .iter()
-                .filter(|id| *id != actor_id)
-                .map(|id| id.clone())
-                .collect();
         }
 
-        new_state.to_act = new_state.turn_order.pop_front().unwrap();
-        new_state.turn_order.push_back(state.to_act);
+        // Remove dead actors from the actors map
+        for actor_id in &dead_actor_ids {
+            new_state.actors.remove(actor_id);
+        }
+
+        // Filter dead actors from the turn order
+        new_state
+            .turn_order
+            .retain(|id| !dead_actor_ids.contains(id));
+
+        // If the game is already in a terminal state (e.g., player died),
+        // we don't need to determine the next actor or update turn order further.
+        if new_state.game_state != GameState::Ongoing
+            && new_state.game_state != GameState::Checkpoint
+        {
+            return new_state;
+        }
+
+        // If the turn order is empty after removing dead actors, game is over.
+        if new_state.turn_order.is_empty() {
+            new_state.game_state = GameState::Lost; // Or Won, depending on game rules
+
+            return new_state;
+        }
+
+        // Rotate turn order: The actor that just acted (state.to_act) moves to the back.
+        // It's expected that state.to_act is at the front of new_state.turn_order.
+        let actor_from_front_of_queue = new_state.turn_order.pop_front();
+
+        if let Some(actor_id_who_just_acted) = actor_from_front_of_queue {
+            // If the actor who just acted is still alive, push them to the back of the queue.
+            if new_state.actors.contains_key(&actor_id_who_just_acted) {
+                new_state.turn_order.push_back(actor_id_who_just_acted);
+            }
+        }
+        // If the queue became empty at this point, the game is over and handled by earlier checks.
+        // If not, the new front of the queue is the next actor to act.
+        new_state.to_act = new_state.turn_order.front().cloned().expect("Turn order should not be empty after rotation if game is ongoing.");
+
         new_state
     }
 }
@@ -575,7 +605,7 @@ impl GameActor {
             traits: HashSet::from([
                 ActorTrait::Mon2y {
                     tree_id: 1,
-                    iterations: 100,
+                    iterations: 5000,
                 },
                 ActorTrait::DiagonalMove,
                 ActorTrait::Health(2),
@@ -592,7 +622,7 @@ impl GameActor {
             traits: HashSet::from([
                 ActorTrait::Mon2y {
                     tree_id: 1,
-                    iterations: 100,
+                    iterations: 5000,
                 },
                 ActorTrait::CardinalMove,
                 ActorTrait::Health(2),
