@@ -9,12 +9,13 @@ use rand::rngs::Xoshiro256PlusPlus;
 
 type ActorId = usize; // If I keep using this code, this might need to be u64, or something else
 
-#[derive(Clone)]
+#[derive(Clone, std::fmt::Debug)]
 pub enum GameState {
     Ongoing,
     Won,
     Lost,
     Checkpoint,
+    Mon2yShortcircuit,
 }
 
 const YOU_ID: usize = 0;
@@ -28,6 +29,8 @@ pub struct UtwidState {
     pub game_state: GameState,
     pub turn_order: Vec<ActorId>,
     pub turn_number: usize,
+    pub short_circuit_at_turns: Option<usize>,
+    pub ai_turn_weight: f64,
 }
 
 impl UtwidState {
@@ -43,6 +46,8 @@ impl UtwidState {
             game_state: GameState::Ongoing,
             turn_number: 0,
             turn_order: vec![0],
+            short_circuit_at_turns: None,
+            ai_turn_weight: 0.0,
         }
     }
 
@@ -107,24 +112,33 @@ impl State for UtwidState {
     }
 
     fn terminal(&self) -> bool {
-        !matches!(self.game_state, GameState::Ongoing)
+        match self.game_state {
+            GameState::Ongoing => false,
+            GameState::Checkpoint => true,
+            _ => true,
+        }
     }
 
     fn reward(&self) -> Vec<Reward> {
         let max_actor_id = self.mon2y_high_actor_id() as usize;
-        match self.game_state {
-            GameState::Ongoing | GameState::Checkpoint => [
-                vec![1.0 + self.current_level as f64 / 20.0],
+
+        let reward = match self.game_state {
+            GameState::Checkpoint => [
+                vec![(1.0 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight)],
+                vec![-0.5; max_actor_id],
+            ]
+            .concat(),
+            GameState::Mon2yShortcircuit => [
+                vec![(0.5 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight)],
                 vec![-0.5; max_actor_id],
             ]
             .concat(),
             GameState::Lost => [vec![-1.0], vec![1.0; max_actor_id]].concat(),
-            GameState::Won => [
-                vec![1.0 - self.turn_number as f64 / 100000.0],
-                vec![-1.0; max_actor_id],
-            ]
-            .concat(),
-        }
+            GameState::Won => [vec![1.0 - self.ai_turn_weight], vec![-1.0; max_actor_id]].concat(),
+            _ => vec![0.0; max_actor_id + 1],
+        };
+        log::trace!("AI Weight: {}, Reward {:?}", self.ai_turn_weight, reward);
+        reward
     }
 }
 
@@ -141,6 +155,8 @@ pub enum UtwidAction {
     SW,
     Wait,
 }
+
+const AI_TURN_WEIGHT: f64 = 1.0 / 100.0;
 
 impl Action for UtwidAction {
     type StateType = UtwidState;
@@ -166,6 +182,12 @@ impl Action for UtwidAction {
             .contains(&ActorTrait::Human)
         {
             new_state.turn_number += 1;
+            new_state.ai_turn_weight += AI_TURN_WEIGHT;
+            if let Some(i) = new_state.short_circuit_at_turns {
+                if i > new_state.turn_number {
+                    new_state.game_state = GameState::Mon2yShortcircuit;
+                }
+            }
         }
         if matches!(state.game_state, GameState::Checkpoint)
             && matches!(new_state.game_state, GameState::Checkpoint)

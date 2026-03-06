@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use log::trace;
 
+
 use crate::mon2y::game::Actor;
 use crate::mon2y::tree::Selection;
 
@@ -106,6 +107,38 @@ where
             };
             picks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
             log::debug!("Action, UCB0: {:?}", picks);
+            picks[0].0.clone()
+        }
+
+        BestTurnPolicy::ConfidentChoice0_6 => {
+            // score = mean - 0.5 / sqrt(visits)
+            let node = root_ref.read().unwrap();
+            // This bit of logic is reimplemented due to crashing when tree is fully explored
+            let mut picks = match &*node {
+                Node::Expanded { children, .. } => children
+                    .iter()
+                    // TODO: Add random factor
+                    .map(|(action, child)| {
+                        let child = child.read().unwrap();
+                        (
+                            action.clone(),
+                            {
+                                let visit_count = child.visit_count() as f64;
+                            let mean = child.value_sum() as f64
+                                / if child.visit_count() > 0 {
+                                    visit_count
+                                } else {
+                                    f64::INFINITY
+                                };
+                                mean - 0.6 / visit_count.sqrt()
+                            }
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+                _ => panic!("Root should be parent"),
+            };
+            picks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            log::debug!("Action, CC0.6: {:?}", picks);
             picks[0].0.clone()
         }
 

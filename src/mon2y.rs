@@ -13,6 +13,7 @@ pub type Reward = f64;
 pub enum BestTurnPolicy {
     MostVisits,
     Ucb0,
+    ConfidentChoice0_6,
 }
 
 impl std::fmt::Display for BestTurnPolicy {
@@ -20,6 +21,7 @@ impl std::fmt::Display for BestTurnPolicy {
         match self {
             BestTurnPolicy::MostVisits => write!(f, "most-visits"),
             BestTurnPolicy::Ucb0 => write!(f, "ucb0"),
+            BestTurnPolicy::ConfidentChoice0_6 => write!(f, "confident-choice0_6"),
         }
     }
 }

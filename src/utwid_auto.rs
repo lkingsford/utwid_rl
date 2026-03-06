@@ -51,9 +51,10 @@ fn draw_board(stdout: &mut Stdout, state: utwid_game::UtwidState) -> std::io::Re
     Ok(())
 }
 
-const HUMAN_ITERATIONS: usize = 50000;
+const HUMAN_ITERATIONS: usize = 100000;
 const THREADS: usize = 6;
 const EXPLORATION_CONSTANT: f64 = 1.4142135623730951; // sqrt(2.0)
+const SHORT_CIRCUIT_AT_TURNS: usize = 20000;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
@@ -82,22 +83,28 @@ fn main() -> std::io::Result<()> {
         .init();
 
     let mut state = utwid_game::UtwidState::new();
+    state.short_circuit_at_turns = Some(SHORT_CIRCUIT_AT_TURNS);
     let mut stdout = stdout();
 
     while matches!(state.game_state, GameState::Ongoing | GameState::Checkpoint) {
+        queue!(stdout, Clear(ClearType::All))?;
+        draw_board(&mut stdout, state.clone())?;
+        stdout.flush();
         let next_act = calculate_best_turn(
             HUMAN_ITERATIONS,
             None,
             THREADS,
             state.clone(),
-            utwid_rl::mon2y::BestTurnPolicy::MostVisits,
+            utwid_rl::mon2y::BestTurnPolicy::ConfidentChoice0_6,
             EXPLORATION_CONSTANT,
             false,
         );
         state = next_act.execute(&state);
-        queue!(stdout, Clear(ClearType::All))?;
-        draw_board(&mut stdout, state.clone())?;
-        stdout.flush();
+        if matches!(state.game_state, GameState::Mon2yShortcircuit) {
+            state.game_state = GameState::Ongoing;
+        };
+        state.ai_turn_weight = 0.0;
+        log::debug!("GameStateType {:?}", state.clone().game_state);
     }
 
     Ok(())
