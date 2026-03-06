@@ -208,14 +208,13 @@ impl UtwidAction {
         let actor = new_state.actors.get_mut(&actor_id).unwrap();
         let new_coords = apply_dir(actor.x, actor.y, *self);
 
-        if state
+        let actor_on_space = state
             .actors
             .iter()
             .map(|actor| actor.1)
-            .find(|actor| actor.x == new_coords.0 && actor.y == new_coords.1)
-            .is_some()
-        {
-            // TODO: Attack, if possible
+            .find(|actor| actor.x == new_coords.0 && actor.y == new_coords.1);
+        if actor_on_space.is_some() {
+            // attack
         } else {
             (actor.x, actor.y) = new_coords;
         }
