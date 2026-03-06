@@ -205,9 +205,19 @@ impl UtwidAction {
         let mut new_state = state.clone();
         let actor_id = new_state.to_act;
 
+        let actor = new_state.actors.get_mut(&actor_id).unwrap();
+        let new_coords = apply_dir(actor.x, actor.y, *self);
+
+        if state
+            .actors
+            .iter()
+            .map(|actor| actor.1)
+            .find(|actor| actor.x == new_coords.0 && actor.y == new_coords.1)
+            .is_some()
         {
-            let actor = new_state.actors.get_mut(&actor_id).unwrap();
-            (actor.x, actor.y) = apply_dir(actor.x, actor.y, *self);
+            // TODO: Attack, if possible
+        } else {
+            (actor.x, actor.y) = new_coords;
         }
 
         let actor_ref = new_state.actors.get(&actor_id).unwrap();
@@ -399,6 +409,9 @@ pub enum ActorTrait {
     DiagonalMove,
     Wait,
     ConsoleRepr(char),
+    Health(usize),
+    Dead,
+    Attack { damage: usize },
 }
 
 #[derive(Clone)]
@@ -415,6 +428,28 @@ impl GameActor {
             _ => None,
         })
     }
+
+    pub fn modify_health(&mut self, d_health: isize) -> () {
+        let current_health = self
+            .traits
+            .iter()
+            .find_map(|t| match t {
+                ActorTrait::Health(h) => Some(*h),
+                _ => None,
+            })
+            .unwrap_or(0); // Default to 0 if no health trait is found
+
+        // Remove the old health trait
+        self.traits.retain(|t| !matches!(t, ActorTrait::Health(_)));
+
+        // Add the new health trait
+        let new_health = (current_health as isize + d_health).max(0) as usize;
+        self.traits.insert(ActorTrait::Health(new_health));
+
+        if new_health <= 0 {
+            self.traits.insert(ActorTrait::Dead);
+        }
+    }
 }
 
 impl GameActor {
@@ -428,6 +463,7 @@ impl GameActor {
                 ActorTrait::Human,
                 ActorTrait::CardinalMove,
                 ActorTrait::DiagonalMove,
+                ActorTrait::Health(7),
             ]),
         }
     }
@@ -445,6 +481,39 @@ impl GameActor {
                 ActorTrait::CardinalMove,
                 ActorTrait::DiagonalMove,
                 ActorTrait::Wait,
+                ActorTrait::Health(7),
+            ]),
+        }
+    }
+
+    fn them_actor(x: usize, y: usize) -> GameActor {
+        GameActor {
+            x,
+            y,
+            traits: HashSet::from([
+                ActorTrait::Mon2y {
+                    tree_id: 1,
+                    iterations: 100,
+                },
+                ActorTrait::DiagonalMove,
+                ActorTrait::Health(2),
+                ActorTrait::ConsoleRepr('t'),
+            ]),
+        }
+    }
+
+    fn are_actor(x: usize, y: usize) -> GameActor {
+        GameActor {
+            x,
+            y,
+            traits: HashSet::from([
+                ActorTrait::Mon2y {
+                    tree_id: 1,
+                    iterations: 100,
+                },
+                ActorTrait::CardinalMove,
+                ActorTrait::Health(2),
+                ActorTrait::ConsoleRepr('t'),
             ]),
         }
     }
