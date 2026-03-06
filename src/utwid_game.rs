@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{vec_deque, HashMap, HashSet, VecDeque};
 
 use crate::mon2y::game::{Action, Actor, State};
 use crate::mon2y::Reward;
@@ -27,7 +27,7 @@ pub struct UtwidState {
     pub actors: HashMap<ActorId, GameActor>,
     pub to_act: ActorId,
     pub game_state: GameState,
-    pub turn_order: Vec<ActorId>,
+    pub turn_order: VecDeque<ActorId>,
     pub turn_number: usize,
     pub short_circuit_at_turns: Option<usize>,
     pub ai_turn_weight: f64,
@@ -47,7 +47,7 @@ impl UtwidState {
             to_act: 0,
             game_state: GameState::Ongoing,
             turn_number: 0,
-            turn_order: vec![0],
+            turn_order: VecDeque::from(vec![0]),
             short_circuit_at_turns: None,
             ai_turn_weight: 0.0,
             spawn_rng,
@@ -58,7 +58,7 @@ impl UtwidState {
     pub fn add_actor(&mut self, actor: GameActor) -> ActorId {
         self.actors.insert(self.actors.len(), actor);
         let id = self.actors.len() - 1;
-        self.turn_order.push(id);
+        self.turn_order.push_back(id);
         id
     }
 
@@ -229,8 +229,29 @@ impl Action for UtwidAction {
         {
             new_state.game_state = GameState::Ongoing;
         }
-        new_state.to_act = new_state.turn_order.pop().unwrap();
-        new_state.turn_order.push(state.to_act);
+
+        // Bring out yer dead!
+        for (actor_id, actor) in new_state
+            .actors
+            .clone() // Necessary?
+            .iter()
+            .filter(|actor| actor.1.traits.contains(&ActorTrait::Dead))
+        {
+            new_state.actors.remove(&actor_id);
+            if actor.traits.contains(&ActorTrait::Human) {
+                new_state.game_state = GameState::Lost;
+            }
+            // This feels inefficient
+            new_state.turn_order = new_state
+                .turn_order
+                .iter()
+                .filter(|id| *id != actor_id)
+                .map(|id| id.clone())
+                .collect();
+        }
+
+        new_state.to_act = new_state.turn_order.pop_front().unwrap();
+        new_state.turn_order.push_back(state.to_act);
         new_state
     }
 }
@@ -240,6 +261,7 @@ impl UtwidAction {
         let mut new_state = state.clone();
         let actor_id = new_state.to_act;
 
+        // --- Attack ---
         let (new_coords, damage) = {
             let actor = new_state.actors.get_mut(&actor_id).unwrap();
             (
@@ -264,6 +286,8 @@ impl UtwidAction {
         {
             actor.modify_health(damage);
         }
+
+        // --- And the rest ---
 
         if new_state
             .actors
@@ -520,6 +544,7 @@ impl GameActor {
                 ActorTrait::CardinalMove,
                 ActorTrait::DiagonalMove,
                 ActorTrait::Health(7),
+                ActorTrait::Attack { damage: 1 },
             ]),
         }
     }
@@ -538,6 +563,7 @@ impl GameActor {
                 ActorTrait::DiagonalMove,
                 ActorTrait::Wait,
                 ActorTrait::Health(7),
+                ActorTrait::Attack { damage: 1 },
             ]),
         }
     }
@@ -554,6 +580,7 @@ impl GameActor {
                 ActorTrait::DiagonalMove,
                 ActorTrait::Health(2),
                 ActorTrait::ConsoleRepr('t'),
+                ActorTrait::Attack { damage: 1 },
             ]),
         }
     }
@@ -570,6 +597,7 @@ impl GameActor {
                 ActorTrait::CardinalMove,
                 ActorTrait::Health(2),
                 ActorTrait::ConsoleRepr('r'),
+                ActorTrait::Attack { damage: 1 },
             ]),
         }
     }

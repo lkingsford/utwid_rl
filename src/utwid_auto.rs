@@ -9,7 +9,7 @@ use std::{fs, thread};
 
 use utwid_rl::{
     mon2y::{calculate_best_turn, game::Action},
-    utwid_game::{self, GameState},
+    utwid_game::{self, ActorTrait, GameState},
 };
 
 use crossterm::{
@@ -51,7 +51,7 @@ fn draw_board(stdout: &mut Stdout, state: utwid_game::UtwidState) -> std::io::Re
     Ok(())
 }
 
-const HUMAN_ITERATIONS: usize = 100000;
+const HUMAN_ITERATIONS: usize = 10000;
 const THREADS: usize = 6;
 const EXPLORATION_CONSTANT: f64 = 1.4142135623730951; // sqrt(2.0)
 const SHORT_CIRCUIT_AT_TURNS: usize = 20000;
@@ -91,11 +91,22 @@ fn main() -> std::io::Result<()> {
         draw_board(&mut stdout, state.clone())?;
         stdout.flush();
         let next_act = calculate_best_turn(
-            HUMAN_ITERATIONS,
+            {
+                let to_act = state.actors.get(&state.to_act).unwrap();
+                to_act.traits.iter().find_map(|trait_| match trait_ {
+                    ActorTrait::Mon2y {
+                        tree_id,
+                        iterations,
+                    } => Some(*iterations),
+                    ActorTrait::Human => Some(HUMAN_ITERATIONS),
+                    _ => None,
+                })
+            }
+            .unwrap(), // This would fail if we'd stopped on the wrong player
             None,
             THREADS,
             state.clone(),
-            utwid_rl::mon2y::BestTurnPolicy::ConfidentChoice0_6,
+            utwid_rl::mon2y::BestTurnPolicy::Ucb0,
             EXPLORATION_CONSTANT,
             false,
         );
