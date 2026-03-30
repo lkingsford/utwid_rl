@@ -154,42 +154,41 @@ where
 
         if let Selection::Selection(selection_result) = selection {
             for action in selection_result.selection.iter() {
-                {
-                    let child_node = {
-                        let node = cur_node.read().unwrap();
-                        if let Node::Expanded { .. } = &*node {
-                            node.get_child(action.clone()).clone()
-                        } else {
-                            continue;
-                        }
-                    };
-
-                    {
-                        let cur_state = {
-                            let node = cur_node.read().unwrap();
-                            node.state().clone()
-                        };
-
-                        let expanded_child = {
-                            let read_node = child_node.read().unwrap();
-                            if let Node::Placeholder { .. } = &*read_node {
-                                Some(read_node.expansion(action.clone(), &cur_state))
-                            } else {
-                                None
-                            }
-                        };
-
-                        if let Some(expanded_child) = expanded_child {
-                            cur_node
-                                .write()
-                                .unwrap()
-                                .insert_child(action.clone(), expanded_child);
-                        }
+                let child_node = {
+                    let node = cur_node.read().unwrap();
+                    if let Node::Expanded { .. } = &*node {
+                        node.get_child(action.clone()).clone()
+                    } else {
+                        continue;
                     }
+                };
 
-                    result.push(cur_node);
-                    cur_node = child_node;
+                let cur_state = {
+                    let node = cur_node.read().unwrap();
+                    node.state().clone()
+                };
+
+                let expanded_child = {
+                    let read_node = child_node.read().unwrap();
+                    if let Node::Placeholder { .. } = &*read_node {
+                        Some(read_node.expansion(action.clone(), &cur_state))
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some(expanded_child) = expanded_child {
+                    cur_node
+                        .write()
+                        .unwrap()
+                        .insert_child(action.clone(), expanded_child);
                 }
+
+                cur_node = {
+                    let node = cur_node.read().unwrap();
+                    node.get_child(action.clone())
+                };
+                result.push(cur_node.clone());
             }
         }
         result
@@ -453,6 +452,70 @@ mod tests {
         } else {
             self::panic!("Node is not expanded");
         }
+    }
+
+    #[test]
+    fn test_expansion_returns_selected_child_path() {
+        let root_state = InjectableGameState {
+            injected_reward: vec![0.0],
+            injected_terminal: false,
+            injected_permitted_actions: vec![
+                InjectableGameAction::WinInXTurns(2),
+                InjectableGameAction::WinInXTurns(3),
+            ],
+            player_count: 1,
+            next_actor: Actor::Player(0),
+            injected_hyperreward: Default::default(),
+            terminal_hyperreward: Default::default(),
+        };
+        let mut explored_state_1 = InjectableGameAction::WinInXTurns(2).execute(&root_state);
+        explored_state_1.injected_permitted_actions =
+            vec![InjectableGameAction::NextTurnInjectActionCount(5)];
+
+        let explored_state_2 = InjectableGameAction::WinInXTurns(3).execute(&root_state);
+        let mut root = create_expanded_node(root_state, None);
+
+        let mut explored_node_1 = create_expanded_node(explored_state_1, None);
+        explored_node_1.visit(0.0f64);
+        explored_node_1.insert_child(
+            InjectableGameAction::NextTurnInjectActionCount(5),
+            Node::Placeholder { weight: None },
+        );
+
+        let mut explored_node_2 = create_expanded_node(explored_state_2, None);
+        explored_node_2.visit(-1.0f64);
+        explored_node_2.visit(0.0f64);
+
+        root.insert_child(InjectableGameAction::WinInXTurns(2), explored_node_1);
+        root.insert_child(InjectableGameAction::WinInXTurns(3), explored_node_2);
+
+        let selection = Selection::Selection(SelectionResult {
+            selection: vec![
+                InjectableGameAction::WinInXTurns(2),
+                InjectableGameAction::NextTurnInjectActionCount(5),
+            ],
+            selected_steps: 2,
+            random_walk_steps: 0,
+            round_hyperreward: Some(TestHyperreward::default()),
+            sum_diff_est_reward: 0.0,
+        });
+
+        let tree = Tree::new(root);
+        let expanded_nodes = tree.expansion(&selection);
+        let owned_root = tree.root.clone();
+        let expected_first = owned_root
+            .read()
+            .unwrap()
+            .get_child(InjectableGameAction::WinInXTurns(2));
+        let expected_last = expected_first
+            .read()
+            .unwrap()
+            .get_child(InjectableGameAction::NextTurnInjectActionCount(5));
+
+        assert_eq!(expanded_nodes.len(), 3);
+        assert!(std::sync::Arc::ptr_eq(&expanded_nodes[0], &tree.root));
+        assert!(std::sync::Arc::ptr_eq(&expanded_nodes[1], &expected_first));
+        assert!(std::sync::Arc::ptr_eq(&expanded_nodes[2], &expected_last));
     }
 
     #[test]
