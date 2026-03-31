@@ -174,7 +174,11 @@ where
                         .iter()
                         .map(|(action, node)| {
                             let node = node.read().unwrap();
-                            (action.clone(), node.visit_count(), node.value_sums())
+                            (
+                                action.clone(),
+                                node.visit_count(),
+                                node.value_sums_ref().to_vec(),
+                            )
                         })
                         .collect::<Vec<_>>()
                 );
@@ -185,8 +189,7 @@ where
                 let winning_moves: Vec<ActionType> = children
                     .iter()
                     .filter_map(|(action, node)| {
-                        let node_ref = node.clone();
-                        let node = node_ref.read().unwrap();
+                        let node = node.read().unwrap();
                         if let Node::Placeholder { .. } = &*node {
                             return None;
                         }

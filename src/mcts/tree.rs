@@ -90,15 +90,10 @@ where
         };
 
         for pick in best_pick.iter() {
-            let action = pick.action_to_take.clone();
-            let child = { node.read().unwrap().get_child(action.clone()) };
+            let child = { node.read().unwrap().get_child(&pick.action_to_take) };
             let is_expanded = {
                 let node = child.read().unwrap();
-                if let Node::Expanded { .. } = &*node {
-                    true
-                } else {
-                    false
-                }
+                matches!(&*node, Node::Expanded { .. })
             };
             if is_expanded {
                 let selection = Tree::select_from(child, constant, depth + 1);
@@ -115,7 +110,9 @@ where
                     Selection::Selection(selection_result) => {
                         // TBD if this would be faster with .insert or
                         // preallocation
-                        let mut result_selection = vec![action.clone()];
+                        let mut result_selection =
+                            Vec::with_capacity(selection_result.selection.len() + 1);
+                        result_selection.push(pick.action_to_take.clone());
                         result_selection.extend(selection_result.selection);
 
                         let diff_est_reward = pick.expected_value - mean_reward;
@@ -133,7 +130,7 @@ where
             } else {
                 let diff_est_reward = pick.expected_value - mean_reward;
                 return Selection::Selection(SelectionResult {
-                    selection: vec![action.clone()],
+                    selection: vec![pick.action_to_take.clone()],
                     random_walk_steps: 0,
                     selected_steps: depth,
                     round_hyperreward: None,
@@ -160,20 +157,19 @@ where
                 let child_node = {
                     let node = cur_node.read().unwrap();
                     if let Node::Expanded { .. } = &*node {
-                        node.get_child(action.clone()).clone()
+                        node.get_child(action)
                     } else {
                         continue;
                     }
                 };
 
-                let cur_state = {
-                    let node = cur_node.read().unwrap();
-                    node.state().clone()
-                };
-
                 let expanded_child = {
                     let read_node = child_node.read().unwrap();
                     if let Node::Placeholder { .. } = &*read_node {
+                        let cur_state = {
+                            let node = cur_node.read().unwrap();
+                            node.state().clone()
+                        };
                         Some(read_node.expansion(action.clone(), &cur_state))
                     } else {
                         None
@@ -189,7 +185,7 @@ where
 
                 cur_node = {
                     let node = cur_node.read().unwrap();
-                    node.get_child(action.clone())
+                    node.get_child(action)
                 };
                 result.push(cur_node.clone());
             }
@@ -198,9 +194,9 @@ where
     }
 
     pub fn play_out(&self, state: StateType) -> PlayOutResult<StateType::GameHyperrewardType> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
-        let mut cur_state = Box::new(state.clone());
+        let mut cur_state = state;
 
         let mut random_walk_steps = 0;
 
@@ -216,12 +212,12 @@ where
                     }
 
                     let action: ActionType =
-                        permitted_actions[rng.gen_range(0..permitted_actions.len())].clone();
-                    cur_state = Box::new(action.execute(&cur_state));
+                        permitted_actions[rng.random_range(0..permitted_actions.len())].clone();
+                    cur_state = action.execute(&cur_state);
                 }
                 Actor::GameAction(actions) => {
                     let action = weighted_random(actions);
-                    cur_state = Box::new(action.execute(&cur_state));
+                    cur_state = action.execute(&cur_state);
                 }
             }
         }
@@ -236,11 +232,11 @@ where
     pub fn propagate_reward(
         &self,
         nodes: Vec<Arc<RwLock<Node<StateType, ActionType>>>>,
-        reward: Vec<Reward>,
+        reward: &[Reward],
     ) {
         for node in nodes.iter() {
             let mut cur_node = node.write().unwrap();
-            cur_node.visit(&reward);
+            cur_node.visit(reward);
         }
     }
 
@@ -263,8 +259,7 @@ where
                         .clone(),
                 )
             };
-            let reward = play_out_result.reward.clone();
-            self.propagate_reward(expanded_nodes, reward);
+            self.propagate_reward(expanded_nodes, &play_out_result.reward);
 
             return Selection::Selection(SelectionResult {
                 selection: selection_result.selection,
@@ -493,11 +488,11 @@ mod tests {
         let expected_first = owned_root
             .read()
             .unwrap()
-            .get_child(InjectableGameAction::WinInXTurns(2));
+            .get_child(&InjectableGameAction::WinInXTurns(2));
         let expected_last = expected_first
             .read()
             .unwrap()
-            .get_child(InjectableGameAction::NextTurnInjectActionCount(5));
+            .get_child(&InjectableGameAction::NextTurnInjectActionCount(5));
 
         assert_eq!(expanded_nodes.len(), 3);
         assert!(std::sync::Arc::ptr_eq(&expanded_nodes[0], &tree.root));
@@ -570,32 +565,32 @@ mod tests {
             owned_root
                 .read()
                 .unwrap()
-                .get_child(InjectableGameAction::WinInXTurns(2))
+                .get_child(&InjectableGameAction::WinInXTurns(2))
                 .clone(),
             owned_root
                 .read()
                 .unwrap()
-                .get_child(InjectableGameAction::WinInXTurns(2))
+                .get_child(&InjectableGameAction::WinInXTurns(2))
                 .read()
                 .unwrap()
-                .get_child(InjectableGameAction::WinInXTurns(1))
+                .get_child(&InjectableGameAction::WinInXTurns(1))
                 .clone(),
             owned_root
                 .read()
                 .unwrap()
-                .get_child(InjectableGameAction::WinInXTurns(2))
+                .get_child(&InjectableGameAction::WinInXTurns(2))
                 .read()
                 .unwrap()
-                .get_child(InjectableGameAction::WinInXTurns(1))
+                .get_child(&InjectableGameAction::WinInXTurns(1))
                 .read()
                 .unwrap()
-                .get_child(InjectableGameAction::Win)
+                .get_child(&InjectableGameAction::Win)
                 .clone(),
         ];
 
         let check_path = path.clone();
         const REWARD: f64 = 0.8;
-        tree.propagate_reward(nodes, vec![REWARD]);
+        tree.propagate_reward(nodes, &[REWARD]);
 
         {
             let root = tree.root.read().unwrap();
@@ -657,26 +652,26 @@ mod tests {
             owned_root
                 .read()
                 .unwrap()
-                .get_child(InjectableGameAction::WinInXTurns(2))
+                .get_child(&InjectableGameAction::WinInXTurns(2))
                 .clone(),
             owned_root
                 .read()
                 .unwrap()
-                .get_child(InjectableGameAction::WinInXTurns(2))
+                .get_child(&InjectableGameAction::WinInXTurns(2))
                 .read()
                 .unwrap()
-                .get_child(InjectableGameAction::WinInXTurns(1))
+                .get_child(&InjectableGameAction::WinInXTurns(1))
                 .clone(),
             owned_root
                 .read()
                 .unwrap()
-                .get_child(InjectableGameAction::WinInXTurns(2))
+                .get_child(&InjectableGameAction::WinInXTurns(2))
                 .read()
                 .unwrap()
-                .get_child(InjectableGameAction::WinInXTurns(1))
+                .get_child(&InjectableGameAction::WinInXTurns(1))
                 .read()
                 .unwrap()
-                .get_child(InjectableGameAction::Win)
+                .get_child(&InjectableGameAction::Win)
                 .clone(),
         ];
 
@@ -684,7 +679,7 @@ mod tests {
         // Using slightly unusual rewards to just make more certain that it was actually this reward
         const REWARD: f64 = 0.8;
         const LOSS_REWARD: f64 = -0.6;
-        tree.propagate_reward(nodes, vec![REWARD, LOSS_REWARD]);
+        tree.propagate_reward(nodes, &[REWARD, LOSS_REWARD]);
 
         {
             let root = tree.root.read().unwrap();
