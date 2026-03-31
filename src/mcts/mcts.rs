@@ -136,6 +136,10 @@ where
     match policy {
         BestTurnPolicy::Ucb0 => {
             let node = root_ref.read().unwrap();
+            let root_player = match node.state().next_actor() {
+                Actor::Player(player_id) => player_id,
+                Actor::GameAction(_) => panic!("BestTurnPolicy::Ucb0 expects a player turn at root"),
+            };
             // This bit of logic is reimplemented due to crashing when tree is fully explored
             let mut picks = match &*node {
                 Node::Expanded { children, .. } => children
@@ -145,7 +149,7 @@ where
                         let child = child.read().unwrap();
                         (
                             action.clone(),
-                            child.value_sum() as f64
+                            child.value_sum_for_player(root_player)
                                 / if child.visit_count() > 0 {
                                     child.visit_count() as f64
                                 } else {
@@ -170,7 +174,7 @@ where
                         .iter()
                         .map(|(action, node)| {
                             let node = node.read().unwrap();
-                            (action.clone(), node.visit_count(), node.value_sum())
+                            (action.clone(), node.visit_count(), node.value_sums())
                         })
                         .collect::<Vec<_>>()
                 );
