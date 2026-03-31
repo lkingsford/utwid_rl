@@ -89,7 +89,7 @@ struct Args {
     config_file: Vec<String>,
     #[command(flatten)]
     verbose: clap_verbosity_flag::Verbosity,
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short = 'u', long, default_value_t = false)]
     human: bool,
 }
 
