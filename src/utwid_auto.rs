@@ -77,7 +77,7 @@ fn draw_monsters(stdout: &mut Stdout, state: &UtwidState) -> std::io::Result<()>
 const DRAW_MONSTER_X: u16 = 20;
 const DRAW_MONSTER_Y: u16 = 2;
 
-const HUMAN_ITERATIONS: usize = 10000;
+const HUMAN_ITERATIONS: usize = 3000;
 const THREADS: usize = 6;
 const EXPLORATION_CONSTANT: f64 = 1.4142135623730951; // sqrt(2.0)
 const SHORT_CIRCUIT_AT_TURNS: usize = 20000;
@@ -176,6 +176,9 @@ fn main() -> std::io::Result<()> {
             )
         };
         state = next_act.execute(&state);
+        if matches!(state.game_state, GameState::Checkpoint) {
+            state.game_state = GameState::Ongoing;
+        }
         if matches!(state.game_state, GameState::Mon2yShortcircuit) {
             state.game_state = GameState::Ongoing;
         };

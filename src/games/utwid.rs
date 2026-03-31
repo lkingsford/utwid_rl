@@ -117,6 +117,24 @@ impl UtwidState {
     fn actor_in_space(&self, x: usize, y: usize) -> Option<&GameActor> {
         self.actors.values().find(|actor| actor.x == x && actor.y == y)
     }
+
+    fn normalize_turn_state(&mut self) {
+        self.turn_order.retain(|id| self.actors.contains_key(id));
+
+        if self.turn_order.is_empty() {
+            if self.actors.contains_key(&0) {
+                self.turn_order.push_back(0);
+            } else if let Some(actor_id) = self.actors.keys().min().copied() {
+                self.turn_order.push_back(actor_id);
+            }
+        }
+
+        if !self.actors.contains_key(&self.to_act) {
+            if let Some(actor_id) = self.turn_order.front().copied() {
+                self.to_act = actor_id;
+            }
+        }
+    }
 }
 
 impl State for UtwidState {
@@ -322,6 +340,7 @@ impl Action for UtwidAction {
         new_state
             .turn_order
             .retain(|id| !dead_actor_ids.contains(id));
+        new_state.normalize_turn_state();
 
         // If the game is already in a terminal state (e.g., player died),
         // we don't need to determine the next actor or update turn order further.
@@ -436,6 +455,14 @@ impl UtwidAction {
         new_state.game_state = GameState::Checkpoint;
         let mut board_rng = state.board.rng.clone();
         new_state.board = Board::new(new_state.current_level, &mut board_rng);
+        let mut you = state.actors.get(&0).cloned().unwrap_or_else(GameActor::you_actor);
+        you.x = 1;
+        you.y = 3;
+        you.traits.remove(&ActorTrait::Dead);
+        new_state.actors = HashMap::from([(0, you)]);
+        new_state.turn_order = VecDeque::from([0]);
+        new_state.to_act = 0;
+        new_state.actor_id_counter = 1;
         new_state
     }
 
@@ -731,5 +758,180 @@ impl Game for Utwid {
 
     fn init_game(&self, _hyperparams: &Self::HyperparamsType) -> Self::StateType {
         UtwidState::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mcts::node::create_expanded_node;
+
+    fn stair_location(state: &UtwidState) -> (usize, usize) {
+        for y in 0..state.board.height {
+            for x in 0..state.board.width {
+                if state.board.get(x, y).traits.contains(&TileTrait::Stairs) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("Expected stairs on board");
+    }
+
+    fn win_location(state: &UtwidState) -> (usize, usize) {
+        for y in 0..state.board.height {
+            for x in 0..state.board.width {
+                if state.board.get(x, y).traits.contains(&TileTrait::Win) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("Expected win tile on board");
+    }
+
+    fn adjacent_move_to(state: &mut UtwidState, target_x: usize, target_y: usize) -> UtwidAction {
+        for (action, dx, dy) in CARDINAL_DIRS.iter().chain(DIAGONAL_DIRS.iter()) {
+            let from_x = target_x as isize - dx;
+            let from_y = target_y as isize - dy;
+            if from_x < 0
+                || from_y < 0
+                || from_x as usize >= state.board.width
+                || from_y as usize >= state.board.height
+            {
+                continue;
+            }
+            if state
+                .board
+                .get(from_x as usize, from_y as usize)
+                .traits
+                .contains(&TileTrait::Walkable)
+            {
+                let you = state.actors.get_mut(&0).unwrap();
+                you.x = from_x as usize;
+                you.y = from_y as usize;
+                state.to_act = 0;
+                state.turn_order = VecDeque::from([0]);
+                return *action;
+            }
+        }
+        panic!("Expected a walkable tile adjacent to target");
+    }
+
+    #[test]
+    fn stairs_transition_resets_turn_state_across_multiple_floors() {
+        let mut state = UtwidState::new();
+
+        for _ in 0..5 {
+            state.add_actor(GameActor::are_actor(2, 2));
+            state.add_actor(GameActor::them_actor(3, 3));
+            state.to_act = 2;
+
+            let (stairs_x, stairs_y) = stair_location(&state);
+            let tile = state.board.get(stairs_x, stairs_y).clone();
+            let actor = state.actors.get(&0).unwrap().clone();
+
+            state = UtwidAction::N.execute_stairs(&state, &tile, &actor);
+
+            assert_eq!(state.to_act, 0);
+            assert_eq!(state.turn_order, VecDeque::from([0]));
+            assert_eq!(state.actor_id_counter, 1);
+            assert_eq!(state.actors.len(), 1);
+            assert!(state.actors.contains_key(&0));
+            assert!(matches!(state.next_actor(), Actor::Player(0)));
+
+            state.game_state = GameState::Ongoing;
+        }
+    }
+
+    #[test]
+    fn stairs_transition_clears_monsters_dead_entries_and_stale_turn_ids() {
+        let mut state = UtwidState::new();
+
+        for _ in 0..5 {
+            let are_id = state.add_actor(GameActor::are_actor(2, 2));
+            let them_id = state.add_actor(GameActor::them_actor(3, 3));
+            if let Some(actor) = state.actors.get_mut(&are_id) {
+                actor.traits.insert(ActorTrait::Dead);
+            }
+            state.turn_order.push_back(9999);
+            state.turn_order.push_back(are_id);
+            state.turn_order.push_back(them_id);
+            state.to_act = them_id;
+
+            let (stairs_x, stairs_y) = stair_location(&state);
+            let tile = state.board.get(stairs_x, stairs_y).clone();
+            let actor = state.actors.get(&0).unwrap().clone();
+
+            state = UtwidAction::N.execute_stairs(&state, &tile, &actor);
+
+            assert_eq!(state.to_act, 0);
+            assert_eq!(state.turn_order, VecDeque::from([0]));
+            assert_eq!(state.actor_id_counter, 1);
+            assert_eq!(state.actors.len(), 1);
+            assert!(state.actors.contains_key(&0));
+            assert!(!state.actors.contains_key(&are_id));
+            assert!(!state.actors.contains_key(&them_id));
+            assert!(!state.turn_order.contains(&9999));
+            assert!(matches!(state.next_actor(), Actor::Player(0)));
+
+            state.game_state = GameState::Ongoing;
+        }
+    }
+
+    #[test]
+    fn execute_path_keeps_to_act_valid_between_floors_and_after_win() {
+        let mut state = UtwidState::new();
+
+        for _ in 0..10 {
+            state.add_actor(GameActor::are_actor(2, 2));
+            state.add_actor(GameActor::them_actor(3, 3));
+
+            let (stairs_x, stairs_y) = stair_location(&state);
+            let action = adjacent_move_to(&mut state, stairs_x, stairs_y);
+            state = action.execute(&state);
+
+            assert!(state.actors.contains_key(&state.to_act));
+            assert!(matches!(state.game_state, GameState::Checkpoint));
+
+            state.game_state = GameState::Ongoing;
+            assert!(state.actors.contains_key(&state.to_act));
+            assert!(matches!(state.next_actor(), Actor::Player(0)));
+        }
+
+        let (win_x, win_y) = win_location(&state);
+        let action = adjacent_move_to(&mut state, win_x, win_y);
+        state = action.execute(&state);
+
+        assert!(matches!(state.game_state, GameState::Won));
+        assert!(state.actors.contains_key(&state.to_act));
+        assert!(matches!(state.next_actor(), Actor::Player(0)));
+    }
+
+    #[test]
+    fn entering_stairs_turn_keeps_to_act_valid_and_terminal_node_safe() {
+        let mut state = UtwidState::new();
+        let are_id = state.add_actor(GameActor::are_actor(2, 2));
+        let them_id = state.add_actor(GameActor::them_actor(3, 3));
+        if let Some(actor) = state.actors.get_mut(&are_id) {
+            actor.traits.insert(ActorTrait::Dead);
+        }
+        state.turn_order.push_back(9999);
+        state.turn_order.push_back(are_id);
+        state.turn_order.push_back(them_id);
+
+        let (stairs_x, stairs_y) = stair_location(&state);
+        let action = adjacent_move_to(&mut state, stairs_x, stairs_y);
+        let post_stairs = action.execute(&state);
+
+        assert!(matches!(post_stairs.game_state, GameState::Checkpoint));
+        assert_eq!(post_stairs.to_act, 0);
+        assert_eq!(post_stairs.turn_order, VecDeque::from([0]));
+        assert!(post_stairs.actors.contains_key(&post_stairs.to_act));
+        assert!(matches!(post_stairs.next_actor(), Actor::Player(0)));
+
+        let node = create_expanded_node(post_stairs.clone(), None);
+        match node {
+            crate::mcts::node::Node::Expanded { children, .. } => assert!(children.is_empty()),
+            crate::mcts::node::Node::Placeholder { .. } => panic!("Expected expanded node"),
+        }
     }
 }

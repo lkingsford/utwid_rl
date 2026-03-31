@@ -113,6 +113,9 @@ where
     log::debug!("Starting next turn");
     let root_node = create_expanded_node(state, None);
     if let Node::Expanded { children, .. } = &root_node {
+        if children.is_empty() {
+            panic!("calculate_best_turn called with a root state that has no available actions");
+        }
         if children.len() == 1 {
             log::debug!("Short circuited - only one option");
             return children.keys().next().unwrap().clone();
