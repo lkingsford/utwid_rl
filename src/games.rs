@@ -21,4 +21,5 @@ pub enum Games {
     NT,
     CS,
     EBR,
+    Utwid,
 }

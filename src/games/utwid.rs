@@ -7,6 +7,18 @@ use crate::mcts::Reward;
 use rand::{prelude::*, rngs::SmallRng, SeedableRng};
 
 type ActorId = usize; // If I keep using this code, this might need to be u64, or something else
+const CARDINAL_DIRS: [(UtwidAction, isize, isize); 4] = [
+    (UtwidAction::N, 0, -1),
+    (UtwidAction::S, 0, 1),
+    (UtwidAction::E, 1, 0),
+    (UtwidAction::W, -1, 0),
+];
+const DIAGONAL_DIRS: [(UtwidAction, isize, isize); 4] = [
+    (UtwidAction::NE, 1, -1),
+    (UtwidAction::NW, -1, -1),
+    (UtwidAction::SE, 1, 1),
+    (UtwidAction::SW, -1, 1),
+];
 
 #[derive(Clone, std::fmt::Debug, PartialEq)]
 pub enum GameState {
@@ -103,10 +115,7 @@ impl UtwidState {
     }
 
     fn actor_in_space(&self, x: usize, y: usize) -> Option<&GameActor> {
-        self.actors
-            .iter()
-            .map(|actor| actor.1)
-            .find(|actor| actor.x == x && actor.y == y)
+        self.actors.values().find(|actor| actor.x == x && actor.y == y)
     }
 }
 
@@ -262,7 +271,7 @@ impl Action for UtwidAction {
             new_state.turn_number += 1;
             new_state.ai_turn_weight += AI_TURN_WEIGHT;
             if let Some(i) = new_state.short_circuit_at_turns {
-                if i > new_state.turn_number {
+                if new_state.turn_number > i {
                     new_state.game_state = GameState::Mon2yShortcircuit;
                 }
             }
@@ -423,9 +432,10 @@ impl UtwidAction {
 
     fn execute_stairs(&self, state: &UtwidState, _tile: &Tile, _to_act: &GameActor) -> UtwidState {
         let mut new_state = state.clone();
+        new_state.current_level = state.current_level + 1;
         new_state.game_state = GameState::Checkpoint;
-        new_state.board = Board::new(state.current_level + 1, &mut state.board.rng.clone());
-        let actor = new_state.actors.get(&0).unwrap();
+        let mut board_rng = state.board.rng.clone();
+        new_state.board = Board::new(new_state.current_level, &mut board_rng);
         new_state
     }
 
@@ -494,35 +504,17 @@ pub struct Board {
     pub rng: SmallRng,
 }
 
-fn cardinal_dirs() -> Vec<(UtwidAction, isize, isize)> {
-    vec![
-        (UtwidAction::N, 0, -1),
-        (UtwidAction::S, 0, 1),
-        (UtwidAction::E, 1, 0),
-        (UtwidAction::W, -1, 0),
-    ]
-}
-
-fn diagonal_dirs() -> Vec<(UtwidAction, isize, isize)> {
-    vec![
-        (UtwidAction::NE, 1, -1),
-        (UtwidAction::NW, -1, -1),
-        (UtwidAction::SE, 1, 1),
-        (UtwidAction::SW, -1, 1),
-    ]
-}
-
 fn apply_dir(x: usize, y: usize, direction: UtwidAction) -> (usize, usize) {
-    let (_, dx, dy) = cardinal_dirs()
+    let (_, dx, dy) = CARDINAL_DIRS
         .iter()
-        .chain(diagonal_dirs().iter())
+        .chain(DIAGONAL_DIRS.iter())
         .find(|(action, _, _)| action == &direction)
         .unwrap()
         .clone();
 
     // Perform arithmetic with isize to handle negative deltas correctly
-    let new_x = (x as isize + dx);
-    let new_y = (y as isize + dy);
+        let new_x = x as isize + dx;
+        let new_y = y as isize + dy;
 
     // These should always be non-negative due to prior filtering by permitted_moves
     (new_x as usize, new_y as usize)
@@ -537,7 +529,7 @@ impl Board {
             geography[width * 8 + ix] = Tile::wall()
         }
         let stair_location = (rng.random_range(0..width), rng.random_range(0..height));
-        geography[stair_location.0 + width * stair_location.1] = if (_level < 10) {
+        geography[stair_location.0 + width * stair_location.1] = if _level < 10 {
             Tile::stair()
         } else {
             Tile::win()
@@ -563,10 +555,10 @@ impl Board {
         cardinal: bool,
         diagonal: bool,
     ) -> Vec<UtwidAction> {
-        cardinal_dirs()
+        CARDINAL_DIRS
             .iter()
             .filter(|_| cardinal)
-            .chain(diagonal_dirs().iter().filter(|_| diagonal))
+            .chain(DIAGONAL_DIRS.iter().filter(|_| diagonal))
             .filter_map(|(action, dx, dy)| {
                 let x = from_x as isize + *dx as isize;
                 let y = from_y as isize + *dy as isize;

@@ -3,7 +3,7 @@ use env_logger::fmt::Formatter;
 use log::Record;
 use mon2y::game::Game;
 use mon2y::games::Games;
-use mon2y::games::{C4, CS, EBR, NT};
+use mon2y::games::{C4, CS, EBR, NT, Utwid};
 use mon2y::mcts::game_trait::{Action, Actor, State};
 use mon2y::mcts::{calculate_best_turn, BestTurnPolicy};
 use std::io;
@@ -211,6 +211,19 @@ fn main() {
                     EBR {
                         player_count: players.len() as u8,
                     },
+                    players.clone(),
+                    args.iterations,
+                    args.limit_time,
+                    args.threads,
+                    args.inject_game_turns,
+                    args.policy,
+                    args.exploration_constant,
+                    args.log_children,
+                );
+            }
+            Games::Utwid => {
+                run_game(
+                    Utwid,
                     players.clone(),
                     args.iterations,
                     args.limit_time,

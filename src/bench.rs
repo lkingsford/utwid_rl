@@ -2,7 +2,7 @@
 use clap::Parser;
 use mon2y::game::Game;
 use mon2y::games::Games;
-use mon2y::games::{C4, CS, EBR, NT};
+use mon2y::games::{C4, CS, EBR, NT, Utwid};
 use mon2y::mcts::{calculate_best_turn, BestTurnPolicy};
 use std::time::Instant;
 
@@ -81,6 +81,7 @@ fn main() {
                 args.iterations,
                 args.threads,
             ),
+            Games::Utwid => run_benchmark(Utwid, args.iterations, args.threads),
         })
         .collect();
     println!("---");

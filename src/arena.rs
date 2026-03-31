@@ -3,7 +3,7 @@ use env_logger::fmt::Formatter;
 use log::Record;
 use mon2y::game::Game;
 use mon2y::games::Games;
-use mon2y::games::{C4, CS, EBR, NT};
+use mon2y::games::{C4, CS, EBR, NT, Utwid};
 use mon2y::mcts::game_trait::{Action, Actor, State};
 use mon2y::mcts::{calculate_best_turn, BestTurnPolicy};
 use rand::Rng;
@@ -120,6 +120,7 @@ fn run_config(config_file: String) {
                 },
                 arena_settings.players.clone(),
             ),
+            Games::Utwid => run_episode(Utwid, arena_settings.players.clone()),
         };
         let max_result = result
             .iter()

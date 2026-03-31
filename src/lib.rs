@@ -1,6 +1,8 @@
 use crate::{
     game::Game,
-    games::{c4::C4Hyperparams, c4::C4, cs::CS, ebr::EBRHyperparams, ebr::EBR, nt::NT, Games},
+    games::{
+        c4::C4Hyperparams, c4::C4, cs::CS, ebr::EBRHyperparams, ebr::EBR, nt::NT, Games, Utwid,
+    },
     hyper::Hyperparams,
     mcts::mcts::explore_tree,
 };
@@ -127,6 +129,21 @@ fn explore(
             .map(|r| r.to_py_dict(py))
             .collect::<PyResult<Vec<_>>>()?
         }
+        Games::Utwid => {
+            let game = Utwid;
+            let hyperparams = ();
+            let state = game.init_game(&hyperparams);
+            explore_tree(
+                iterations,
+                time_limit,
+                thread_count,
+                state,
+                exploration_constant,
+            )
+            .into_iter()
+            .map(|r| r.to_py_dict(py))
+            .collect::<PyResult<Vec<_>>>()?
+        }
     };
 
     Ok(results)
@@ -139,6 +156,7 @@ fn get_hyperreward_meta(py: Python, game: Games) -> PyResult<Py<PyAny>> {
         Games::NT => hyper::Hyperrewards::<()>::py_meta(py),
         Games::CS => hyper::Hyperrewards::<()>::py_meta(py),
         Games::EBR => hyper::Hyperrewards::<games::ebr::EBRHyperrewards>::py_meta(py),
+        Games::Utwid => hyper::Hyperrewards::<()>::py_meta(py),
     }
 }
 
@@ -149,7 +167,7 @@ fn default_hyperparams(py: Python, game: Games) -> PyResult<Py<PyAny>> {
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
         Games::EBR => serde_json::to_string(&EBRHyperparams::default())
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
-        Games::NT | Games::CS => return Ok(PyDict::new(py).into()),
+        Games::NT | Games::CS | Games::Utwid => return Ok(PyDict::new(py).into()),
     };
 
     let json = PyModule::import(py, "json")?;
