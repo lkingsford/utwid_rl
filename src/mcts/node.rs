@@ -365,6 +365,9 @@ where
             game_action,
             ..
         } => {
+            if children.is_empty() {
+                return vec![];
+            }
             let parent_visit_count = std::cmp::max(node.visit_count(), 1);
             let player_id = match node.state().next_actor() {
                 Actor::Player(player_id) => Some(player_id),

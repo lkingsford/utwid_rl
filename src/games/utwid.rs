@@ -118,7 +118,57 @@ impl UtwidState {
         self.actors.values().find(|actor| actor.x == x && actor.y == y)
     }
 
+    fn actor_debug_rows(&self) -> Vec<String> {
+        let mut rows: Vec<String> = self
+            .actors
+            .iter()
+            .map(|(id, actor)| {
+                let label = actor
+                    .traits
+                    .iter()
+                    .find_map(|trait_| match trait_ {
+                        ActorTrait::Human => Some("Human".to_string()),
+                        ActorTrait::Mon2y {
+                            tree_id,
+                            iterations,
+                        } => Some(format!("Mon2y(tree={},iters={})", tree_id, iterations)),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| "Other".to_string());
+                format!(
+                    "id={} pos=({}, {}) repr={:?} label={} dead={} health={:?}",
+                    id,
+                    actor.x,
+                    actor.y,
+                    actor.console_repr(),
+                    label,
+                    actor.traits.contains(&ActorTrait::Dead),
+                    actor.traits.iter().find_map(|trait_| match trait_ {
+                        ActorTrait::Health(h) => Some(*h),
+                        _ => None,
+                    }),
+                )
+            })
+            .collect();
+        rows.sort();
+        rows
+    }
+
+    fn debug_summary(&self) -> String {
+        format!(
+            "level={} state={:?} to_act={} turn_number={} turn_order={:?} actor_ids={:?} actors=[{}]",
+            self.current_level,
+            self.game_state,
+            self.to_act,
+            self.turn_number,
+            self.turn_order,
+            self.actors.keys().copied().collect::<Vec<_>>(),
+            self.actor_debug_rows().join(" | "),
+        )
+    }
+
     fn normalize_turn_state(&mut self) {
+        let before = self.debug_summary();
         self.turn_order.retain(|id| self.actors.contains_key(id));
 
         if self.turn_order.is_empty() {
@@ -134,6 +184,14 @@ impl UtwidState {
                 self.to_act = actor_id;
             }
         }
+
+        if log::log_enabled!(log::Level::Trace) && before != self.debug_summary() {
+            log::trace!(
+                "normalize_turn_state changed state: before=[{}] after=[{}]",
+                before,
+                self.debug_summary()
+            );
+        }
     }
 }
 
@@ -142,7 +200,11 @@ impl State for UtwidState {
     type GameHyperrewardType = ();
 
     fn permitted_actions(&self) -> Vec<Self::ActionType> {
-        let next_actor = self.actors.get(&self.to_act).unwrap();
+        log::trace!("permitted_actions state {}", self.debug_summary());
+        let next_actor = self
+            .actors
+            .get(&self.to_act)
+            .unwrap_or_else(|| panic!("Invalid to_act in permitted_actions: {}", self.debug_summary()));
         self.board.permitted_moves(
             next_actor.x,
             next_actor.y,
@@ -152,7 +214,11 @@ impl State for UtwidState {
     }
 
     fn next_actor(&self) -> Actor<Self::ActionType> {
-        let next_actor = self.actors.get(&self.to_act).unwrap();
+        log::trace!("next_actor state {}", self.debug_summary());
+        let next_actor = self
+            .actors
+            .get(&self.to_act)
+            .unwrap_or_else(|| panic!("Invalid to_act in next_actor: {}", self.debug_summary()));
         next_actor
             .traits
             .iter()
@@ -450,6 +516,7 @@ impl UtwidAction {
     }
 
     fn execute_stairs(&self, state: &UtwidState, _tile: &Tile, _to_act: &GameActor) -> UtwidState {
+        log::debug!("execute_stairs before {}", state.debug_summary());
         let mut new_state = state.clone();
         new_state.current_level = state.current_level + 1;
         new_state.game_state = GameState::Checkpoint;
@@ -463,6 +530,7 @@ impl UtwidAction {
         new_state.turn_order = VecDeque::from([0]);
         new_state.to_act = 0;
         new_state.actor_id_counter = 1;
+        log::debug!("execute_stairs after {}", new_state.debug_summary());
         new_state
     }
 

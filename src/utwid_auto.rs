@@ -82,6 +82,21 @@ const THREADS: usize = 6;
 const EXPLORATION_CONSTANT: f64 = 1.4142135623730951; // sqrt(2.0)
 const SHORT_CIRCUIT_AT_TURNS: usize = 20000;
 
+struct RawModeGuard;
+
+impl RawModeGuard {
+    fn new() -> std::io::Result<Self> {
+        terminal::enable_raw_mode()?;
+        Ok(Self)
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        let _ = terminal::disable_raw_mode();
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -91,11 +106,17 @@ struct Args {
     verbose: clap_verbosity_flag::Verbosity,
     #[arg(short = 'u', long, default_value_t = false)]
     human: bool,
+    #[arg(long, default_value_t = false)]
+    plain_mode: bool,
 }
 
 fn main() -> std::io::Result<()> {
-    terminal::enable_raw_mode()?;
     let args = Args::parse();
+    let _raw_mode = if args.plain_mode {
+        None
+    } else {
+        Some(RawModeGuard::new()?)
+    };
     env_logger::Builder::new()
         .format(|buf: &mut Formatter, record: &Record| {
             let thread_id = thread::current().id();
@@ -117,10 +138,12 @@ fn main() -> std::io::Result<()> {
     let mut stdout = stdout();
 
     while matches!(state.game_state, GameState::Ongoing | GameState::Checkpoint) {
-        queue!(stdout, Clear(ClearType::All))?;
-        draw_board(&mut stdout, state.clone())?;
-        draw_monsters(&mut stdout, &state)?;
-        stdout.flush()?;
+        if !args.plain_mode {
+            queue!(stdout, Clear(ClearType::All))?;
+            draw_board(&mut stdout, state.clone())?;
+            draw_monsters(&mut stdout, &state)?;
+            stdout.flush()?;
+        }
         let to_act = state.actors.get(&state.to_act).unwrap();
         let next_act = if args.human && to_act.traits.contains(&ActorTrait::Human) {
             let mut this_attempt: Option<UtwidAction> = None;
@@ -184,6 +207,12 @@ fn main() -> std::io::Result<()> {
         };
         state.ai_turn_weight = 0.0;
         log::debug!("GameStateType {:?}", state.clone().game_state);
+    }
+
+    match state.game_state {
+        GameState::Won => print!("Won!"),
+        GameState::Lost => print!("Lost!"),
+        _ => panic!("Invalid end game state"),
     }
 
     Ok(())
