@@ -25,6 +25,10 @@ from .study import Study, StudyError
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.DEBUG)
 
+OPEN_STUDIES_RETRY_COUNT = 3
+OPEN_STUDIES_BACKOFF_SECONDS = 1
+MIN_SECONDS_BETWEEN_EC2_CALLS = 30
+
 
 def get_cpu_arch() -> str | None:
     machine = platform.machine()
@@ -70,6 +74,80 @@ class TrialDaemon:
         self.last_activity_time = time.time()
         self.start_time = time.time()
         self.is_shutting_down = False
+        self.last_ec2_lookup_time = 0.0
+
+    def _lookup_dist_uri_from_ec2(self) -> Optional[str]:
+        self.last_ec2_lookup_time = time.time()
+        return uri_from_ec2()
+
+    def _refresh_dist_uri_if_allowed(self) -> bool:
+        seconds_since_last_lookup = time.time() - self.last_ec2_lookup_time
+        if seconds_since_last_lookup <= MIN_SECONDS_BETWEEN_EC2_CALLS:
+            LOGGER.info(
+                "Skipping EC2 dist lookup; last lookup was %.2fs ago.",
+                seconds_since_last_lookup,
+            )
+            return False
+
+        refreshed_dist_uri = self._lookup_dist_uri_from_ec2()
+        if not refreshed_dist_uri:
+            LOGGER.warning("EC2 dist lookup did not return a running dist server.")
+            return False
+
+        if refreshed_dist_uri == self.dist_uri:
+            LOGGER.info("EC2 dist lookup returned the same dist URI: %s", self.dist_uri)
+            return False
+
+        LOGGER.info(
+            "Updating dist URI from %s to %s after repeated request failures.",
+            self.dist_uri,
+            refreshed_dist_uri,
+        )
+        self.dist_uri = refreshed_dist_uri
+        return True
+
+    def _get_open_studies(self):
+        last_exception: Optional[Exception] = None
+        for attempt in range(1, OPEN_STUDIES_RETRY_COUNT + 1):
+            try:
+                response = requests.get(f"{self.dist_uri}/open", timeout=10)
+                response.raise_for_status()
+                return response.json()
+            except requests.RequestException as exc:
+                last_exception = exc
+                LOGGER.error(
+                    "Failed to get open studies from %s on attempt %d/%d: %s",
+                    self.dist_uri,
+                    attempt,
+                    OPEN_STUDIES_RETRY_COUNT,
+                    exc,
+                )
+                if attempt < OPEN_STUDIES_RETRY_COUNT:
+                    backoff_seconds = OPEN_STUDIES_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                    LOGGER.info(
+                        "Retrying /open in %ss after failure %d/%d.",
+                        backoff_seconds,
+                        attempt,
+                        OPEN_STUDIES_RETRY_COUNT,
+                    )
+                    time.sleep(backoff_seconds)
+
+        if self._refresh_dist_uri_if_allowed():
+            try:
+                response = requests.get(f"{self.dist_uri}/open", timeout=10)
+                response.raise_for_status()
+                return response.json()
+            except requests.RequestException as exc:
+                last_exception = exc
+                LOGGER.error(
+                    "Failed to get open studies from refreshed dist URI %s: %s",
+                    self.dist_uri,
+                    exc,
+                )
+
+        if last_exception is not None:
+            raise last_exception
+        raise RuntimeError("Failed to get open studies for an unknown reason")
 
     def _initiate_graceful_shutdown(self, reason: str):
         """Initiates a graceful shutdown of all runners, then halts the instance."""
@@ -143,9 +221,7 @@ class TrialDaemon:
 
                 LOGGER.info("Polling for open studies...")
                 try:
-                    response = requests.get(f"{self.dist_uri}/open", timeout=10)
-                    response.raise_for_status()
-                    open_studies = response.json()
+                    open_studies = self._get_open_studies()
                 except requests.RequestException as e:
                     LOGGER.error(f"Failed to get open studies: {e}")
                     time.sleep(poll_interval)
