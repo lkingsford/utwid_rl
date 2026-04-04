@@ -104,7 +104,11 @@ pub fn calculate_best_turn<
     policy: BestTurnPolicy,
     exploration_constant: f64,
     log_children: bool,
-) -> <StateType as State>::ActionType
+    existing_tree: Option<Tree<StateType, ActionType>>,
+) -> (
+    <StateType as State>::ActionType,
+    Option<Tree<StateType, ActionType>>,
+)
 where
     StateType: State<ActionType = ActionType>,
     ActionType: Action<StateType = StateType>,
@@ -118,11 +122,15 @@ where
         }
         if children.len() == 1 {
             log::debug!("Short circuited - only one option");
-            return children.keys().next().unwrap().clone();
+            return (children.keys().next().unwrap().clone(), None);
         }
     }
 
-    let tree = Arc::new(Tree::new_with_constant(root_node, exploration_constant));
+    let tree = Arc::new(match existing_tree {
+        Some(existing_tree) => existing_tree,
+        None => Tree::new_with_constant(root_node, exploration_constant),
+    });
+
     let noop_sender = Box::new(NoopSender::new());
     run_mcts_iterations(
         tree.clone(),
@@ -141,7 +149,9 @@ where
             let node = root_ref.read().unwrap();
             let root_player = match node.state().next_actor() {
                 Actor::Player(player_id) => player_id,
-                Actor::GameAction(_) => panic!("BestTurnPolicy::Ucb0 expects a player turn at root"),
+                Actor::GameAction(_) => {
+                    panic!("BestTurnPolicy::Ucb0 expects a player turn at root")
+                }
             };
             // This bit of logic is reimplemented due to crashing when tree is fully explored
             let mut picks = match &*node {
@@ -165,7 +175,7 @@ where
             };
             picks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
             log::debug!("Action, UCB0: {:?}", picks);
-            picks[0].0.clone()
+            (picks[0].0.clone(), (Arc::try_unwrap(tree).ok()))
         }
 
         BestTurnPolicy::MostVisits => {
@@ -218,15 +228,18 @@ where
                     })
                     .collect();
                 if let Some(action) = winning_moves.first() {
-                    return action.clone();
+                    return (action.clone(), (Arc::try_unwrap(tree).ok()));
                 }
 
-                children
-                    .iter()
-                    .max_by_key(|(_, node)| node.read().unwrap().visit_count())
-                    .unwrap()
-                    .0
-                    .clone()
+                (
+                    children
+                        .iter()
+                        .max_by_key(|(_, node)| node.read().unwrap().visit_count())
+                        .unwrap()
+                        .0
+                        .clone(),
+                    (Arc::try_unwrap(tree).ok()),
+                )
             } else {
                 panic!("Expected root to be an expanded node")
             }

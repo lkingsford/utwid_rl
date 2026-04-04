@@ -41,6 +41,8 @@ pub struct UtwidState {
     pub turn_order: VecDeque<ActorId>,
     pub turn_number: usize,
     pub short_circuit_at_turns: Option<usize>,
+    pub short_circuit_at_turns_increment: Option<usize>,
+
     pub ai_turn_weight: f64,
     pub spawn_rng: SmallRng,
     pub actor_id_counter: ActorId,
@@ -61,6 +63,7 @@ impl UtwidState {
             turn_number: 0,
             turn_order: VecDeque::from(vec![0]),
             short_circuit_at_turns: None,
+            short_circuit_at_turns_increment: None,
             ai_turn_weight: 0.0,
             spawn_rng,
             actor_id_counter: 1,
@@ -281,7 +284,7 @@ impl State for UtwidState {
                 }
             }
             GameState::Lost => {
-                rewards[YOU_ID] = -1.0;
+                rewards[YOU_ID] = -1.0 - 1.0 * self.ai_turn_weight;
                 for actor in self.actors.values() {
                     if let Some(tree_id) = actor.traits.iter().find_map(|_trait| {
                         if let ActorTrait::Mon2y { tree_id, .. } = _trait {
@@ -295,7 +298,6 @@ impl State for UtwidState {
                 }
             }
             GameState::Won => {
-                rewards[YOU_ID] = 1.0 - self.ai_turn_weight;
                 for actor in self.actors.values() {
                     if let Some(tree_id) = actor.traits.iter().find_map(|_trait| {
                         if let ActorTrait::Mon2y { tree_id, .. } = _trait {
@@ -307,6 +309,7 @@ impl State for UtwidState {
                         rewards[tree_id] = -1.0;
                     }
                 }
+                rewards[YOU_ID] = 3.0 * (1.0 - self.ai_turn_weight);
             }
             _ => { /* rewards are already 0.0 */ }
         };
@@ -333,7 +336,7 @@ pub enum UtwidAction {
     Wait,
 }
 
-const AI_TURN_WEIGHT: f64 = 1.0 / 200.0;
+const AI_TURN_WEIGHT: f64 = 1.0 / 1000.0;
 
 impl Action for UtwidAction {
     type StateType = UtwidState;
@@ -531,6 +534,11 @@ impl UtwidAction {
         new_state.turn_order = VecDeque::from([0]);
         new_state.to_act = 0;
         new_state.actor_id_counter = 1;
+        if let Some(current_short_circuit) = new_state.short_circuit_at_turns {
+            if let Some(increment) = new_state.short_circuit_at_turns_increment {
+                new_state.short_circuit_at_turns = Some(current_short_circuit + increment);
+            }
+        };
         log::debug!("execute_stairs after {}", new_state.debug_summary());
         new_state
     }

@@ -3,7 +3,9 @@ use crossterm::{
     cursor::MoveTo,
     event::{self, KeyCode, KeyModifiers},
     queue,
+    style::Color,
     style::Print,
+    style::SetForegroundColor,
     terminal::{self, Clear, ClearType},
 };
 use env_logger::fmt::Formatter;
@@ -13,6 +15,7 @@ use std::thread;
 
 use mon2y::games::utwid::{ActorTrait, GameState, UtwidAction, UtwidState};
 use mon2y::mcts::game_trait::Action;
+use mon2y::mcts::tree::Tree;
 use mon2y::mcts::{calculate_best_turn, BestTurnPolicy};
 
 const DRAW_BOARD_X: u16 = 3;
@@ -74,13 +77,49 @@ fn draw_monsters(stdout: &mut Stdout, state: &UtwidState) -> std::io::Result<()>
     Ok(())
 }
 
+fn draw_status(stdout: &mut Stdout, state: &UtwidState) -> std::io::Result<()> {
+    queue!(stdout, MoveTo(0, STATUS_LINE_Y),)?;
+    Ok(())
+}
+
+fn draw_status_mcts(
+    stdout: &mut Stdout,
+    completed_iterations: usize,
+    mcts_iterations: usize,
+) -> std::io::Result<()> {
+    queue!(
+        stdout,
+        MoveTo(MCTS_STATUS_LINE_X1, MCTS_STATUS_LINE_Y),
+        Print("|"),
+        SetForegroundColor(Color::Blue),
+    )?;
+    let completed_length = ((MCTS_STATUS_LINE_X2 - MCTS_STATUS_LINE_X1) as f32
+        * (completed_iterations as f32)
+        / (mcts_iterations as f32)) as u16;
+    for _ in (0..completed_length) {
+        queue!(stdout, Print("-"))?;
+    }
+    let to_go_length = (MCTS_STATUS_LINE_X2 - MCTS_STATUS_LINE_X1) - completed_length;
+    for _ in (0..to_go_length) {
+        queue!(stdout, Print(" "))?;
+    }
+    queue!(stdout, SetForegroundColor(Color::Grey), Print("|"));
+    Ok(())
+}
+
 const DRAW_MONSTER_X: u16 = 20;
 const DRAW_MONSTER_Y: u16 = 2;
 
+const STATUS_LINE_Y: u16 = 13;
+const MCTS_STATUS_LINE_X1: u16 = 2;
+const MCTS_STATUS_LINE_X2: u16 = 12;
+const MCTS_STATUS_LINE_Y: u16 = 17;
+
 const HUMAN_ITERATIONS: usize = 3000;
+const ITERATIONS_STEPS: usize = 10;
 const THREADS: usize = 6;
 const EXPLORATION_CONSTANT: f64 = 1.4142135623730951; // sqrt(2.0)
-const SHORT_CIRCUIT_AT_TURNS: usize = 5000;
+const SHORT_CIRCUIT_AT_TURNS: usize = 300;
 
 struct RawModeGuard;
 
@@ -139,6 +178,7 @@ fn main() -> std::io::Result<()> {
 
     let mut state = UtwidState::new();
     state.short_circuit_at_turns = Some(SHORT_CIRCUIT_AT_TURNS);
+    state.short_circuit_at_turns_increment = Some(SHORT_CIRCUIT_AT_TURNS);
     let mut stdout = stdout();
 
     while matches!(state.game_state, GameState::Ongoing | GameState::Checkpoint) {
@@ -146,6 +186,7 @@ fn main() -> std::io::Result<()> {
             queue!(stdout, Clear(ClearType::All))?;
             draw_board(&mut stdout, state.clone())?;
             draw_monsters(&mut stdout, &state)?;
+            draw_status(&mut stdout, &state)?;
             stdout.flush()?;
         }
         let to_act = state.actors.get(&state.to_act).unwrap();
@@ -182,29 +223,45 @@ fn main() -> std::io::Result<()> {
             }
             this_attempt.unwrap()
         } else {
-            let mut ai_marked_state = state.clone();
-            ai_marked_state.short_circuit_at_turns =
-                Some(ai_marked_state.turn_number + SHORT_CIRCUIT_AT_TURNS);
-            ai_marked_state.ai_turn_weight = 0.0;
-            calculate_best_turn(
-                {
-                    to_act.traits.iter().find_map(|trait_| match trait_ {
-                        ActorTrait::Mon2y {
-                            tree_id,
-                            iterations,
-                        } => Some(((*iterations as f32) * args.difficulty_mod) as usize),
-                        ActorTrait::Human => Some(args.iterations),
-                        _ => None,
-                    })
+            let mut completed_iterations = 0;
+            let iterations_step = args.iterations / ITERATIONS_STEPS;
+            let mut tree: Option<Tree<UtwidState, UtwidAction>> = None;
+            let mut best_turn: Option<UtwidAction> = None;
+            let mcts_iterations = {
+                to_act.traits.iter().find_map(|trait_| match trait_ {
+                    ActorTrait::Mon2y {
+                        tree_id,
+                        iterations,
+                    } => Some(((*iterations as f32) * args.difficulty_mod) as usize),
+                    ActorTrait::Human => Some(args.iterations),
+                    _ => None,
+                })
+            }
+            .unwrap(); // This would fail if we'd stopped on the wrong player
+            while completed_iterations < args.iterations {
+                let mut ai_marked_state = state.clone();
+                ai_marked_state.short_circuit_at_turns =
+                    Some(ai_marked_state.turn_number + SHORT_CIRCUIT_AT_TURNS);
+                ai_marked_state.ai_turn_weight = 0.0;
+                let (best_turn_from_calculate, tree_from_calculate) = calculate_best_turn(
+                    mcts_iterations,
+                    None,
+                    THREADS,
+                    ai_marked_state,
+                    BestTurnPolicy::Ucb0,
+                    EXPLORATION_CONSTANT,
+                    false,
+                    tree,
+                );
+                tree = tree_from_calculate;
+                best_turn = Some(best_turn_from_calculate);
+                completed_iterations += iterations_step;
+                if !args.plain_mode {
+                    draw_status_mcts(&mut stdout, completed_iterations, mcts_iterations);
+                    stdout.flush()?;
                 }
-                .unwrap(), // This would fail if we'd stopped on the wrong player
-                None,
-                THREADS,
-                ai_marked_state,
-                BestTurnPolicy::Ucb0,
-                EXPLORATION_CONSTANT,
-                false,
-            )
+            }
+            best_turn.unwrap()
         };
         state = next_act.execute(&state);
         if matches!(state.game_state, GameState::Checkpoint) {
