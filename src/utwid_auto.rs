@@ -10,8 +10,11 @@ use crossterm::{
 };
 use env_logger::fmt::Formatter;
 use log::Record;
-use std::io::{stdout, Stdout, Write};
 use std::thread;
+use std::{
+    io::{stdout, Stdout, Write},
+    time::Duration,
+};
 
 use mon2y::games::utwid::{ActorTrait, GameState, UtwidAction, UtwidState};
 use mon2y::mcts::game_trait::Action;
@@ -105,6 +108,17 @@ fn draw_status_mcts(
     }
     queue!(stdout, SetForegroundColor(Color::Grey), Print("|"));
     Ok(())
+}
+
+fn check_for_killing_process() {
+    while event::poll(Duration::from_mins(0)).is_ok() {
+        let incoming_event = event::read();
+        if let Ok(event::Event::Key(key_event)) = incoming_event {
+            if key_event.modifiers.intersects(KeyModifiers::CONTROL) {
+                unimplemented!("Lazy quit");
+            };
+        }
+    }
 }
 
 const DRAW_MONSTER_X: u16 = 20;
@@ -260,6 +274,8 @@ fn main() -> std::io::Result<()> {
                 if !args.plain_mode {
                     draw_status_mcts(&mut stdout, completed_iterations, mcts_iterations);
                     stdout.flush()?;
+
+                    check_for_killing_process();
                 }
             }
             best_turn.unwrap()
