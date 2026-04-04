@@ -1,5 +1,3 @@
-use crate::hyper::GameHyperrewardTrait;
-
 use super::game_trait::{Action, Actor, State};
 use super::node::Node;
 use super::weighted_random::weighted_random;
@@ -9,20 +7,18 @@ use log::trace;
 use rand::Rng;
 use std::sync::{Arc, RwLock};
 
-
 #[derive(Debug, PartialEq, Clone)]
-pub struct SelectionResult<ActionType: Action, GameHyperrewardType: GameHyperrewardTrait> {
+pub struct SelectionResult<ActionType: Action> {
     pub selection: Vec<ActionType>,
     pub random_walk_steps: u32,
     pub selected_steps: u32,
-    pub round_hyperreward: Option<GameHyperrewardType>,
     pub sum_diff_est_reward: f64,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Selection<ActionType: Action, GameHyperrewardType: GameHyperrewardTrait> {
+pub enum Selection<ActionType: Action> {
     FullyExplored,
-    Selection(SelectionResult<ActionType, GameHyperrewardType>),
+    Selection(SelectionResult<ActionType>),
 }
 pub struct Tree<StateType: State, ActionType: Action<StateType = StateType>> {
     pub root: Arc<RwLock<Node<StateType, ActionType>>>,
@@ -67,7 +63,7 @@ where
     ///
     /// Returns a path to the current selection
     ///
-    pub fn selection(&self) -> Selection<ActionType, StateType::GameHyperrewardType> {
+    pub fn selection(&self) -> Selection<ActionType> {
         return Tree::select_from(self.root.clone(), self.constant, 1);
     }
 
@@ -75,7 +71,7 @@ where
         node: Arc<RwLock<Node<StateType, ActionType>>>,
         constant: f64,
         depth: u32,
-    ) -> Selection<ActionType, StateType::GameHyperrewardType> {
+    ) -> Selection<ActionType> {
         let best_pick = super::node::best_pick(&node, constant);
         if best_pick.is_empty() {
             return Selection::FullyExplored;
@@ -121,7 +117,6 @@ where
                             selection: result_selection,
                             random_walk_steps: selection_result.random_walk_steps,
                             selected_steps: selection_result.selected_steps,
-                            round_hyperreward: selection_result.round_hyperreward,
                             sum_diff_est_reward: selection_result.sum_diff_est_reward
                                 + diff_est_reward,
                         });
@@ -133,7 +128,6 @@ where
                     selection: vec![pick.action_to_take.clone()],
                     random_walk_steps: 0,
                     selected_steps: depth,
-                    round_hyperreward: None,
                     sum_diff_est_reward: diff_est_reward,
                 });
             }
@@ -143,7 +137,7 @@ where
 
     pub fn expansion(
         &self,
-        selection: &Selection<ActionType, StateType::GameHyperrewardType>,
+        selection: &Selection<ActionType>,
     ) -> Vec<Arc<RwLock<Node<StateType, ActionType>>>> {
         trace!("Expansion: Selection: {:#?}", selection);
         let mut cur_node = self.root.clone();
@@ -240,7 +234,7 @@ where
         }
     }
 
-    pub fn iterate(&self) -> Selection<ActionType, StateType::GameHyperrewardType> {
+    pub fn iterate(&self) -> Selection<ActionType> {
         let selection = self.selection();
         if let Selection::FullyExplored = selection {
             log::warn!("Iterate short circuited - fully explored");
@@ -265,7 +259,6 @@ where
                 selection: selection_result.selection,
                 random_walk_steps: play_out_result.random_walk_steps,
                 selected_steps: selection_result.selected_steps,
-                round_hyperreward: Some(play_out_result.round_hyperreward),
                 sum_diff_est_reward: selection_result.sum_diff_est_reward,
             });
         }
@@ -420,7 +413,6 @@ mod tests {
             selection: selection_path.clone(),
             selected_steps: 2,
             random_walk_steps: 0,
-            round_hyperreward: Some(TestHyperreward::default()),
             sum_diff_est_reward: 0.0,
         });
 
@@ -478,7 +470,6 @@ mod tests {
             ],
             selected_steps: 2,
             random_walk_steps: 0,
-            round_hyperreward: Some(TestHyperreward::default()),
             sum_diff_est_reward: 0.0,
         });
 

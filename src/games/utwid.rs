@@ -173,7 +173,11 @@ impl UtwidState {
     }
 
     fn normalize_turn_state(&mut self) {
-        let before = self.debug_summary();
+        let before = if log::log_enabled!(log::Level::Trace) {
+            Some(self.debug_summary())
+        } else {
+            None
+        };
         self.turn_order.retain(|id| self.actors.contains_key(id));
 
         if self.turn_order.is_empty() {
@@ -190,10 +194,13 @@ impl UtwidState {
             }
         }
 
-        if log::log_enabled!(log::Level::Trace) && before != self.debug_summary() {
+        if log::log_enabled!(log::Level::Trace)
+            && before.is_some()
+            && before.clone().unwrap() != self.debug_summary()
+        {
             log::trace!(
                 "normalize_turn_state changed state: before=[{}] after=[{}]",
-                before,
+                before.unwrap(),
                 self.debug_summary()
             );
         }
@@ -835,7 +842,6 @@ pub struct Utwid;
 impl Game for Utwid {
     type StateType = UtwidState;
     type ActionType = UtwidAction;
-    type HyperparamsType = ();
     type HyperrewardsType = ();
 
     fn visualise_state(&self, state: &Self::StateType) {
@@ -861,7 +867,7 @@ impl Game for Utwid {
         println!("State: {:?}", state.game_state);
     }
 
-    fn init_game(&self, _hyperparams: &Self::HyperparamsType) -> Self::StateType {
+    fn init_game(&self) -> Self::StateType {
         UtwidState::new()
     }
 }
