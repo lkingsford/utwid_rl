@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 
-use mon2y::games::utwid::{ActorTrait, GameState, UtwidAction, UtwidState};
+use mon2y::games::utwid::{ActorTraits, GameState, UtwidAction, UtwidState};
 use mon2y::mcts::game_trait::Action;
 use mon2y::mcts::tree::Tree;
 use mon2y::mcts::{calculate_best_turn, BestTurnPolicy};
@@ -31,7 +31,8 @@ fn draw_board(stdout: &mut Stdout, state: UtwidState) -> std::io::Result<()> {
         for ix in 0..state.board.width {
             let actor_repr = state
                 .actors
-                .values()
+                .iter()
+                .filter_map(|actor| actor.as_ref())
                 .find(|actor| actor.x == ix && actor.y == iy)
                 .and_then(|actor| actor.console_repr());
 
@@ -54,7 +55,11 @@ fn draw_board(stdout: &mut Stdout, state: UtwidState) -> std::io::Result<()> {
 
 fn draw_monsters(stdout: &mut Stdout, state: &UtwidState) -> std::io::Result<()> {
     for (i, actor_id) in state.turn_order.iter().enumerate() {
-        if let Some(actor) = state.actors.get(actor_id) {
+        if let Some(actor) = state.actors.get(*actor_id) {
+            let actor = match actor.as_ref() {
+                Some(actor) => actor,
+                None => continue,
+            };
             queue!(
                 stdout,
                 MoveTo(DRAW_MONSTER_X, DRAW_MONSTER_Y + i as u16),
@@ -63,17 +68,7 @@ fn draw_monsters(stdout: &mut Stdout, state: &UtwidState) -> std::io::Result<()>
                     actor.console_repr().unwrap_or(' '),
                     actor.x,
                     actor.y,
-                    actor
-                        .traits
-                        .iter()
-                        .find_map(|t| {
-                            if let ActorTrait::Health(h) = t {
-                                Some(*h)
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or(0)
+                    actor.health.unwrap_or(0)
                 ))
             )?;
         }
@@ -205,8 +200,12 @@ fn main() -> std::io::Result<()> {
             draw_status(&mut stdout, &state)?;
             stdout.flush()?;
         }
-        let to_act = state.actors.get(&state.to_act).unwrap();
-        let next_act = if args.human && to_act.traits.contains(&ActorTrait::Human) {
+        let to_act = state
+            .actors
+            .get(state.to_act)
+            .and_then(|actor| actor.as_ref())
+            .unwrap();
+        let next_act = if args.human && to_act.traits.contains(ActorTraits::HUMAN) {
             let mut this_attempt: Option<UtwidAction> = None;
             while this_attempt.is_none() {
                 let read_event_result = event::read();
@@ -244,14 +243,16 @@ fn main() -> std::io::Result<()> {
             let mut tree: Option<Arc<Tree<UtwidState, UtwidAction>>> = None;
             let mut best_turn: Option<UtwidAction> = None;
             let (mcts_iterations, short_circuit_increment) = {
-                to_act.traits.iter().find_map(|trait_| match trait_ {
-                    ActorTrait::Mon2y {
-                        tree_id,
-                        iterations,
-                    } => Some((((*iterations as f32) * args.difficulty_mod) as usize, 0)),
-                    ActorTrait::Human => Some((args.iterations, SHORT_CIRCUIT_INCREMENT)),
-                    _ => None,
-                })
+                if let Some(mon2y) = to_act.mon2y.as_ref() {
+                    Some((
+                        (((mon2y.iterations) as f32) * args.difficulty_mod) as usize,
+                        0,
+                    ))
+                } else if to_act.traits.contains(ActorTraits::HUMAN) {
+                    Some((args.iterations, SHORT_CIRCUIT_INCREMENT))
+                } else {
+                    None
+                }
             }
             .unwrap(); // This would fail if we'd stopped on the wrong player
             while completed_iterations < args.iterations {

@@ -1,4 +1,6 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use bitflags::bitflags;
 
 use crate::game::Game;
 use crate::mcts::game_trait::{Action, Actor, State};
@@ -35,7 +37,7 @@ const YOU_ID: usize = 0;
 pub struct UtwidState {
     pub current_level: usize,
     pub board: Board,
-    pub actors: HashMap<ActorId, GameActor>,
+    pub actors: Vec<Option<GameActor>>,
     pub to_act: ActorId,
     pub game_state: GameState,
     pub turn_order: VecDeque<ActorId>,
@@ -57,7 +59,7 @@ impl UtwidState {
         UtwidState {
             current_level: 0,
             board: board, // Use the pre-created board
-            actors: HashMap::from([(0, GameActor::you_actor())]),
+            actors: vec![Some(GameActor::you_actor())],
             to_act: 0,
             game_state: GameState::Ongoing,
             turn_number: 0,
@@ -73,30 +75,51 @@ impl UtwidState {
     // Urgh - I don't know if I should be using an index here...
     pub fn add_actor(&mut self, actor: GameActor) -> ActorId {
         let id = self.actor_id_counter;
-        self.actors.insert(id, actor);
+        self.actors.push(Some(actor));
         self.actor_id_counter += 1;
         self.turn_order.push_back(id);
         id
     }
 
+    fn actor(&self, actor_id: ActorId) -> Option<&GameActor> {
+        self.actors.get(actor_id).and_then(Option::as_ref)
+    }
+
+    fn actor_mut(&mut self, actor_id: ActorId) -> Option<&mut GameActor> {
+        self.actors.get_mut(actor_id).and_then(Option::as_mut)
+    }
+
+    fn has_actor(&self, actor_id: ActorId) -> bool {
+        self.actor(actor_id).is_some()
+    }
+
+    fn remove_actor(&mut self, actor_id: ActorId) -> Option<GameActor> {
+        self.actors.get_mut(actor_id).and_then(Option::take)
+    }
+
+    fn actors_iter(&self) -> impl Iterator<Item = (ActorId, &GameActor)> {
+        self.actors
+            .iter()
+            .enumerate()
+            .filter_map(|(id, actor)| actor.as_ref().map(|actor| (id, actor)))
+    }
+
+    fn actors_iter_mut(&mut self) -> impl Iterator<Item = (ActorId, &mut GameActor)> {
+        self.actors
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(id, actor)| actor.as_mut().map(|actor| (id, actor)))
+    }
+
+    fn actor_count(&self) -> usize {
+        self.actors_iter().count()
+    }
+
     pub fn mon2y_high_actor_id(&self) -> u8 {
         self.actors
             .iter()
-            .map(|actor| {
-                actor
-                    .1
-                    .traits
-                    .iter()
-                    .map(|_trait| match _trait {
-                        ActorTrait::Mon2y {
-                            tree_id,
-                            iterations,
-                        } => tree_id.clone(),
-                        _ => 0,
-                    })
-                    .max()
-                    .unwrap_or(0)
-            })
+            .filter_map(|actor| actor.as_ref())
+            .map(|actor| actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id).unwrap_or(0))
             .max()
             .unwrap_or(0)
     }
@@ -119,26 +142,22 @@ impl UtwidState {
 
     fn actor_in_space(&self, x: usize, y: usize) -> Option<&GameActor> {
         self.actors
-            .values()
+            .iter()
+            .filter_map(|actor| actor.as_ref())
             .find(|actor| actor.x == x && actor.y == y)
     }
 
     fn actor_debug_rows(&self) -> Vec<String> {
         let mut rows: Vec<String> = self
-            .actors
-            .iter()
+            .actors_iter()
             .map(|(id, actor)| {
-                let label = actor
-                    .traits
-                    .iter()
-                    .find_map(|trait_| match trait_ {
-                        ActorTrait::Human => Some("Human".to_string()),
-                        ActorTrait::Mon2y {
-                            tree_id,
-                            iterations,
-                        } => Some(format!("Mon2y(tree={},iters={})", tree_id, iterations)),
-                        _ => None,
-                    })
+                let label = if actor.traits.contains(ActorTraits::HUMAN) {
+                    Some("Human".to_string())
+                } else {
+                    actor.mon2y
+                        .as_ref()
+                        .map(|mon2y| format!("Mon2y(tree={},iters={})", mon2y.tree_id, mon2y.iterations))
+                }
                     .unwrap_or_else(|| "Other".to_string());
                 format!(
                     "id={} pos=({}, {}) repr={:?} label={} dead={} health={:?}",
@@ -147,11 +166,8 @@ impl UtwidState {
                     actor.y,
                     actor.console_repr(),
                     label,
-                    actor.traits.contains(&ActorTrait::Dead),
-                    actor.traits.iter().find_map(|trait_| match trait_ {
-                        ActorTrait::Health(h) => Some(*h),
-                        _ => None,
-                    }),
+                    actor.traits.contains(ActorTraits::DEAD),
+                    actor.health,
                 )
             })
             .collect();
@@ -167,7 +183,7 @@ impl UtwidState {
             self.to_act,
             self.turn_number,
             self.turn_order,
-            self.actors.keys().copied().collect::<Vec<_>>(),
+            self.actors_iter().map(|(id, _)| id).collect::<Vec<_>>(),
             self.actor_debug_rows().join(" | "),
         )
     }
@@ -178,17 +194,18 @@ impl UtwidState {
         } else {
             None
         };
-        self.turn_order.retain(|id| self.actors.contains_key(id));
+        let live_actor_ids: Vec<_> = self.actors_iter().map(|(id, _)| id).collect();
+        self.turn_order.retain(|id| live_actor_ids.contains(id));
 
         if self.turn_order.is_empty() {
-            if self.actors.contains_key(&0) {
+            if self.has_actor(0) {
                 self.turn_order.push_back(0);
-            } else if let Some(actor_id) = self.actors.keys().min().copied() {
+            } else if let Some(actor_id) = self.actors_iter().map(|(id, _)| id).min() {
                 self.turn_order.push_back(actor_id);
             }
         }
 
-        if !self.actors.contains_key(&self.to_act) {
+        if !self.has_actor(self.to_act) {
             if let Some(actor_id) = self.turn_order.front().copied() {
                 self.to_act = actor_id;
             }
@@ -213,7 +230,7 @@ impl State for UtwidState {
 
     fn permitted_actions(&self) -> Vec<Self::ActionType> {
         log::trace!("permitted_actions state {}", self.debug_summary());
-        let next_actor = self.actors.get(&self.to_act).unwrap_or_else(|| {
+        let next_actor = self.actor(self.to_act).unwrap_or_else(|| {
             panic!(
                 "Invalid to_act in permitted_actions: {}",
                 self.debug_summary()
@@ -222,29 +239,21 @@ impl State for UtwidState {
         self.board.permitted_moves(
             next_actor.x,
             next_actor.y,
-            next_actor.traits.contains(&ActorTrait::CardinalMove),
-            next_actor.traits.contains(&ActorTrait::DiagonalMove),
+            next_actor.traits.contains(ActorTraits::CARDINAL_MOVE),
+            next_actor.traits.contains(ActorTraits::DIAGONAL_MOVE),
         )
     }
 
     fn next_actor(&self) -> Actor<Self::ActionType> {
         log::trace!("next_actor state {}", self.debug_summary());
         let next_actor = self
-            .actors
-            .get(&self.to_act)
+            .actor(self.to_act)
             .unwrap_or_else(|| panic!("Invalid to_act in next_actor: {}", self.debug_summary()));
-        next_actor
-            .traits
-            .iter()
-            .find_map(|_trait| match _trait {
-                ActorTrait::Human => Some(Actor::Player(0)),
-                ActorTrait::Mon2y {
-                    tree_id,
-                    iterations,
-                } => Some(Actor::Player(*tree_id)),
-                _ => None,
-            })
-            .unwrap()
+        if next_actor.traits.contains(ActorTraits::HUMAN) {
+            Actor::Player(0)
+        } else {
+            Actor::Player(next_actor.mon2y.as_ref().unwrap().tree_id)
+        }
     }
 
     fn terminal(&self) -> bool {
@@ -261,14 +270,8 @@ impl State for UtwidState {
 
         match self.game_state {
             GameState::Checkpoint => {
-                for actor in self.actors.values() {
-                    if let Some(tree_id) = actor.traits.iter().find_map(|_trait| {
-                        if let ActorTrait::Mon2y { tree_id, .. } = _trait {
-                            Some(*tree_id as usize)
-                        } else {
-                            None
-                        }
-                    }) {
+                for (_, actor) in self.actors_iter() {
+                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize) {
                         rewards[tree_id] = -0.5;
                     }
                 }
@@ -276,14 +279,8 @@ impl State for UtwidState {
                     (1.0 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight);
             }
             GameState::Mon2yShortcircuit => {
-                for actor in self.actors.values() {
-                    if let Some(tree_id) = actor.traits.iter().find_map(|_trait| {
-                        if let ActorTrait::Mon2y { tree_id, .. } = _trait {
-                            Some(*tree_id as usize)
-                        } else {
-                            None
-                        }
-                    }) {
+                for (_, actor) in self.actors_iter() {
+                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize) {
                         rewards[tree_id] = -0.5;
                     }
                 }
@@ -291,28 +288,16 @@ impl State for UtwidState {
                     (0.5 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight);
             }
             GameState::Lost => {
-                for actor in self.actors.values() {
-                    if let Some(tree_id) = actor.traits.iter().find_map(|_trait| {
-                        if let ActorTrait::Mon2y { tree_id, .. } = _trait {
-                            Some(*tree_id as usize)
-                        } else {
-                            None
-                        }
-                    }) {
+                for (_, actor) in self.actors_iter() {
+                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize) {
                         rewards[tree_id] = 1.0;
                     }
                 }
                 rewards[YOU_ID] = -1.0 - 1.0 * self.ai_turn_weight;
             }
             GameState::Won => {
-                for actor in self.actors.values() {
-                    if let Some(tree_id) = actor.traits.iter().find_map(|_trait| {
-                        if let ActorTrait::Mon2y { tree_id, .. } = _trait {
-                            Some(*tree_id as usize)
-                        } else {
-                            None
-                        }
-                    }) {
+                for (_, actor) in self.actors_iter() {
+                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize) {
                         rewards[tree_id] = -1.0;
                     }
                 }
@@ -367,11 +352,10 @@ impl Action for UtwidAction {
             _ => unimplemented!(),
         };
         if state
-            .actors
-            .get(&state.to_act)
+            .actor(state.to_act)
             .unwrap()
             .traits
-            .contains(&ActorTrait::Human)
+            .contains(ActorTraits::HUMAN)
         {
             new_state.turn_number += 1;
 
@@ -401,19 +385,23 @@ impl Action for UtwidAction {
         // Bring out yer dead!
         let mut dead_actor_ids: Vec<ActorId> = Vec::new();
         for (actor_id, actor) in new_state
-            .actors
-            .iter()
-            .filter(|actor| actor.1.traits.contains(&ActorTrait::Dead))
+            .actors_iter()
+            .filter(|(_, actor)| actor.traits.contains(ActorTraits::DEAD))
         {
-            dead_actor_ids.push(*actor_id);
-            if actor.traits.contains(&ActorTrait::Human) {
-                new_state.game_state = GameState::Lost;
-            }
+            dead_actor_ids.push(actor_id);
+        }
+        if dead_actor_ids.iter().any(|actor_id| {
+            new_state
+                .actor(*actor_id)
+                .map(|actor| actor.traits.contains(ActorTraits::HUMAN))
+                .unwrap_or(false)
+        }) {
+            new_state.game_state = GameState::Lost;
         }
 
         // Remove dead actors from the actors map
         for actor_id in &dead_actor_ids {
-            new_state.actors.remove(actor_id);
+            new_state.remove_actor(*actor_id);
         }
 
         // Filter dead actors from the turn order
@@ -448,7 +436,7 @@ impl Action for UtwidAction {
             // Remove the actor from their current position.
             if let Some(actor_id) = new_state.turn_order.remove(index) {
                 // If they are still alive, add them to the back of the queue.
-                if new_state.actors.contains_key(&actor_id) {
+                if new_state.has_actor(actor_id) {
                     new_state.turn_order.push_back(actor_id);
                 }
             }
@@ -474,26 +462,13 @@ impl UtwidAction {
 
         // --- Attack ---
         let (new_coords, damage) = {
-            let actor = new_state.actors.get_mut(&actor_id).unwrap();
-            (
-                apply_dir(actor.x, actor.y, *self),
-                actor
-                    .traits
-                    .iter()
-                    .map(|trait_| match trait_ {
-                        ActorTrait::Attack { damage } => (*damage).clone() as isize,
-                        _ => 0,
-                    })
-                    .sum::<isize>()
-                    * -1,
-            )
+            let actor = new_state.actor(actor_id).unwrap();
+            (apply_dir(actor.x, actor.y, *self), actor.attack_damage.unwrap_or(0) as isize * -1)
         };
 
-        for actor in new_state
-            .actors
-            .iter_mut()
-            .map(|actor| actor.1)
-            .filter(|actor| actor.x == new_coords.0 && actor.y == new_coords.1)
+        for (_, actor) in new_state
+            .actors_iter_mut()
+            .filter(|(_, actor)| actor.x == new_coords.0 && actor.y == new_coords.1)
         {
             actor.modify_health(damage);
         }
@@ -501,50 +476,43 @@ impl UtwidAction {
         // --- And the rest ---
 
         if new_state
-            .actors
-            .iter()
-            .map(|actor| actor.1)
+            .actors_iter()
+            .map(|(_, actor)| actor)
             .find(|actor| actor.x == new_coords.0 && actor.y == new_coords.1)
             .is_none()
         {
-            let actor = new_state.actors.get_mut(&actor_id).unwrap();
+            let actor = new_state.actor_mut(actor_id).unwrap();
             (actor.x, actor.y) = new_coords;
         }
 
-        let actor_ref = new_state.actors.get(&actor_id).unwrap();
+        let actor_ref = new_state.actor(actor_id).unwrap();
 
-        if actor_ref.traits.contains(&ActorTrait::Human) {
+        if actor_ref.traits.contains(ActorTraits::HUMAN) {
             let tile = new_state.board.get(actor_ref.x, actor_ref.y);
-
-            tile.traits
-                .iter()
-                .find_map(|trait_| match trait_ {
-                    TileTrait::Stairs => Some(self.execute_stairs(&new_state, &tile, actor_ref)),
-                    TileTrait::Win => Some(self.execute_win(&new_state)),
-                    _ => None,
-                })
-                .unwrap_or(new_state)
+            if tile.traits.contains(TileTraits::STAIRS) {
+                self.execute_stairs(&new_state)
+            } else if tile.traits.contains(TileTraits::WIN) {
+                self.execute_win(&new_state)
+            } else {
+                new_state
+            }
         } else {
             new_state
         }
     }
 
-    fn execute_stairs(&self, state: &UtwidState, _tile: &Tile, _to_act: &GameActor) -> UtwidState {
+    fn execute_stairs(&self, state: &UtwidState) -> UtwidState {
         log::debug!("execute_stairs before {}", state.debug_summary());
         let mut new_state = state.clone();
         new_state.current_level = state.current_level + 1;
         new_state.game_state = GameState::Checkpoint;
         let mut board_rng = state.board.rng.clone();
         new_state.board = Board::new(new_state.current_level, &mut board_rng);
-        let mut you = state
-            .actors
-            .get(&0)
-            .cloned()
-            .unwrap_or_else(GameActor::you_actor);
+        let mut you = state.actor(0).cloned().unwrap_or_else(GameActor::you_actor);
         you.x = 1;
         you.y = 3;
-        you.traits.remove(&ActorTrait::Dead);
-        new_state.actors = HashMap::from([(0, you)]);
+        you.traits.remove(ActorTraits::DEAD);
+        new_state.actors = vec![Some(you)];
         new_state.turn_order = VecDeque::from([0]);
         new_state.to_act = 0;
         new_state.actor_id_counter = 1;
@@ -564,57 +532,52 @@ impl UtwidAction {
     }
 }
 
-#[derive(Clone, PartialEq, PartialOrd, Eq, Hash)]
-pub enum TileTrait {
-    Walkable,
-    ConsoleRepr(char),
-    Stairs,
-    Win,
+bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct TileTraits: u8 {
+        const WALKABLE = 1 << 0;
+        const STAIRS = 1 << 1;
+        const WIN = 1 << 2;
+    }
 }
 
 #[derive(Clone)]
 pub struct Tile {
-    traits: HashSet<TileTrait>,
+    traits: TileTraits,
+    pub console_repr: Option<char>,
 }
 
 impl Tile {
     fn floor() -> Tile {
         Tile {
-            traits: HashSet::from([TileTrait::Walkable, TileTrait::ConsoleRepr('.')]),
+            traits: TileTraits::WALKABLE,
+            console_repr: Some('.'),
         }
     }
 
     fn wall() -> Tile {
         Tile {
-            traits: HashSet::from([TileTrait::ConsoleRepr('#')]),
+            traits: TileTraits::empty(),
+            console_repr: Some('#'),
         }
     }
 
     fn stair() -> Tile {
         Tile {
-            traits: HashSet::from([
-                TileTrait::Stairs,
-                TileTrait::Walkable,
-                TileTrait::ConsoleRepr('>'),
-            ]),
+            traits: TileTraits::STAIRS | TileTraits::WALKABLE,
+            console_repr: Some('>'),
         }
     }
 
     fn win() -> Tile {
         Tile {
-            traits: HashSet::from([
-                TileTrait::Walkable,
-                TileTrait::ConsoleRepr('W'),
-                TileTrait::Win,
-            ]),
+            traits: TileTraits::WALKABLE | TileTraits::WIN,
+            console_repr: Some('W'),
         }
     }
 
     pub fn console_repr(&self) -> Option<char> {
-        self.traits.iter().find_map(|trait_| match trait_ {
-            TileTrait::ConsoleRepr(c) => Some(*c),
-            _ => None,
-        })
+        self.console_repr
     }
 }
 
@@ -688,7 +651,7 @@ impl Board {
                 if x >= 0 && (x as usize) < self.width && y >= 0 && (y as usize) < self.height {
                     self.get(x as usize, y as usize)
                         .traits
-                        .contains(&TileTrait::Walkable)
+                        .contains(TileTraits::WALKABLE)
                         .then_some(*action)
                 } else {
                     None
@@ -698,53 +661,47 @@ impl Board {
     }
 }
 
-#[derive(Clone, PartialEq, PartialOrd, Eq, Hash)]
-pub enum ActorTrait {
-    Human,
-    Mon2y { tree_id: u8, iterations: usize },
-    CardinalMove,
-    DiagonalMove,
-    Wait,
-    ConsoleRepr(char),
-    Health(usize),
-    Dead,
-    Attack { damage: usize },
+bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct ActorTraits: u16 {
+        const HUMAN = 1 << 0;
+        const MON2Y = 1 << 1;
+        const CARDINAL_MOVE = 1 << 2;
+        const DIAGONAL_MOVE = 1 << 3;
+        const WAIT = 1 << 4;
+        const DEAD = 1 << 5;
+    }
+}
+
+#[derive(Clone)]
+pub struct Mon2yData {
+    pub tree_id: u8,
+    pub iterations: usize,
 }
 
 #[derive(Clone)]
 pub struct GameActor {
     pub x: usize,
     pub y: usize,
-    pub traits: HashSet<ActorTrait>,
+    pub traits: ActorTraits,
+    pub mon2y: Option<Mon2yData>,
+    pub console_repr: Option<char>,
+    pub health: Option<usize>,
+    pub attack_damage: Option<usize>,
 }
 
 impl GameActor {
     pub fn console_repr(&self) -> Option<char> {
-        self.traits.iter().find_map(|trait_| match trait_ {
-            ActorTrait::ConsoleRepr(c) => Some(*c),
-            _ => None,
-        })
+        self.console_repr
     }
 
     pub fn modify_health(&mut self, d_health: isize) -> () {
-        let current_health = self
-            .traits
-            .iter()
-            .find_map(|t| match t {
-                ActorTrait::Health(h) => Some(*h),
-                _ => None,
-            })
-            .unwrap_or(0); // Default to 0 if no health trait is found
-
-        // Remove the old health trait
-        self.traits.retain(|t| !matches!(t, ActorTrait::Health(_)));
-
-        // Add the new health trait
+        let current_health = self.health.unwrap_or(0);
         let new_health = (current_health as isize + d_health).max(0) as usize;
-        self.traits.insert(ActorTrait::Health(new_health));
+        self.health = Some(new_health);
 
         if new_health <= 0 {
-            self.traits.insert(ActorTrait::Dead);
+            self.traits.insert(ActorTraits::DEAD);
         }
     }
 }
@@ -755,14 +712,11 @@ impl GameActor {
         GameActor {
             x: 1,
             y: 3,
-            traits: HashSet::from([
-                ActorTrait::ConsoleRepr('@'),
-                ActorTrait::Human,
-                ActorTrait::CardinalMove,
-                ActorTrait::DiagonalMove,
-                ActorTrait::Health(7),
-                ActorTrait::Attack { damage: 1 },
-            ]),
+            traits: ActorTraits::HUMAN | ActorTraits::CARDINAL_MOVE | ActorTraits::DIAGONAL_MOVE,
+            mon2y: None,
+            console_repr: Some('@'),
+            health: Some(7),
+            attack_damage: Some(1),
         }
     }
 
@@ -770,18 +724,17 @@ impl GameActor {
         GameActor {
             x: 7,
             y: 7,
-            traits: HashSet::from([
-                ActorTrait::ConsoleRepr('&'),
-                ActorTrait::Mon2y {
-                    tree_id: 1,
-                    iterations: 1000,
-                },
-                ActorTrait::CardinalMove,
-                ActorTrait::DiagonalMove,
-                ActorTrait::Wait,
-                ActorTrait::Health(7),
-                ActorTrait::Attack { damage: 1 },
-            ]),
+            traits: ActorTraits::MON2Y
+                | ActorTraits::CARDINAL_MOVE
+                | ActorTraits::DIAGONAL_MOVE
+                | ActorTraits::WAIT,
+            mon2y: Some(Mon2yData {
+                tree_id: 1,
+                iterations: 1000,
+            }),
+            console_repr: Some('&'),
+            health: Some(7),
+            attack_damage: Some(1),
         }
     }
 
@@ -789,16 +742,14 @@ impl GameActor {
         GameActor {
             x,
             y,
-            traits: HashSet::from([
-                ActorTrait::Mon2y {
-                    tree_id: 1,
-                    iterations: 5000,
-                },
-                ActorTrait::DiagonalMove,
-                ActorTrait::Health(2),
-                ActorTrait::ConsoleRepr('t'),
-                ActorTrait::Attack { damage: 1 },
-            ]),
+            traits: ActorTraits::MON2Y | ActorTraits::DIAGONAL_MOVE,
+            mon2y: Some(Mon2yData {
+                tree_id: 1,
+                iterations: 5000,
+            }),
+            console_repr: Some('t'),
+            health: Some(2),
+            attack_damage: Some(1),
         }
     }
 
@@ -806,16 +757,14 @@ impl GameActor {
         GameActor {
             x,
             y,
-            traits: HashSet::from([
-                ActorTrait::Mon2y {
-                    tree_id: 1,
-                    iterations: 5000,
-                },
-                ActorTrait::CardinalMove,
-                ActorTrait::Health(2),
-                ActorTrait::ConsoleRepr('r'),
-                ActorTrait::Attack { damage: 1 },
-            ]),
+            traits: ActorTraits::MON2Y | ActorTraits::CARDINAL_MOVE,
+            mon2y: Some(Mon2yData {
+                tree_id: 1,
+                iterations: 5000,
+            }),
+            console_repr: Some('r'),
+            health: Some(2),
+            attack_damage: Some(1),
         }
     }
 
@@ -823,16 +772,14 @@ impl GameActor {
         GameActor {
             x,
             y,
-            traits: HashSet::from([
-                ActorTrait::Mon2y {
-                    tree_id: 1,
-                    iterations: 5000,
-                },
-                ActorTrait::CardinalMove,
-                ActorTrait::Health(2),
-                ActorTrait::ConsoleRepr('r'),
-                ActorTrait::Attack { damage: 1 },
-            ]),
+            traits: ActorTraits::MON2Y | ActorTraits::CARDINAL_MOVE,
+            mon2y: Some(Mon2yData {
+                tree_id: 1,
+                iterations: 5000,
+            }),
+            console_repr: Some('r'),
+            health: Some(2),
+            attack_damage: Some(1),
         }
     }
 }
@@ -848,8 +795,8 @@ impl Game for Utwid {
         for iy in 0..state.board.height {
             for ix in 0..state.board.width {
                 let actor_repr = state
-                    .actors
-                    .values()
+                    .actors_iter()
+                    .map(|(_, actor)| actor)
                     .find(|actor| actor.x == ix && actor.y == iy)
                     .and_then(|actor| actor.console_repr());
                 print!(
@@ -880,7 +827,7 @@ mod tests {
     fn stair_location(state: &UtwidState) -> (usize, usize) {
         for y in 0..state.board.height {
             for x in 0..state.board.width {
-                if state.board.get(x, y).traits.contains(&TileTrait::Stairs) {
+                if state.board.get(x, y).traits.contains(TileTraits::STAIRS) {
                     return (x, y);
                 }
             }
@@ -891,7 +838,7 @@ mod tests {
     fn win_location(state: &UtwidState) -> (usize, usize) {
         for y in 0..state.board.height {
             for x in 0..state.board.width {
-                if state.board.get(x, y).traits.contains(&TileTrait::Win) {
+                if state.board.get(x, y).traits.contains(TileTraits::WIN) {
                     return (x, y);
                 }
             }
@@ -914,9 +861,9 @@ mod tests {
                 .board
                 .get(from_x as usize, from_y as usize)
                 .traits
-                .contains(&TileTrait::Walkable)
+                .contains(TileTraits::WALKABLE)
             {
-                let you = state.actors.get_mut(&0).unwrap();
+                let you = state.actor_mut(0).unwrap();
                 you.x = from_x as usize;
                 you.y = from_y as usize;
                 state.to_act = 0;
@@ -937,16 +884,13 @@ mod tests {
             state.to_act = 2;
 
             let (stairs_x, stairs_y) = stair_location(&state);
-            let tile = state.board.get(stairs_x, stairs_y).clone();
-            let actor = state.actors.get(&0).unwrap().clone();
-
-            state = UtwidAction::N.execute_stairs(&state, &tile, &actor);
+            state = UtwidAction::N.execute_stairs(&state);
 
             assert_eq!(state.to_act, 0);
             assert_eq!(state.turn_order, VecDeque::from([0]));
             assert_eq!(state.actor_id_counter, 1);
-            assert_eq!(state.actors.len(), 1);
-            assert!(state.actors.contains_key(&0));
+            assert_eq!(state.actor_count(), 1);
+            assert!(state.has_actor(0));
             assert!(matches!(state.next_actor(), Actor::Player(0)));
 
             state.game_state = GameState::Ongoing;
@@ -960,8 +904,8 @@ mod tests {
         for _ in 0..5 {
             let are_id = state.add_actor(GameActor::are_actor(2, 2));
             let them_id = state.add_actor(GameActor::them_actor(3, 3));
-            if let Some(actor) = state.actors.get_mut(&are_id) {
-                actor.traits.insert(ActorTrait::Dead);
+            if let Some(actor) = state.actor_mut(are_id) {
+                actor.traits.insert(ActorTraits::DEAD);
             }
             state.turn_order.push_back(9999);
             state.turn_order.push_back(are_id);
@@ -969,18 +913,15 @@ mod tests {
             state.to_act = them_id;
 
             let (stairs_x, stairs_y) = stair_location(&state);
-            let tile = state.board.get(stairs_x, stairs_y).clone();
-            let actor = state.actors.get(&0).unwrap().clone();
-
-            state = UtwidAction::N.execute_stairs(&state, &tile, &actor);
+            state = UtwidAction::N.execute_stairs(&state);
 
             assert_eq!(state.to_act, 0);
             assert_eq!(state.turn_order, VecDeque::from([0]));
             assert_eq!(state.actor_id_counter, 1);
-            assert_eq!(state.actors.len(), 1);
-            assert!(state.actors.contains_key(&0));
-            assert!(!state.actors.contains_key(&are_id));
-            assert!(!state.actors.contains_key(&them_id));
+            assert_eq!(state.actor_count(), 1);
+            assert!(state.has_actor(0));
+            assert!(!state.has_actor(are_id));
+            assert!(!state.has_actor(them_id));
             assert!(!state.turn_order.contains(&9999));
             assert!(matches!(state.next_actor(), Actor::Player(0)));
 
@@ -1000,11 +941,11 @@ mod tests {
             let action = adjacent_move_to(&mut state, stairs_x, stairs_y);
             state = action.execute(&state);
 
-            assert!(state.actors.contains_key(&state.to_act));
+            assert!(state.has_actor(state.to_act));
             assert!(matches!(state.game_state, GameState::Checkpoint));
 
             state.game_state = GameState::Ongoing;
-            assert!(state.actors.contains_key(&state.to_act));
+            assert!(state.has_actor(state.to_act));
             assert!(matches!(state.next_actor(), Actor::Player(0)));
         }
 
@@ -1013,7 +954,7 @@ mod tests {
         state = action.execute(&state);
 
         assert!(matches!(state.game_state, GameState::Won));
-        assert!(state.actors.contains_key(&state.to_act));
+        assert!(state.has_actor(state.to_act));
         assert!(matches!(state.next_actor(), Actor::Player(0)));
     }
 
@@ -1022,8 +963,8 @@ mod tests {
         let mut state = UtwidState::new();
         let are_id = state.add_actor(GameActor::are_actor(2, 2));
         let them_id = state.add_actor(GameActor::them_actor(3, 3));
-        if let Some(actor) = state.actors.get_mut(&are_id) {
-            actor.traits.insert(ActorTrait::Dead);
+        if let Some(actor) = state.actor_mut(are_id) {
+            actor.traits.insert(ActorTraits::DEAD);
         }
         state.turn_order.push_back(9999);
         state.turn_order.push_back(are_id);
@@ -1036,7 +977,7 @@ mod tests {
         assert!(matches!(post_stairs.game_state, GameState::Checkpoint));
         assert_eq!(post_stairs.to_act, 0);
         assert_eq!(post_stairs.turn_order, VecDeque::from([0]));
-        assert!(post_stairs.actors.contains_key(&post_stairs.to_act));
+        assert!(post_stairs.has_actor(post_stairs.to_act));
         assert!(matches!(post_stairs.next_actor(), Actor::Player(0)));
 
         let node = create_expanded_node(post_stairs.clone(), None);
