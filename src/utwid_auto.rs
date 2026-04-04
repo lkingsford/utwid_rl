@@ -119,7 +119,8 @@ const HUMAN_ITERATIONS: usize = 3000;
 const ITERATIONS_STEPS: usize = 10;
 const THREADS: usize = 6;
 const EXPLORATION_CONSTANT: f64 = 1.4142135623730951; // sqrt(2.0)
-const SHORT_CIRCUIT_AT_TURNS: usize = 300;
+const SHORT_CIRCUIT_AT_TURNS: usize = 200;
+const SHORT_CIRCUIT_INCREMENT: usize = 100;
 
 struct RawModeGuard;
 
@@ -181,9 +182,9 @@ fn main() -> std::io::Result<()> {
     state.short_circuit_at_turns_increment = Some(SHORT_CIRCUIT_AT_TURNS);
     let mut stdout = stdout();
 
+    queue!(stdout, Clear(ClearType::All))?;
     while matches!(state.game_state, GameState::Ongoing | GameState::Checkpoint) {
         if !args.plain_mode {
-            queue!(stdout, Clear(ClearType::All))?;
             draw_board(&mut stdout, state.clone())?;
             draw_monsters(&mut stdout, &state)?;
             draw_status(&mut stdout, &state)?;
@@ -227,21 +228,21 @@ fn main() -> std::io::Result<()> {
             let iterations_step = args.iterations / ITERATIONS_STEPS;
             let mut tree: Option<Tree<UtwidState, UtwidAction>> = None;
             let mut best_turn: Option<UtwidAction> = None;
-            let mcts_iterations = {
+            let (mcts_iterations, short_circuit_increment) = {
                 to_act.traits.iter().find_map(|trait_| match trait_ {
                     ActorTrait::Mon2y {
                         tree_id,
                         iterations,
-                    } => Some(((*iterations as f32) * args.difficulty_mod) as usize),
-                    ActorTrait::Human => Some(args.iterations),
+                    } => Some((((*iterations as f32) * args.difficulty_mod) as usize, 0)),
+                    ActorTrait::Human => Some((args.iterations, SHORT_CIRCUIT_INCREMENT)),
                     _ => None,
                 })
             }
             .unwrap(); // This would fail if we'd stopped on the wrong player
             while completed_iterations < args.iterations {
                 let mut ai_marked_state = state.clone();
-                ai_marked_state.short_circuit_at_turns =
-                    Some(ai_marked_state.turn_number + SHORT_CIRCUIT_AT_TURNS);
+                ai_marked_state.short_circuit_at_turns = Some(SHORT_CIRCUIT_AT_TURNS);
+                ai_marked_state.short_circuit_at_turns_increment = Some(short_circuit_increment);
                 ai_marked_state.ai_turn_weight = 0.0;
                 let (best_turn_from_calculate, tree_from_calculate) = calculate_best_turn(
                     mcts_iterations,

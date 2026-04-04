@@ -254,23 +254,21 @@ impl State for UtwidState {
 
         match self.game_state {
             GameState::Checkpoint => {
+                for actor in self.actors.values() {
+                    if let Some(tree_id) = actor.traits.iter().find_map(|_trait| {
+                        if let ActorTrait::Mon2y { tree_id, .. } = _trait {
+                            Some(*tree_id as usize)
+                        } else {
+                            None
+                        }
+                    }) {
+                        rewards[tree_id] = -0.5;
+                    }
+                }
                 rewards[YOU_ID] =
                     (1.0 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight);
-                for actor in self.actors.values() {
-                    if let Some(tree_id) = actor.traits.iter().find_map(|_trait| {
-                        if let ActorTrait::Mon2y { tree_id, .. } = _trait {
-                            Some(*tree_id as usize)
-                        } else {
-                            None
-                        }
-                    }) {
-                        rewards[tree_id] = -0.5;
-                    }
-                }
             }
             GameState::Mon2yShortcircuit => {
-                rewards[YOU_ID] =
-                    (0.5 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight);
                 for actor in self.actors.values() {
                     if let Some(tree_id) = actor.traits.iter().find_map(|_trait| {
                         if let ActorTrait::Mon2y { tree_id, .. } = _trait {
@@ -282,9 +280,10 @@ impl State for UtwidState {
                         rewards[tree_id] = -0.5;
                     }
                 }
+                rewards[YOU_ID] =
+                    (0.5 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight);
             }
             GameState::Lost => {
-                rewards[YOU_ID] = -1.0 - 1.0 * self.ai_turn_weight;
                 for actor in self.actors.values() {
                     if let Some(tree_id) = actor.traits.iter().find_map(|_trait| {
                         if let ActorTrait::Mon2y { tree_id, .. } = _trait {
@@ -296,6 +295,7 @@ impl State for UtwidState {
                         rewards[tree_id] = 1.0;
                     }
                 }
+                rewards[YOU_ID] = -1.0 - 1.0 * self.ai_turn_weight;
             }
             GameState::Won => {
                 for actor in self.actors.values() {
@@ -309,11 +309,16 @@ impl State for UtwidState {
                         rewards[tree_id] = -1.0;
                     }
                 }
-                rewards[YOU_ID] = 3.0 * (1.0 - self.ai_turn_weight);
+                rewards[YOU_ID] = 3.0 * f64::max(0.5, (1.0 - self.ai_turn_weight));
             }
             _ => { /* rewards are already 0.0 */ }
         };
-        log::trace!("AI Weight: {}, Reward {:?}", self.ai_turn_weight, rewards);
+        log::trace!(
+            "Game State: {:?}, AI Weight: {}, Reward {:?}",
+            self.game_state,
+            self.ai_turn_weight,
+            rewards
+        );
         rewards
     }
 
@@ -362,9 +367,11 @@ impl Action for UtwidAction {
             .contains(&ActorTrait::Human)
         {
             new_state.turn_number += 1;
+
             new_state.ai_turn_weight += AI_TURN_WEIGHT;
-            if let Some(i) = new_state.short_circuit_at_turns {
-                if new_state.turn_number > i {
+            if let Some(short_circuit_turns_remaining) = new_state.short_circuit_at_turns {
+                new_state.short_circuit_at_turns = Some(short_circuit_turns_remaining - 1);
+                if short_circuit_turns_remaining == 1 {
                     new_state.game_state = GameState::Mon2yShortcircuit;
                 }
             }
@@ -588,7 +595,11 @@ impl Tile {
 
     fn win() -> Tile {
         Tile {
-            traits: HashSet::from([TileTrait::ConsoleRepr('W'), TileTrait::Win]),
+            traits: HashSet::from([
+                TileTrait::Walkable,
+                TileTrait::ConsoleRepr('W'),
+                TileTrait::Win,
+            ]),
         }
     }
 
@@ -633,7 +644,7 @@ impl Board {
             geography[width * 8 + ix] = Tile::wall()
         }
         let stair_location = (rng.random_range(0..width), rng.random_range(0..height));
-        geography[stair_location.0 + width * stair_location.1] = if _level < 10 {
+        geography[stair_location.0 + width * stair_location.1] = if _level < 2 {
             Tile::stair()
         } else {
             Tile::win()
