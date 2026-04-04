@@ -21,17 +21,6 @@ crossterm = "0.28.1"
 [dev-dependencies]
 test-env-log = "0.2.8"
 
-[build-dependencies]
-pyo3-build-config = "0.22" # Use the same version as your pyo3
-
-[[bin]]
-name = "bench"
-path = "src/bench.rs"
-
-[[bin]]
-name = "arena"
-path = "src/arena.rs"
-
 [[bin]]
 name = "utwid_auto"
 path = "src/utwid_auto.rs"
@@ -39,7 +28,7 @@ path = "src/utwid_auto.rs"
 [lib]
 name = "mon2y"
 path = "src/lib.rs"
-crate-type = ["cdylib", "rlib", "staticlib"]
+# crate-type = ["cdylib", "rlib", "staticlib"]
 
 
 [target.x86_64-pc-windows-msvc]

@@ -115,7 +115,9 @@ impl UtwidState {
     }
 
     fn actor_in_space(&self, x: usize, y: usize) -> Option<&GameActor> {
-        self.actors.values().find(|actor| actor.x == x && actor.y == y)
+        self.actors
+            .values()
+            .find(|actor| actor.x == x && actor.y == y)
     }
 
     fn actor_debug_rows(&self) -> Vec<String> {
@@ -201,10 +203,12 @@ impl State for UtwidState {
 
     fn permitted_actions(&self) -> Vec<Self::ActionType> {
         log::trace!("permitted_actions state {}", self.debug_summary());
-        let next_actor = self
-            .actors
-            .get(&self.to_act)
-            .unwrap_or_else(|| panic!("Invalid to_act in permitted_actions: {}", self.debug_summary()));
+        let next_actor = self.actors.get(&self.to_act).unwrap_or_else(|| {
+            panic!(
+                "Invalid to_act in permitted_actions: {}",
+                self.debug_summary()
+            )
+        });
         self.board.permitted_moves(
             next_actor.x,
             next_actor.y,
@@ -247,7 +251,8 @@ impl State for UtwidState {
 
         match self.game_state {
             GameState::Checkpoint => {
-                rewards[YOU_ID] = (1.0 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight);
+                rewards[YOU_ID] =
+                    (1.0 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight);
                 for actor in self.actors.values() {
                     if let Some(tree_id) = actor.traits.iter().find_map(|_trait| {
                         if let ActorTrait::Mon2y { tree_id, .. } = _trait {
@@ -259,9 +264,10 @@ impl State for UtwidState {
                         rewards[tree_id] = -0.5;
                     }
                 }
-            },
+            }
             GameState::Mon2yShortcircuit => {
-                rewards[YOU_ID] = (0.5 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight);
+                rewards[YOU_ID] =
+                    (0.5 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight);
                 for actor in self.actors.values() {
                     if let Some(tree_id) = actor.traits.iter().find_map(|_trait| {
                         if let ActorTrait::Mon2y { tree_id, .. } = _trait {
@@ -273,7 +279,7 @@ impl State for UtwidState {
                         rewards[tree_id] = -0.5;
                     }
                 }
-            },
+            }
             GameState::Lost => {
                 rewards[YOU_ID] = -1.0;
                 for actor in self.actors.values() {
@@ -287,7 +293,7 @@ impl State for UtwidState {
                         rewards[tree_id] = 1.0;
                     }
                 }
-            },
+            }
             GameState::Won => {
                 rewards[YOU_ID] = 1.0 - self.ai_turn_weight;
                 for actor in self.actors.values() {
@@ -301,8 +307,8 @@ impl State for UtwidState {
                         rewards[tree_id] = -1.0;
                     }
                 }
-            },
-            _ => { /* rewards are already 0.0 */ },
+            }
+            _ => { /* rewards are already 0.0 */ }
         };
         log::trace!("AI Weight: {}, Reward {:?}", self.ai_turn_weight, rewards);
         rewards
@@ -327,7 +333,7 @@ pub enum UtwidAction {
     Wait,
 }
 
-const AI_TURN_WEIGHT: f64 = 1.0 / 100.0;
+const AI_TURN_WEIGHT: f64 = 1.0 / 200.0;
 
 impl Action for UtwidAction {
     type StateType = UtwidState;
@@ -373,15 +379,6 @@ impl Action for UtwidAction {
             && matches!(new_state.game_state, GameState::Checkpoint)
         {
             new_state.game_state = GameState::Ongoing;
-        }
-
-        if new_state.turn_number == 20 {
-            new_state
-                .actors
-                .get_mut(&0)
-                .unwrap()
-                .traits
-                .insert(ActorTrait::Dead);
         }
 
         // Bring out yer dead!
@@ -522,7 +519,11 @@ impl UtwidAction {
         new_state.game_state = GameState::Checkpoint;
         let mut board_rng = state.board.rng.clone();
         new_state.board = Board::new(new_state.current_level, &mut board_rng);
-        let mut you = state.actors.get(&0).cloned().unwrap_or_else(GameActor::you_actor);
+        let mut you = state
+            .actors
+            .get(&0)
+            .cloned()
+            .unwrap_or_else(GameActor::you_actor);
         you.x = 1;
         you.y = 3;
         you.traits.remove(&ActorTrait::Dead);
@@ -608,8 +609,8 @@ fn apply_dir(x: usize, y: usize, direction: UtwidAction) -> (usize, usize) {
         .clone();
 
     // Perform arithmetic with isize to handle negative deltas correctly
-        let new_x = x as isize + dx;
-        let new_y = y as isize + dy;
+    let new_x = x as isize + dx;
+    let new_y = y as isize + dy;
 
     // These should always be non-negative due to prior filtering by permitted_moves
     (new_x as usize, new_y as usize)
@@ -770,12 +771,29 @@ impl GameActor {
                 ActorTrait::DiagonalMove,
                 ActorTrait::Health(2),
                 ActorTrait::ConsoleRepr('t'),
-                ActorTrait::Attack { damage: 6 },
+                ActorTrait::Attack { damage: 1 },
             ]),
         }
     }
 
     fn are_actor(x: usize, y: usize) -> GameActor {
+        GameActor {
+            x,
+            y,
+            traits: HashSet::from([
+                ActorTrait::Mon2y {
+                    tree_id: 1,
+                    iterations: 5000,
+                },
+                ActorTrait::CardinalMove,
+                ActorTrait::Health(2),
+                ActorTrait::ConsoleRepr('r'),
+                ActorTrait::Attack { damage: 1 },
+            ]),
+        }
+    }
+
+    fn one_actor(x: usize, y: usize) -> GameActor {
         GameActor {
             x,
             y,

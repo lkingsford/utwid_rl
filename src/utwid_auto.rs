@@ -80,7 +80,7 @@ const DRAW_MONSTER_Y: u16 = 2;
 const HUMAN_ITERATIONS: usize = 3000;
 const THREADS: usize = 6;
 const EXPLORATION_CONSTANT: f64 = 1.4142135623730951; // sqrt(2.0)
-const SHORT_CIRCUIT_AT_TURNS: usize = 20000;
+const SHORT_CIRCUIT_AT_TURNS: usize = 5000;
 
 struct RawModeGuard;
 
@@ -108,6 +108,10 @@ struct Args {
     human: bool,
     #[arg(long, default_value_t = false)]
     plain_mode: bool,
+    #[arg(short, long, default_value_t = 1.0)]
+    difficulty_mod: f32,
+    #[arg(short, long, default_value_t = HUMAN_ITERATIONS)]
+    iterations: usize,
 }
 
 fn main() -> std::io::Result<()> {
@@ -178,21 +182,25 @@ fn main() -> std::io::Result<()> {
             }
             this_attempt.unwrap()
         } else {
+            let mut ai_marked_state = state.clone();
+            ai_marked_state.short_circuit_at_turns =
+                Some(ai_marked_state.turn_number + SHORT_CIRCUIT_AT_TURNS);
+            ai_marked_state.ai_turn_weight = 0.0;
             calculate_best_turn(
                 {
                     to_act.traits.iter().find_map(|trait_| match trait_ {
                         ActorTrait::Mon2y {
                             tree_id,
                             iterations,
-                        } => Some(*iterations),
-                        ActorTrait::Human => Some(HUMAN_ITERATIONS),
+                        } => Some(((*iterations as f32) * args.difficulty_mod) as usize),
+                        ActorTrait::Human => Some(args.iterations),
                         _ => None,
                     })
                 }
                 .unwrap(), // This would fail if we'd stopped on the wrong player
                 None,
                 THREADS,
-                state.clone(),
+                ai_marked_state,
                 BestTurnPolicy::Ucb0,
                 EXPLORATION_CONSTANT,
                 false,
