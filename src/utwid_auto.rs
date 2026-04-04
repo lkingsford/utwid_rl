@@ -13,6 +13,7 @@ use log::Record;
 use std::thread;
 use std::{
     io::{stdout, Stdout, Write},
+    sync::Arc,
     time::Duration,
 };
 
@@ -111,12 +112,12 @@ fn draw_status_mcts(
 }
 
 fn check_for_killing_process() {
-    while event::poll(Duration::from_mins(0)).is_ok() {
+    while event::poll(Duration::from_millis(0)).unwrap_or(false) {
         let incoming_event = event::read();
         if let Ok(event::Event::Key(key_event)) = incoming_event {
             if key_event.modifiers.intersects(KeyModifiers::CONTROL) {
                 unimplemented!("Lazy quit");
-            };
+            }
         }
     }
 }
@@ -240,7 +241,7 @@ fn main() -> std::io::Result<()> {
         } else {
             let mut completed_iterations = 0;
             let iterations_step = args.iterations / ITERATIONS_STEPS;
-            let mut tree: Option<Tree<UtwidState, UtwidAction>> = None;
+            let mut tree: Option<Arc<Tree<UtwidState, UtwidAction>>> = None;
             let mut best_turn: Option<UtwidAction> = None;
             let (mcts_iterations, short_circuit_increment) = {
                 to_act.traits.iter().find_map(|trait_| match trait_ {

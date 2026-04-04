@@ -104,10 +104,10 @@ pub fn calculate_best_turn<
     policy: BestTurnPolicy,
     exploration_constant: f64,
     log_children: bool,
-    existing_tree: Option<Tree<StateType, ActionType>>,
+    existing_tree: Option<Arc<Tree<StateType, ActionType>>>,
 ) -> (
     <StateType as State>::ActionType,
-    Option<Tree<StateType, ActionType>>,
+    Option<Arc<Tree<StateType, ActionType>>>,
 )
 where
     StateType: State<ActionType = ActionType>,
@@ -126,10 +126,10 @@ where
         }
     }
 
-    let tree = Arc::new(match existing_tree {
+    let tree = match existing_tree {
         Some(existing_tree) => existing_tree,
-        None => Tree::new_with_constant(root_node, exploration_constant),
-    });
+        None => Arc::new(Tree::new_with_constant(root_node, exploration_constant)),
+    };
 
     let noop_sender = Box::new(NoopSender::new());
     run_mcts_iterations(
@@ -175,7 +175,7 @@ where
             };
             picks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
             log::debug!("Action, UCB0: {:?}", picks);
-            (picks[0].0.clone(), (Arc::try_unwrap(tree).ok()))
+            (picks[0].0.clone(), Some(tree))
         }
 
         BestTurnPolicy::MostVisits => {
@@ -228,7 +228,7 @@ where
                     })
                     .collect();
                 if let Some(action) = winning_moves.first() {
-                    return (action.clone(), (Arc::try_unwrap(tree).ok()));
+                    return (action.clone(), Some(tree));
                 }
 
                 (
@@ -238,7 +238,7 @@ where
                         .unwrap()
                         .0
                         .clone(),
-                    (Arc::try_unwrap(tree).ok()),
+                    Some(tree),
                 )
             } else {
                 panic!("Expected root to be an expanded node")
