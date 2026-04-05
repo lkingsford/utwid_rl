@@ -3,10 +3,10 @@ use std::collections::VecDeque;
 use bitflags::bitflags;
 
 use crate::game::Game;
-use crate::mcts::game_trait::{Action, Actor, State};
 use crate::mcts::Reward;
+use crate::mcts::game_trait::{Action, Actor, State};
 
-use rand::{prelude::*, rngs::SmallRng, SeedableRng};
+use rand::{SeedableRng, prelude::*, rngs::SmallRng};
 
 type ActorId = usize; // If I keep using this code, this might need to be u64, or something else
 const CARDINAL_DIRS: [(UtwidAction, isize, isize); 4] = [
@@ -144,6 +144,7 @@ impl UtwidState {
         self.actors
             .iter()
             .filter_map(|actor| actor.as_ref())
+            .filter(|actor| !actor.traits.contains(ActorTraits::DEAD))
             .find(|actor| actor.x == x && actor.y == y)
     }
 
@@ -236,12 +237,28 @@ impl State for UtwidState {
                 self.debug_summary()
             )
         });
-        self.board.permitted_moves(
+        // board permitted doesn't look for actor interactions
+        let board_permitted_moves = self.board.board_permitted_moves(
             next_actor.x,
             next_actor.y,
             next_actor.traits.contains(ActorTraits::CARDINAL_MOVE),
             next_actor.traits.contains(ActorTraits::DIAGONAL_MOVE),
-        )
+        );
+
+        board_permitted_moves
+            .iter()
+            .filter(|action| {
+                let (x, y) = apply_dir(next_actor.x, next_actor.y, **action);
+                let on_point = self.actor_in_space(x, y);
+                if let Some(actor) = on_point {
+                    (next_actor.traits.contains(ActorTraits::MELEE)
+                        && next_actor.allegiance != actor.allegiance)
+                } else {
+                    true
+                }
+            })
+            .map(|action_ref| *action_ref)
+            .collect()
     }
 
     fn next_actor(&self) -> Actor<Self::ActionType> {
@@ -608,7 +625,7 @@ fn apply_dir(x: usize, y: usize, direction: UtwidAction) -> (usize, usize) {
     let new_x = x as isize + dx;
     let new_y = y as isize + dy;
 
-    // These should always be non-negative due to prior filtering by permitted_moves
+    // These should always be non-negative due to prior filtering by board_permitted_moves
     (new_x as usize, new_y as usize)
 }
 
@@ -640,7 +657,7 @@ impl Board {
         &self.geography[self.width * y + x]
     }
 
-    fn permitted_moves(
+    fn board_permitted_moves(
         &self,
         from_x: usize,
         from_y: usize,
