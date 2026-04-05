@@ -237,12 +237,13 @@ impl State for UtwidState {
                 self.debug_summary()
             )
         });
-        // board permitted doesn't look for actor interactions
+        // board permitted doesn't look for actor health interactions
         let board_permitted_moves = self.board.board_permitted_moves(
             next_actor.x,
             next_actor.y,
             next_actor.traits.contains(ActorTraits::CARDINAL_MOVE),
             next_actor.traits.contains(ActorTraits::DIAGONAL_MOVE),
+            next_actor.traits.contains(ActorTraits::MELEE),
         );
 
         board_permitted_moves
@@ -258,6 +259,11 @@ impl State for UtwidState {
                 }
             })
             .map(|action_ref| *action_ref)
+            .chain(if next_actor.traits.contains(ActorTraits::BOMB) {
+                vec![UtwidAction::Explode]
+            } else {
+                vec![]
+            })
             .collect()
     }
 
@@ -352,6 +358,7 @@ pub enum UtwidAction {
     SE,
     SW,
     Wait,
+    Explode,
 }
 
 const AI_TURN_WEIGHT: f64 = 1.0 / 1000.0;
@@ -370,6 +377,7 @@ impl Action for UtwidAction {
             | UtwidAction::SE
             | UtwidAction::SW => self.execute_move(state),
             UtwidAction::Wait => state.clone(),
+            UtwidAction::Explode => self.execute_explode(state),
             _ => unimplemented!(),
         };
         if state
@@ -497,6 +505,11 @@ impl UtwidAction {
             actor.modify_health(damage);
         }
 
+        let tile = new_state.board.get_mut(new_coords.0, new_coords.1);
+        if tile.health.is_some() {
+            tile.modify_health(damage);
+        }
+
         // --- And the rest ---
 
         if new_state
@@ -504,6 +517,11 @@ impl UtwidAction {
             .map(|(_, actor)| actor)
             .find(|actor| actor.x == new_coords.0 && actor.y == new_coords.1)
             .is_none()
+            && new_state
+                .board
+                .get(new_coords.0, new_coords.1)
+                .traits
+                .contains(TileTraits::WALKABLE)
         {
             let actor = new_state.actor_mut(actor_id).unwrap();
             (actor.x, actor.y) = new_coords;
@@ -554,6 +572,12 @@ impl UtwidAction {
         new_state.game_state = GameState::Won;
         new_state
     }
+
+    fn execute_explode(&self, state: &UtwidState) -> UtwidState {
+        log::debug!("execute explode");
+        let mut new_state = state.clone();
+        new_state
+    }
 }
 
 bitflags! {
@@ -568,6 +592,7 @@ bitflags! {
 #[derive(Clone)]
 pub struct Tile {
     traits: TileTraits,
+    health: Option<isize>,
     pub console_repr: Option<char>,
 }
 
@@ -576,6 +601,7 @@ impl Tile {
         Tile {
             traits: TileTraits::WALKABLE,
             console_repr: Some('.'),
+            health: None,
         }
     }
 
@@ -583,6 +609,7 @@ impl Tile {
         Tile {
             traits: TileTraits::empty(),
             console_repr: Some('#'),
+            health: Some(5),
         }
     }
 
@@ -590,6 +617,7 @@ impl Tile {
         Tile {
             traits: TileTraits::STAIRS | TileTraits::WALKABLE,
             console_repr: Some('>'),
+            health: None,
         }
     }
 
@@ -597,11 +625,24 @@ impl Tile {
         Tile {
             traits: TileTraits::WALKABLE | TileTraits::WIN,
             console_repr: Some('W'),
+            health: None,
         }
     }
 
     pub fn console_repr(&self) -> Option<char> {
         self.console_repr
+    }
+
+    pub fn modify_health(&mut self, dhealth: isize) {
+        if self.health.is_some() {
+            self.health = Some(self.health.unwrap() + dhealth);
+
+            if self.health.unwrap() <= 0 {
+                self.traits = TileTraits::WALKABLE;
+                self.console_repr = Some('.');
+                self.health = None;
+            }
+        }
     }
 }
 
@@ -657,12 +698,17 @@ impl Board {
         &self.geography[self.width * y + x]
     }
 
+    fn get_mut(&mut self, x: usize, y: usize) -> &mut Tile {
+        &mut self.geography[self.width * y + x]
+    }
+
     fn board_permitted_moves(
         &self,
         from_x: usize,
         from_y: usize,
         cardinal: bool,
         diagonal: bool,
+        melee: bool,
     ) -> Vec<UtwidAction> {
         CARDINAL_DIRS
             .iter()
@@ -673,9 +719,8 @@ impl Board {
                 let y = from_y as isize + *dy as isize;
 
                 if x >= 0 && (x as usize) < self.width && y >= 0 && (y as usize) < self.height {
-                    self.get(x as usize, y as usize)
-                        .traits
-                        .contains(TileTraits::WALKABLE)
+                    let tile = self.get(x as usize, y as usize);
+                    (tile.traits.contains(TileTraits::WALKABLE) || tile.health.is_some())
                         .then_some(*action)
                 } else {
                     None
@@ -699,16 +744,16 @@ bitflags! {
     }
 }
 
-#[derive(Clone)]
-pub struct Mon2yData {
-    pub tree_id: u8,
-    pub iterations: usize,
-}
-
 #[derive(Clone, PartialEq, PartialOrd)]
 pub enum Allegiance {
     You,
     Monty,
+}
+
+#[derive(Clone)]
+pub struct Mon2yData {
+    pub tree_id: u8,
+    pub iterations: usize,
 }
 
 #[derive(Clone)]
@@ -813,14 +858,14 @@ impl GameActor {
         GameActor {
             x,
             y,
-            traits: ActorTraits::MON2Y | ActorTraits::CARDINAL_MOVE | ActorTraits::MELEE,
+            traits: ActorTraits::MON2Y | ActorTraits::CARDINAL_MOVE | ActorTraits::BOMB,
             mon2y: Some(Mon2yData {
                 tree_id: 1,
-                iterations: 5000,
+                iterations: 1000,
             }),
             console_repr: Some('1'),
-            health: Some(2),
-            attack_damage: Some(1),
+            health: Some(4),
+            attack_damage: Some(5),
             allegiance: Allegiance::Monty,
         }
     }
