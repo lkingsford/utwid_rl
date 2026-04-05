@@ -154,11 +154,11 @@ impl UtwidState {
                 let label = if actor.traits.contains(ActorTraits::HUMAN) {
                     Some("Human".to_string())
                 } else {
-                    actor.mon2y
-                        .as_ref()
-                        .map(|mon2y| format!("Mon2y(tree={},iters={})", mon2y.tree_id, mon2y.iterations))
+                    actor.mon2y.as_ref().map(|mon2y| {
+                        format!("Mon2y(tree={},iters={})", mon2y.tree_id, mon2y.iterations)
+                    })
                 }
-                    .unwrap_or_else(|| "Other".to_string());
+                .unwrap_or_else(|| "Other".to_string());
                 format!(
                     "id={} pos=({}, {}) repr={:?} label={} dead={} health={:?}",
                     id,
@@ -271,7 +271,8 @@ impl State for UtwidState {
         match self.game_state {
             GameState::Checkpoint => {
                 for (_, actor) in self.actors_iter() {
-                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize) {
+                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize)
+                    {
                         rewards[tree_id] = -0.5;
                     }
                 }
@@ -280,7 +281,8 @@ impl State for UtwidState {
             }
             GameState::Mon2yShortcircuit => {
                 for (_, actor) in self.actors_iter() {
-                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize) {
+                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize)
+                    {
                         rewards[tree_id] = -0.5;
                     }
                 }
@@ -289,7 +291,8 @@ impl State for UtwidState {
             }
             GameState::Lost => {
                 for (_, actor) in self.actors_iter() {
-                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize) {
+                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize)
+                    {
                         rewards[tree_id] = 1.0;
                     }
                 }
@@ -297,7 +300,8 @@ impl State for UtwidState {
             }
             GameState::Won => {
                 for (_, actor) in self.actors_iter() {
-                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize) {
+                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize)
+                    {
                         rewards[tree_id] = -1.0;
                     }
                 }
@@ -463,7 +467,10 @@ impl UtwidAction {
         // --- Attack ---
         let (new_coords, damage) = {
             let actor = new_state.actor(actor_id).unwrap();
-            (apply_dir(actor.x, actor.y, *self), actor.attack_damage.unwrap_or(0) as isize * -1)
+            (
+                apply_dir(actor.x, actor.y, *self),
+                actor.attack_damage.unwrap_or(0) as isize * -1,
+            )
         };
 
         for (_, actor) in new_state
@@ -614,7 +621,7 @@ impl Board {
             geography[width * 8 + ix] = Tile::wall()
         }
         let stair_location = (rng.random_range(0..width), rng.random_range(0..height));
-        geography[stair_location.0 + width * stair_location.1] = if _level < 2 {
+        geography[stair_location.0 + width * stair_location.1] = if _level < 9 {
             Tile::stair()
         } else {
             Tile::win()
@@ -670,6 +677,8 @@ bitflags! {
         const DIAGONAL_MOVE = 1 << 3;
         const WAIT = 1 << 4;
         const DEAD = 1 << 5;
+        const MELEE = 1 << 6;
+        const BOMB = 1 << 7;
     }
 }
 
@@ -677,6 +686,12 @@ bitflags! {
 pub struct Mon2yData {
     pub tree_id: u8,
     pub iterations: usize,
+}
+
+#[derive(Clone, PartialEq, PartialOrd)]
+pub enum Allegiance {
+    You,
+    Monty,
 }
 
 #[derive(Clone)]
@@ -688,6 +703,7 @@ pub struct GameActor {
     pub console_repr: Option<char>,
     pub health: Option<usize>,
     pub attack_damage: Option<usize>,
+    pub allegiance: Allegiance,
 }
 
 impl GameActor {
@@ -712,11 +728,15 @@ impl GameActor {
         GameActor {
             x: 1,
             y: 3,
-            traits: ActorTraits::HUMAN | ActorTraits::CARDINAL_MOVE | ActorTraits::DIAGONAL_MOVE,
+            traits: ActorTraits::HUMAN
+                | ActorTraits::CARDINAL_MOVE
+                | ActorTraits::DIAGONAL_MOVE
+                | ActorTraits::MELEE,
             mon2y: None,
             console_repr: Some('@'),
             health: Some(7),
             attack_damage: Some(1),
+            allegiance: Allegiance::You,
         }
     }
 
@@ -727,7 +747,8 @@ impl GameActor {
             traits: ActorTraits::MON2Y
                 | ActorTraits::CARDINAL_MOVE
                 | ActorTraits::DIAGONAL_MOVE
-                | ActorTraits::WAIT,
+                | ActorTraits::WAIT
+                | ActorTraits::MELEE,
             mon2y: Some(Mon2yData {
                 tree_id: 1,
                 iterations: 1000,
@@ -735,6 +756,7 @@ impl GameActor {
             console_repr: Some('&'),
             health: Some(7),
             attack_damage: Some(1),
+            allegiance: Allegiance::Monty,
         }
     }
 
@@ -742,14 +764,15 @@ impl GameActor {
         GameActor {
             x,
             y,
-            traits: ActorTraits::MON2Y | ActorTraits::DIAGONAL_MOVE,
+            traits: ActorTraits::MON2Y | ActorTraits::DIAGONAL_MOVE | ActorTraits::MELEE,
             mon2y: Some(Mon2yData {
                 tree_id: 1,
-                iterations: 5000,
+                iterations: 1000,
             }),
             console_repr: Some('t'),
             health: Some(2),
             attack_damage: Some(1),
+            allegiance: Allegiance::Monty,
         }
     }
 
@@ -757,14 +780,15 @@ impl GameActor {
         GameActor {
             x,
             y,
-            traits: ActorTraits::MON2Y | ActorTraits::CARDINAL_MOVE,
+            traits: ActorTraits::MON2Y | ActorTraits::CARDINAL_MOVE | ActorTraits::MELEE,
             mon2y: Some(Mon2yData {
                 tree_id: 1,
-                iterations: 5000,
+                iterations: 1000,
             }),
             console_repr: Some('r'),
             health: Some(2),
             attack_damage: Some(1),
+            allegiance: Allegiance::Monty,
         }
     }
 
@@ -772,14 +796,15 @@ impl GameActor {
         GameActor {
             x,
             y,
-            traits: ActorTraits::MON2Y | ActorTraits::CARDINAL_MOVE,
+            traits: ActorTraits::MON2Y | ActorTraits::CARDINAL_MOVE | ActorTraits::MELEE,
             mon2y: Some(Mon2yData {
                 tree_id: 1,
                 iterations: 5000,
             }),
-            console_repr: Some('r'),
+            console_repr: Some('1'),
             health: Some(2),
             attack_damage: Some(1),
+            allegiance: Allegiance::Monty,
         }
     }
 }
