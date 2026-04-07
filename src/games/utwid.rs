@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use bitflags::bitflags;
+use std::cmp::{max, min};
 
 use crate::game::Game;
 use crate::mcts::Reward;
@@ -259,11 +260,12 @@ impl State for UtwidState {
                 }
             })
             .map(|action_ref| *action_ref)
-            .chain(if next_actor.traits.contains(ActorTraits::BOMB) {
-                vec![UtwidAction::Explode]
-            } else {
-                vec![]
-            })
+            .chain(
+                next_actor
+                    .traits
+                    .contains(ActorTraits::BOMB)
+                    .then_some(UtwidAction::Explode),
+            )
             .collect()
     }
 
@@ -396,13 +398,17 @@ impl Action for UtwidAction {
                 }
             }
 
-            if (new_state.turn_number % 11) == 0 {
+            if (new_state.turn_number % 7) == 0 {
                 let spawn = new_state.suggest_spawn();
                 new_state.add_actor(GameActor::are_actor(spawn.0, spawn.1));
             }
-            if (new_state.turn_number % 13) == 0 {
+            if (new_state.turn_number % 9) == 0 {
                 let spawn = new_state.suggest_spawn();
                 new_state.add_actor(GameActor::them_actor(spawn.0, spawn.1));
+            }
+            if (new_state.turn_number % 11) == 0 {
+                let spawn = new_state.suggest_spawn();
+                new_state.add_actor(GameActor::one_actor(spawn.0, spawn.1));
             }
         }
         if matches!(state.game_state, GameState::Checkpoint)
@@ -482,6 +488,10 @@ impl Action for UtwidAction {
 
         new_state
     }
+}
+
+fn neighborhood_range(center: usize, max: usize) -> std::ops::Range<usize> {
+    center.saturating_sub(1)..center.saturating_add(2).min(max)
 }
 
 impl UtwidAction {
@@ -576,6 +586,27 @@ impl UtwidAction {
     fn execute_explode(&self, state: &UtwidState) -> UtwidState {
         log::debug!("execute explode");
         let mut new_state = state.clone();
+        let actor_id = new_state.to_act;
+        let (x0, y0, damage) = {
+            let actor = new_state.actor(actor_id).unwrap();
+            (
+                actor.x,
+                actor.y,
+                actor.attack_damage.unwrap_or_default() as isize * -1,
+            )
+        };
+        for ix in neighborhood_range(x0, new_state.board.width) {
+            for iy in neighborhood_range(y0, new_state.board.height) {
+                let tile = new_state.board.get_mut(ix, iy);
+                tile.modify_health(damage);
+                for (_, actor) in new_state
+                    .actors_iter_mut()
+                    .filter(|(_, actor)| actor.x == ix && actor.y == iy)
+                {
+                    actor.modify_health(damage);
+                }
+            }
+        }
         new_state
     }
 }
@@ -858,10 +889,13 @@ impl GameActor {
         GameActor {
             x,
             y,
-            traits: ActorTraits::MON2Y | ActorTraits::CARDINAL_MOVE | ActorTraits::BOMB,
+            traits: ActorTraits::MON2Y
+                | ActorTraits::DIAGONAL_MOVE
+                | ActorTraits::CARDINAL_MOVE
+                | ActorTraits::BOMB,
             mon2y: Some(Mon2yData {
                 tree_id: 1,
-                iterations: 1000,
+                iterations: 250,
             }),
             console_repr: Some('1'),
             health: Some(4),
