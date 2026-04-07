@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 
 use bitflags::bitflags;
-use std::cmp::{max, min};
 
 use crate::game::Game;
 use crate::mcts::Reward;
@@ -22,6 +21,11 @@ const DIAGONAL_DIRS: [(UtwidAction, isize, isize); 4] = [
     (UtwidAction::SE, 1, 1),
     (UtwidAction::SW, -1, 1),
 ];
+const ACTOR_TYPE_NAMES: [&str; 5] = ["you", "monte", "them", "are", "one"];
+const ACTOR_TYPE_YOU: usize = 0;
+const ACTOR_TYPE_THEM: usize = 2;
+const ACTOR_TYPE_ARE: usize = 3;
+const ACTOR_TYPE_ONE: usize = 4;
 
 #[derive(Clone, std::fmt::Debug, PartialEq)]
 pub enum GameState {
@@ -149,6 +153,14 @@ impl UtwidState {
             .find(|actor| actor.x == x && actor.y == y)
     }
 
+    fn actor_id_in_space(&self, x: usize, y: usize) -> Option<ActorId> {
+        self.actors_iter()
+            .find(|(_, actor)| {
+                !actor.traits.contains(ActorTraits::DEAD) && actor.x == x && actor.y == y
+            })
+            .map(|(id, _)| id)
+    }
+
     fn actor_debug_rows(&self) -> Vec<String> {
         let mut rows: Vec<String> = self
             .actors_iter()
@@ -162,8 +174,10 @@ impl UtwidState {
                 }
                 .unwrap_or_else(|| "Other".to_string());
                 format!(
-                    "id={} pos=({}, {}) repr={:?} label={} dead={} health={:?}",
+                    "id={} type={}({}) pos=({}, {}) repr={:?} label={} dead={} health={:?}",
                     id,
+                    actor.actor_type,
+                    actor.actor_type_name(),
                     actor.x,
                     actor.y,
                     actor.console_repr(),
@@ -175,6 +189,54 @@ impl UtwidState {
             .collect();
         rows.sort();
         rows
+    }
+
+    fn neighboring_tile_rows(&self, x: usize, y: usize) -> Vec<String> {
+        CARDINAL_DIRS
+            .iter()
+            .chain(DIAGONAL_DIRS.iter())
+            .map(|(action, dx, dy)| {
+                let target_x = x as isize + dx;
+                let target_y = y as isize + dy;
+
+                if target_x < 0
+                    || target_y < 0
+                    || target_x as usize >= self.board.width
+                    || target_y as usize >= self.board.height
+                {
+                    return format!("{action:?}->out_of_bounds");
+                }
+
+                let target_x = target_x as usize;
+                let target_y = target_y as usize;
+                let tile = self.board.get(target_x, target_y);
+                let occupant = self
+                    .actor_id_in_space(target_x, target_y)
+                    .and_then(|actor_id| {
+                        self.actor(actor_id).map(|actor| {
+                            format!(
+                                "id={} type={}({}) repr={:?} allegiance={:?} dead={}",
+                                actor_id,
+                                actor.actor_type,
+                                actor.actor_type_name(),
+                                actor.console_repr(),
+                                actor.allegiance,
+                                actor.traits.contains(ActorTraits::DEAD),
+                            )
+                        })
+                    });
+
+                format!(
+                    "{action:?}->({}, {}) walkable={} tile_health={:?} tile_repr={:?} occupant={}",
+                    target_x,
+                    target_y,
+                    tile.traits.contains(TileTraits::WALKABLE),
+                    tile.health,
+                    tile.console_repr(),
+                    occupant.unwrap_or_else(|| "none".to_string()),
+                )
+            })
+            .collect()
     }
 
     fn debug_summary(&self) -> String {
@@ -247,7 +309,7 @@ impl State for UtwidState {
             next_actor.traits.contains(ActorTraits::MELEE),
         );
 
-        board_permitted_moves
+        let permitted_actions: Vec<_> = board_permitted_moves
             .iter()
             .filter(|action| {
                 let (x, y) = apply_dir(next_actor.x, next_actor.y, **action);
@@ -266,7 +328,26 @@ impl State for UtwidState {
                     .contains(ActorTraits::BOMB)
                     .then_some(UtwidAction::Explode),
             )
-            .collect()
+            .collect();
+
+        if permitted_actions.is_empty() {
+            let permitted_actions = vec![UtwidAction::Wait];
+            log::trace!(
+                "permitted_actions output actor_id={} actor_type={} actions={:?}",
+                self.to_act,
+                next_actor.actor_type_name(),
+                permitted_actions
+            );
+            return permitted_actions;
+        }
+
+        log::trace!(
+            "permitted_actions output actor_id={} actor_type={} actions={:?}",
+            self.to_act,
+            next_actor.actor_type_name(),
+            permitted_actions
+        );
+        permitted_actions
     }
 
     fn next_actor(&self) -> Actor<Self::ActionType> {
@@ -398,15 +479,15 @@ impl Action for UtwidAction {
                 }
             }
 
-            if (new_state.turn_number % 7) == 0 {
+            if (new_state.turn_number % 9) == 0 {
                 let spawn = new_state.suggest_spawn();
                 new_state.add_actor(GameActor::are_actor(spawn.0, spawn.1));
             }
-            if (new_state.turn_number % 9) == 0 {
+            if (new_state.turn_number % 13) == 0 {
                 let spawn = new_state.suggest_spawn();
                 new_state.add_actor(GameActor::them_actor(spawn.0, spawn.1));
             }
-            if (new_state.turn_number % 11) == 0 {
+            if (new_state.turn_number % 5) == 0 {
                 let spawn = new_state.suggest_spawn();
                 new_state.add_actor(GameActor::one_actor(spawn.0, spawn.1));
             }
@@ -775,7 +856,7 @@ bitflags! {
     }
 }
 
-#[derive(Clone, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Allegiance {
     You,
     Monty,
@@ -791,6 +872,7 @@ pub struct Mon2yData {
 pub struct GameActor {
     pub x: usize,
     pub y: usize,
+    pub actor_type: usize,
     pub traits: ActorTraits,
     pub mon2y: Option<Mon2yData>,
     pub console_repr: Option<char>,
@@ -802,6 +884,13 @@ pub struct GameActor {
 impl GameActor {
     pub fn console_repr(&self) -> Option<char> {
         self.console_repr
+    }
+
+    pub fn actor_type_name(&self) -> &'static str {
+        ACTOR_TYPE_NAMES
+            .get(self.actor_type)
+            .copied()
+            .unwrap_or("unknown")
     }
 
     pub fn modify_health(&mut self, d_health: isize) -> () {
@@ -821,6 +910,7 @@ impl GameActor {
         GameActor {
             x: 1,
             y: 3,
+            actor_type: ACTOR_TYPE_YOU,
             traits: ActorTraits::HUMAN
                 | ActorTraits::CARDINAL_MOVE
                 | ActorTraits::DIAGONAL_MOVE
@@ -837,6 +927,7 @@ impl GameActor {
         GameActor {
             x: 7,
             y: 7,
+            actor_type: 1,
             traits: ActorTraits::MON2Y
                 | ActorTraits::CARDINAL_MOVE
                 | ActorTraits::DIAGONAL_MOVE
@@ -857,6 +948,7 @@ impl GameActor {
         GameActor {
             x,
             y,
+            actor_type: ACTOR_TYPE_THEM,
             traits: ActorTraits::MON2Y | ActorTraits::DIAGONAL_MOVE | ActorTraits::MELEE,
             mon2y: Some(Mon2yData {
                 tree_id: 1,
@@ -873,14 +965,15 @@ impl GameActor {
         GameActor {
             x,
             y,
+            actor_type: ACTOR_TYPE_ARE,
             traits: ActorTraits::MON2Y | ActorTraits::CARDINAL_MOVE | ActorTraits::MELEE,
             mon2y: Some(Mon2yData {
                 tree_id: 1,
                 iterations: 1000,
             }),
             console_repr: Some('r'),
-            health: Some(2),
-            attack_damage: Some(1),
+            health: Some(3),
+            attack_damage: Some(2),
             allegiance: Allegiance::Monty,
         }
     }
@@ -889,13 +982,14 @@ impl GameActor {
         GameActor {
             x,
             y,
+            actor_type: ACTOR_TYPE_ONE,
             traits: ActorTraits::MON2Y
                 | ActorTraits::DIAGONAL_MOVE
                 | ActorTraits::CARDINAL_MOVE
                 | ActorTraits::BOMB,
             mon2y: Some(Mon2yData {
                 tree_id: 1,
-                iterations: 250,
+                iterations: 500,
             }),
             console_repr: Some('1'),
             health: Some(4),
