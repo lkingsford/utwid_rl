@@ -1,4 +1,5 @@
-use std::collections::VecDeque;
+use std::cmp::{max, min};
+use std::collections::{HashSet, VecDeque};
 
 use bitflags::bitflags;
 
@@ -26,6 +27,10 @@ const ACTOR_TYPE_YOU: usize = 0;
 const ACTOR_TYPE_THEM: usize = 2;
 const ACTOR_TYPE_ARE: usize = 3;
 const ACTOR_TYPE_ONE: usize = 4;
+const MON2Y_ID: usize = 1;
+const PLAYER_MAX_HEALTH: usize = 7;
+const ROOM_SPLITS_MIN: usize = 2;
+const ROOM_SPLITS_MAX: usize = 8;
 
 #[derive(Clone, std::fmt::Debug, PartialEq)]
 pub enum GameState {
@@ -127,6 +132,18 @@ impl UtwidState {
             .map(|actor| actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id).unwrap_or(0))
             .max()
             .unwrap_or(0)
+    }
+
+    fn reward_actor_count(&self) -> usize {
+        usize::max(self.mon2y_high_actor_id() as usize, MON2Y_ID) + 1
+    }
+
+    fn player_health_ratio(&self) -> f64 {
+        let health = self
+            .actor(YOU_ID)
+            .and_then(|actor| actor.health)
+            .unwrap_or(0) as f64;
+        health / PLAYER_MAX_HEALTH as f64
     }
 
     fn suggest_spawn(&mut self) -> (usize, usize) {
@@ -371,19 +388,13 @@ impl State for UtwidState {
     }
 
     fn reward(&self) -> Vec<Reward> {
-        let max_actor_id_val = self.mon2y_high_actor_id() as usize;
-        let mut rewards = vec![0.0; max_actor_id_val + 1]; // Initialize with zeros
+        let mut rewards = vec![0.0; self.reward_actor_count()];
 
         match self.game_state {
             GameState::Checkpoint => {
-                for (_, actor) in self.actors_iter() {
-                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize)
-                    {
-                        rewards[tree_id] = -0.5;
-                    }
-                }
-                rewards[YOU_ID] =
-                    (1.0 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight);
+                let player_health_ratio = self.player_health_ratio();
+                rewards[YOU_ID] = 1.0 - player_health_ratio;
+                rewards[MON2Y_ID] = -1.0 + player_health_ratio;
             }
             GameState::Mon2yShortcircuit => {
                 for (_, actor) in self.actors_iter() {
@@ -396,22 +407,12 @@ impl State for UtwidState {
                     (0.5 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight);
             }
             GameState::Lost => {
-                for (_, actor) in self.actors_iter() {
-                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize)
-                    {
-                        rewards[tree_id] = 1.0;
-                    }
-                }
-                rewards[YOU_ID] = -1.0 - 1.0 * self.ai_turn_weight;
+                rewards[YOU_ID] = -1.0;
+                rewards[MON2Y_ID] = 1.0;
             }
             GameState::Won => {
-                for (_, actor) in self.actors_iter() {
-                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize)
-                    {
-                        rewards[tree_id] = -1.0;
-                    }
-                }
-                rewards[YOU_ID] = 3.0 * f64::max(0.5, (1.0 - self.ai_turn_weight));
+                rewards[YOU_ID] = 1.0;
+                rewards[MON2Y_ID] = -1.0;
             }
             _ => { /* rewards are already 0.0 */ }
         };
@@ -784,12 +785,77 @@ fn apply_dir(x: usize, y: usize, direction: UtwidAction) -> (usize, usize) {
 
 impl Board {
     pub fn new(_level: usize, rng: &mut SmallRng) -> Self {
+        let (geography, width, height, rng) = Board::rooms_builder(_level, rng);
+        Board {
+            geography,
+            width,
+            height,
+            rng,
+        }
+    }
+
+    fn rooms_builder(_level: usize, rng: &mut SmallRng) -> (Vec<Tile>, usize, usize, SmallRng) {
+        let mut rng = rng.clone();
         let width: usize = 11;
         let height: usize = 11;
         let mut geography = vec![Tile::floor(); (width * height) as usize];
-        for ix in 5..11 {
-            geography[width * 8 + ix] = Tile::wall()
+        let mut splits: HashSet<(usize, usize, bool)> = HashSet::from([]);
+
+        for _ in 0..rng.random_range(ROOM_SPLITS_MIN..ROOM_SPLITS_MAX) {
+            let vertical = rng.random_bool(0.5);
+            let split_location = (rng.random_range(0..width), rng.random_range(0..height));
+            splits.insert((split_location.0, split_location.1, vertical));
+            if vertical {
+                let x = rng.random_range(0..width);
+                for y in (0..split_location.1).rev() {
+                    if geography[x + y * width]
+                        .traits
+                        .contains(TileTraits::WALKABLE)
+                        || splits.contains(&(x, y, true))
+                    {
+                        geography[x + y * width] = Tile::wall();
+                    } else {
+                        break;
+                    }
+                }
+                for y in split_location.1 + 1..height {
+                    if geography[x + y * width]
+                        .traits
+                        .contains(TileTraits::WALKABLE)
+                        || splits.contains(&(x, y, false))
+                    {
+                        geography[x + y * width] = Tile::wall();
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                let y = rng.random_range(0..height);
+                for x in (0..split_location.0).rev() {
+                    if geography[x + y * width]
+                        .traits
+                        .contains(TileTraits::WALKABLE)
+                        || splits.contains(&(x, y))
+                    {
+                        geography[x + y * width] = Tile::wall();
+                    } else {
+                        break;
+                    }
+                }
+                for x in split_location.1 + 1..height {
+                    if geography[x + y * width]
+                        .traits
+                        .contains(TileTraits::WALKABLE)
+                        || splits.contains(&(x, y))
+                    {
+                        geography[x + y * width] = Tile::wall();
+                    } else {
+                        break;
+                    }
+                }
+            }
         }
+
         let stair_location = (rng.random_range(0..width), rng.random_range(0..height));
         geography[stair_location.0 + width * stair_location.1] = if _level < 9 {
             Tile::stair()
@@ -797,13 +863,7 @@ impl Board {
             Tile::win()
         };
 
-        let rng = rng.clone();
-        Board {
-            geography,
-            width,
-            height,
-            rng,
-        }
+        (geography, width, height, rng)
     }
 
     fn get(&self, x: usize, y: usize) -> &Tile {
@@ -1200,5 +1260,34 @@ mod tests {
             crate::mcts::node::Node::Expanded { children, .. } => assert!(children.is_empty()),
             crate::mcts::node::Node::Placeholder { .. } => panic!("Expected expanded node"),
         }
+    }
+
+    #[test]
+    fn checkpoint_reward_uses_player_health_ratio_and_stays_terminal() {
+        let mut state = UtwidState::new();
+        state.add_actor(GameActor::are_actor(2, 2));
+
+        let (stairs_x, stairs_y) = stair_location(&state);
+        let action = adjacent_move_to(&mut state, stairs_x, stairs_y);
+        state.actor_mut(0).unwrap().health = Some(4);
+
+        let post_stairs = action.execute(&state);
+        let rewards = post_stairs.reward();
+
+        assert!(post_stairs.terminal());
+        assert_eq!(rewards.len(), 2);
+        assert!((rewards[YOU_ID] - (1.0 - 4.0 / 7.0)).abs() < f64::EPSILON);
+        assert!((rewards[MON2Y_ID] - (-1.0 + 4.0 / 7.0)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn lost_and_won_rewards_match_actor_outcomes() {
+        let mut lost_state = UtwidState::new();
+        lost_state.game_state = GameState::Lost;
+        assert_eq!(lost_state.reward(), vec![-1.0, 1.0]);
+
+        let mut won_state = UtwidState::new();
+        won_state.game_state = GameState::Won;
+        assert_eq!(won_state.reward(), vec![1.0, -1.0]);
     }
 }
