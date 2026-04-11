@@ -15,7 +15,7 @@ use std::thread;
 use std::{
     collections::BTreeMap,
     fs::OpenOptions,
-    io::{stdout, Stdout, Write},
+    io::{BufWriter, Stdout, Write, stdout},
     sync::Arc,
     time::Duration,
 };
@@ -23,7 +23,7 @@ use std::{
 use mon2y::games::utwid::{ActorTraits, GameState, UtwidAction, UtwidState};
 use mon2y::mcts::game_trait::Action;
 use mon2y::mcts::tree::Tree;
-use mon2y::mcts::{calculate_best_turn, BestTurnPolicy};
+use mon2y::mcts::{BestTurnPolicy, calculate_best_turn};
 
 const DRAW_BOARD_X: u16 = 3;
 const DRAW_BOARD_Y: u16 = 3;
@@ -67,7 +67,7 @@ fn draw_monsters(stdout: &mut Stdout, state: &UtwidState) -> std::io::Result<()>
                 stdout,
                 MoveTo(DRAW_MONSTER_X, DRAW_MONSTER_Y + i as u16),
                 Print(format!(
-                    "{} ({}, {}) - {}",
+                    "{} ({}, {}) - {}  ",
                     actor.console_repr().unwrap_or(' '),
                     actor.x,
                     actor.y,
@@ -101,11 +101,18 @@ fn draw_status_mcts(
     for _ in 0..completed_length {
         queue!(stdout, Print("-"))?;
     }
+
     let to_go_length = (MCTS_STATUS_LINE_X2 - MCTS_STATUS_LINE_X1) - completed_length;
     for _ in 0..to_go_length {
         queue!(stdout, Print(" "))?;
     }
-    queue!(stdout, SetForegroundColor(Color::Grey), Print("|"))?;
+
+    queue!(
+        stdout,
+        MoveTo(MCTS_STATUS_LINE_X2, MCTS_STATUS_LINE_Y),
+        SetForegroundColor(Color::Grey),
+        Print("|")
+    )?;
     Ok(())
 }
 
@@ -226,7 +233,11 @@ fn draw_exploration_status(
     Ok(())
 }
 
-fn append_exploration_log(iterations: usize, difficulty_mod: f32, win: bool) -> std::io::Result<()> {
+fn append_exploration_log(
+    iterations: usize,
+    difficulty_mod: f32,
+    win: bool,
+) -> std::io::Result<()> {
     let mut log_file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -280,7 +291,7 @@ fn run_game(
             let mut this_attempt: Option<UtwidAction> = None;
             while this_attempt.is_none() {
                 let read_event_result = event::read();
-                log::info!("Result {:?}", read_event_result);
+                //log::info!("Result {:?}", read_event_result);
                 this_attempt = match read_event_result {
                     Ok(read_event) => match read_event {
                         event::Event::Key(key_event) => match key_event.code {
@@ -315,7 +326,10 @@ fn run_game(
             let (mcts_iterations, short_circuit_increment) = {
                 if let Some(mon2y) = to_act.mon2y.as_ref() {
                     Some((
-                        usize::max(1, ((mon2y.iterations as f32) * config.difficulty_mod) as usize),
+                        usize::max(
+                            1,
+                            ((mon2y.iterations as f32) * config.difficulty_mod) as usize,
+                        ),
                         0,
                     ))
                 } else if to_act.traits.contains(ActorTraits::HUMAN) {
@@ -325,7 +339,7 @@ fn run_game(
                 }
             }
             .unwrap();
-            while completed_iterations < config.iterations {
+            while completed_iterations < mcts_iterations {
                 let mut ai_marked_state = state.clone();
                 ai_marked_state.short_circuit_at_turns = Some(SHORT_CIRCUIT_AT_TURNS);
                 ai_marked_state.short_circuit_at_turns_increment = Some(short_circuit_increment);
@@ -364,7 +378,6 @@ fn run_game(
             state.game_state = GameState::Ongoing;
         };
         state.ai_turn_weight = 0.0;
-        log::debug!("GameStateType {:?}", state.clone().game_state);
     }
 
     Ok(Some(state.game_state))
@@ -405,7 +418,9 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
                     return Ok(());
                 };
                 let win = matches!(game_state, GameState::Won);
-                let entry = stats.get_mut(&label).expect("exploration entry should exist");
+                let entry = stats
+                    .get_mut(&label)
+                    .expect("exploration entry should exist");
                 if win {
                     entry.wins += 1;
                 }
