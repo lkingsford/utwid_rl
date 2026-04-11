@@ -1,12 +1,11 @@
 use chrono::Local;
 use clap::Parser;
 use crossterm::{
+    ExecutableCommand,
     cursor::MoveTo,
     event::{self, KeyCode, KeyModifiers},
     queue,
-    style::Color,
-    style::Print,
-    style::SetForegroundColor,
+    style::{Color, Print, SetForegroundColor},
     terminal::{self, Clear, ClearType},
 };
 use env_logger::fmt::Formatter;
@@ -168,6 +167,8 @@ struct Args {
     verbose: clap_verbosity_flag::Verbosity,
     #[arg(short = 'u', long, default_value_t = false)]
     human: bool,
+    #[arg(short = 'U', long, default_value_t = false)]
+    very_human: bool,
     #[arg(long, default_value_t = false)]
     plain_mode: bool,
     #[arg(short = 'x', long, default_value_t = false)]
@@ -196,6 +197,7 @@ struct Args {
 struct GameRunConfig {
     plain_mode: bool,
     human: bool,
+    very_human: bool,
     difficulty_mod: f32,
     iterations: usize,
 }
@@ -287,7 +289,13 @@ fn run_game(
             .get(state.to_act)
             .and_then(|actor| actor.as_ref())
             .unwrap();
-        let next_act = if config.human && to_act.traits.contains(ActorTraits::HUMAN) {
+        let next_act = if config.human && to_act.traits.contains(ActorTraits::HUMAN)
+            || config.very_human
+        {
+            stdout.execute(MoveTo(
+                (to_act.x) as u16 + DRAW_BOARD_X,
+                (to_act.y) as u16 + DRAW_BOARD_Y,
+            ));
             let mut this_attempt: Option<UtwidAction> = None;
             while this_attempt.is_none() {
                 let read_event_result = event::read();
@@ -303,6 +311,7 @@ fn run_game(
                             KeyCode::Char('u') => Some(UtwidAction::NE),
                             KeyCode::Char('b') => Some(UtwidAction::SW),
                             KeyCode::Char('n') => Some(UtwidAction::SE),
+                            KeyCode::Char('x') => Some(UtwidAction::Explode),
                             KeyCode::Char('c') => {
                                 if key_event.modifiers.intersects(KeyModifiers::CONTROL) {
                                     return Ok(None);
@@ -408,6 +417,7 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
                     GameRunConfig {
                         plain_mode: args.plain_mode,
                         human: false,
+                        very_human: false,
                         difficulty_mod: *difficulty_mod,
                         iterations: *iterations,
                     },
@@ -490,6 +500,7 @@ fn main() -> std::io::Result<()> {
         GameRunConfig {
             plain_mode: args.plain_mode,
             human: args.human,
+            very_human: args.very_human,
             difficulty_mod: args.difficulty_mod,
             iterations: args.iterations,
         },
