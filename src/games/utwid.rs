@@ -793,75 +793,107 @@ impl Board {
             rng,
         }
     }
-
     fn rooms_builder(_level: usize, rng: &mut SmallRng) -> (Vec<Tile>, usize, usize, SmallRng) {
         let mut rng = rng.clone();
         let width: usize = 11;
         let height: usize = 11;
-        let mut geography = vec![Tile::floor(); (width * height) as usize];
-        let mut splits: HashSet<(usize, usize, bool)> = HashSet::from([]);
+        let mut geography = vec![Tile::floor(); width * height];
 
-        for _ in 0..rng.random_range(ROOM_SPLITS_MIN..ROOM_SPLITS_MAX) {
+        // Track vertical and horizontal positions separately to prevent parallel crowding
+        let mut used_x: Vec<usize> = Vec::new();
+        let mut used_y: Vec<usize> = Vec::new();
+        let mut splits: Vec<(usize, usize)> = Vec::new();
+
+        'split_attempt: for _ in
+            0..rng.random_range(ROOM_SPLITS_MIN + _level..ROOM_SPLITS_MAX + _level)
+        {
             let vertical = rng.random_bool(0.5);
-            let split_location = (rng.random_range(0..width), rng.random_range(0..height));
-            splits.insert((split_location.0, split_location.1, vertical));
+            let split_x = rng.random_range(1..width - 1);
+            let split_y = rng.random_range(1..height - 1);
+
             if vertical {
-                let x = rng.random_range(0..width);
-                for y in (0..split_location.1).rev() {
-                    if geography[x + y * width]
-                        .traits
-                        .contains(TileTraits::WALKABLE)
-                        || splits.contains(&(x, y, true))
-                    {
-                        geography[x + y * width] = Tile::wall();
+                if used_x.iter().any(|&x| split_x.abs_diff(x) <= 3) {
+                    continue 'split_attempt;
+                }
+
+                if !geography[split_x + split_y * width]
+                    .traits
+                    .contains(TileTraits::WALKABLE)
+                {
+                    continue 'split_attempt;
+                }
+
+                for y in (0..=split_y).rev() {
+                    let idx = split_x + y * width;
+                    if geography[idx].traits.contains(TileTraits::WALKABLE) {
+                        geography[idx] = Tile::wall();
                     } else {
                         break;
                     }
                 }
-                for y in split_location.1 + 1..height {
-                    if geography[x + y * width]
-                        .traits
-                        .contains(TileTraits::WALKABLE)
-                        || splits.contains(&(x, y, false))
-                    {
-                        geography[x + y * width] = Tile::wall();
+                for y in (split_y + 1)..height {
+                    let idx = split_x + y * width;
+                    if geography[idx].traits.contains(TileTraits::WALKABLE) {
+                        geography[idx] = Tile::wall();
                     } else {
                         break;
                     }
                 }
+                used_x.push(split_x);
             } else {
-                let y = rng.random_range(0..height);
-                for x in (0..split_location.0).rev() {
-                    if geography[x + y * width]
-                        .traits
-                        .contains(TileTraits::WALKABLE)
-                        || splits.contains(&(x, y))
-                    {
-                        geography[x + y * width] = Tile::wall();
+                if used_y.iter().any(|&y| split_y.abs_diff(y) <= 3) {
+                    continue 'split_attempt;
+                }
+
+                if !geography[split_x + split_y * width]
+                    .traits
+                    .contains(TileTraits::WALKABLE)
+                {
+                    continue 'split_attempt;
+                }
+
+                for x in (0..=split_x).rev() {
+                    let idx = x + split_y * width;
+                    if geography[idx].traits.contains(TileTraits::WALKABLE) {
+                        geography[idx] = Tile::wall();
                     } else {
                         break;
                     }
                 }
-                for x in split_location.1 + 1..height {
-                    if geography[x + y * width]
-                        .traits
-                        .contains(TileTraits::WALKABLE)
-                        || splits.contains(&(x, y))
-                    {
-                        geography[x + y * width] = Tile::wall();
+                for x in (split_x + 1)..width {
+                    let idx = x + split_y * width;
+                    if geography[idx].traits.contains(TileTraits::WALKABLE) {
+                        geography[idx] = Tile::wall();
                     } else {
                         break;
                     }
                 }
+                used_y.push(split_y);
+            }
+            geography[split_x + split_y * width] = Tile::floor();
+            splits.push((split_x, split_y));
+        }
+
+        // Ensure stairs don't spawn in a wall
+        let mut stair_idx;
+        loop {
+            let x = rng.random_range(0..width);
+            let y = rng.random_range(0..height);
+            stair_idx = x + y * width;
+            if geography[stair_idx].traits.contains(TileTraits::WALKABLE) {
+                break;
             }
         }
 
-        let stair_location = (rng.random_range(0..width), rng.random_range(0..height));
-        geography[stair_location.0 + width * stair_location.1] = if _level < 9 {
+        geography[stair_idx] = if _level < 9 {
             Tile::stair()
         } else {
             Tile::win()
         };
+
+        for coords in splits {
+            geography[coords.0 + coords.1 * width] = Tile::floor();
+        }
 
         (geography, width, height, rng)
     }
