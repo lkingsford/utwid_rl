@@ -393,8 +393,8 @@ impl State for UtwidState {
         match self.game_state {
             GameState::Checkpoint => {
                 let player_health_ratio = self.player_health_ratio();
-                rewards[YOU_ID] = 1.0 - player_health_ratio;
-                rewards[MON2Y_ID] = -1.0 + player_health_ratio;
+                rewards[YOU_ID] = player_health_ratio;
+                rewards[MON2Y_ID] = -player_health_ratio;
             }
             GameState::Mon2yShortcircuit => {
                 for (_, actor) in self.actors_iter() {

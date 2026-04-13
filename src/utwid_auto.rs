@@ -19,10 +19,13 @@ use std::{
     time::Duration,
 };
 
-use mon2y::games::utwid::{ActorTraits, GameState, UtwidAction, UtwidState};
 use mon2y::mcts::game_trait::Action;
 use mon2y::mcts::tree::Tree;
 use mon2y::mcts::{BestTurnPolicy, calculate_best_turn};
+use mon2y::{
+    games::utwid::{ActorTraits, GameState, UtwidAction, UtwidState},
+    mcts::mcts::run_mcts_iterations,
+};
 
 const DRAW_BOARD_X: u16 = 3;
 const DRAW_BOARD_Y: u16 = 3;
@@ -255,6 +258,41 @@ fn append_exploration_log(
     Ok(())
 }
 
+fn sample_actions(stdout: &mut Stdout, state: &UtwidState, iterations: usize) {
+    let tree = std::sync::Arc::new(mon2y::mcts::tree::Tree::new(
+        mon2y::mcts::node::create_expanded_node(state.clone(), None),
+    ));
+    run_mcts_iterations(tree.clone(), iterations, None, 8);
+    let root_ref = tree.root.clone();
+    let root = root_ref.read().unwrap();
+    if let mon2y::mcts::node::Node::Expanded { children, .. } = &*root {
+        queue!(stdout, MoveTo(0, MCTS_STATUS_LINE_Y));
+        for action_value in {
+            (children.iter().map(|(action, node)| {
+                let node = node.read().unwrap();
+                (format!(
+                    "{:?} - V:{} E:{:?}\n",
+                    action.clone(),
+                    node.visit_count(),
+                    node.value_sums_ref()
+                        .to_vec()
+                        .iter()
+                        .map(|value_sum| *value_sum / (node.visit_count() as f64)),
+                ))
+            }))
+        }
+        .enumerate()
+        {
+            queue!(
+                stdout,
+                MoveTo(0, MCTS_STATUS_LINE_Y + action_value.0 as u16),
+                Print(action_value.1)
+            );
+        }
+    }
+    stdout.flush();
+}
+
 fn run_game(
     stdout: &mut Stdout,
     config: GameRunConfig,
@@ -312,6 +350,11 @@ fn run_game(
                             KeyCode::Char('b') => Some(UtwidAction::SW),
                             KeyCode::Char('n') => Some(UtwidAction::SE),
                             KeyCode::Char('x') => Some(UtwidAction::Explode),
+                            KeyCode::Char('?') => {
+                                // This... is an abuse of side effects. I don't think I like this :s
+                                sample_actions(stdout, &state, 10000);
+                                None
+                            }
                             KeyCode::Char('c') => {
                                 if key_event.modifiers.intersects(KeyModifiers::CONTROL) {
                                     return Ok(None);
