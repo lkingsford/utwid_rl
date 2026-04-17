@@ -505,6 +505,7 @@ impl Action for UtwidAction {
                 new_state.prescription_turns = Some(PRESCRIPTION_TURNS);
                 new_state
             }
+            UtwidAction::Conclusion => self.execute_conclusion(state),
             _ => unimplemented!(),
         };
         if state
@@ -633,30 +634,34 @@ fn neighborhood_range(center: usize, max: usize) -> std::ops::Range<usize> {
 
 impl UtwidAction {
     fn execute_move(&self, state: &UtwidState) -> UtwidState {
-        let mut new_state = state.clone();
-        let actor_id = new_state.to_act;
         let direction = match self {
             UtwidAction::Move(direction) => *direction,
             _ => unreachable!("execute_move only handles Move actions"),
         };
 
+        let actor = state.actor(state.to_act).unwrap();
+        let (new_x, new_y) = apply_dir(actor.x, actor.y, direction);
+        self.move_to(state, new_x, new_y)
+    }
+
+    fn move_to(&self, state: &UtwidState, new_x: usize, new_y: usize) -> UtwidState {
+        let mut new_state = state.clone();
+        let actor_id = new_state.to_act;
+
         // --- Attack ---
-        let (new_coords, damage) = {
+        let damage = {
             let actor = new_state.actor(actor_id).unwrap();
-            (
-                apply_dir(actor.x, actor.y, direction),
-                actor.attack_damage.unwrap_or(0) as isize * -1,
-            )
+            actor.attack_damage.unwrap_or(0) as isize * -1
         };
 
         for (_, actor) in new_state
             .actors_iter_mut()
-            .filter(|(_, actor)| actor.x == new_coords.0 && actor.y == new_coords.1)
+            .filter(|(_, actor)| actor.x == new_x && actor.y == new_y)
         {
             actor.modify_health(damage);
         }
 
-        let tile = new_state.board.get_mut(new_coords.0, new_coords.1);
+        let tile = new_state.board.get_mut(new_x, new_y);
         if tile.health.is_some() {
             tile.modify_health(damage);
         }
@@ -666,16 +671,16 @@ impl UtwidAction {
         if new_state
             .actors_iter()
             .map(|(_, actor)| actor)
-            .find(|actor| actor.x == new_coords.0 && actor.y == new_coords.1)
+            .find(|actor| actor.x == new_x && actor.y == new_y)
             .is_none()
             && new_state
                 .board
-                .get(new_coords.0, new_coords.1)
+                .get(new_x, new_y)
                 .traits
                 .contains(TileTraits::WALKABLE)
         {
             let actor = new_state.actor_mut(actor_id).unwrap();
-            (actor.x, actor.y) = new_coords;
+            (actor.x, actor.y) = (new_x, new_y);
         }
 
         let actor_ref = new_state.actor(actor_id).unwrap();
@@ -692,6 +697,27 @@ impl UtwidAction {
         } else {
             new_state
         }
+    }
+
+    fn execute_conclusion(&self, state: &UtwidState) -> UtwidState {
+        let direction = match self {
+            UtwidAction::Move(direction) => *direction,
+            _ => unreachable!("execute_move only handles Move actions"),
+        };
+
+        let actor = state.actor(state.to_act).unwrap();
+
+        let (mut new_x, mut new_y) = apply_dir(actor.x, actor.y, direction);
+
+        while state
+            .board
+            .board_permitted_moves(new_x, new_y, true, true, true)
+            .contains(&direction)
+        {
+            (new_x, new_y) = apply_dir(new_x, new_y, direction);
+        }
+
+        self.move_to(state, new_x, new_y)
     }
 
     fn execute_stairs(&self, state: &UtwidState) -> UtwidState {
