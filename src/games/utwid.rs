@@ -338,44 +338,39 @@ impl State for UtwidState {
             next_actor.traits.contains(ActorTraits::MELEE),
         );
 
-        let permitted_actions: Vec<_> = board_permitted_moves
+        let is_you = next_actor.actor_type == ACTOR_TYPE_YOU;
+
+        let mut permitted_actions: Vec<_> = board_permitted_moves
             .iter()
+            .copied()
             .filter(|direction| {
-                let (x, y) = apply_dir(next_actor.x, next_actor.y, **direction);
+                let (x, y) = apply_dir(next_actor.x, next_actor.y, *direction);
                 let on_point = self.actor_in_space(x, y);
                 if let Some(actor) = on_point {
-                    (next_actor.traits.contains(ActorTraits::MELEE)
-                        && next_actor.allegiance != actor.allegiance)
+                    next_actor.traits.contains(ActorTraits::MELEE)
+                        && next_actor.allegiance != actor.allegiance
                 } else {
                     true
                 }
             })
-            .map(|direction| UtwidAction::Move(*direction))
+            .map(UtwidAction::Move)
             .chain(
                 next_actor
                     .traits
                     .contains(ActorTraits::BOMB)
                     .then_some(UtwidAction::Explode),
             )
-            .chain(
-                next_actor
-                    .actor_type
-                    .eq(&ACTOR_TYPE_YOU)
-                    .then_some(vec![
-                        //UtwidAction::Conclusion,
-                        //UtwidAction::Assumption,
-                        //UtwidAction::Demonstration,
-                        //UtwidAction::Redemption,
-                        //UtwidAction::Stagnation,
-                        //UtwidAction::Contemplation,
-                        UtwidAction::Prescription,
-                        //UtwidAction::Contention,
-                        //UtwidAction::Attention,
-                    ])
-                    .iter()
-                    .flat_map(|i| i.clone()),
-            )
             .collect();
+
+        if is_you {
+            permitted_actions.extend(
+                board_permitted_moves
+                    .iter()
+                    .copied()
+                    .map(UtwidAction::Conclusion),
+            );
+            permitted_actions.push(UtwidAction::Prescription);
+        }
 
         if permitted_actions.is_empty() {
             let permitted_actions = vec![UtwidAction::Wait];
@@ -479,15 +474,15 @@ pub enum UtwidAction {
     Wait,
     Explode,
 
-    Conclusion,    // Jump to a position
-    Assumption,    // Take over a person
-    Demonstration, // Play two timelines at once
-    Redemption,    // Jump through a line of actors, injuring all
-    Stagnation,    // Create a wall
-    Contemplation, // Push all adjacent away
-    Prescription,  // Take multiple moves in a row
-    Contention,    // Glitch swap two chunks of map
-    Attention,     // Pull a whole direction closer
+    Conclusion(Dir), // Jump to a position
+    Assumption,      // Take over a person
+    Demonstration,   // Play two timelines at once
+    Redemption,      // Jump through a line of actors, injuring all
+    Stagnation,      // Create a wall
+    Contemplation,   // Push all adjacent away
+    Prescription,    // Take multiple moves in a row
+    Contention,      // Glitch swap two chunks of map
+    Attention,       // Pull a whole direction closer
 }
 
 const AI_TURN_WEIGHT: f64 = 1.0 / 1000.0;
@@ -505,7 +500,7 @@ impl Action for UtwidAction {
                 new_state.prescription_turns = Some(PRESCRIPTION_TURNS);
                 new_state
             }
-            UtwidAction::Conclusion => self.execute_conclusion(state),
+            UtwidAction::Conclusion(_) => self.execute_conclusion(state),
             _ => unimplemented!(),
         };
         if state
@@ -701,8 +696,8 @@ impl UtwidAction {
 
     fn execute_conclusion(&self, state: &UtwidState) -> UtwidState {
         let direction = match self {
-            UtwidAction::Move(direction) => *direction,
-            _ => unreachable!("execute_move only handles Move actions"),
+            UtwidAction::Conclusion(direction) => *direction,
+            _ => unreachable!("execute_conclusion only handles Conclusion actions"),
         };
 
         let actor = state.actor(state.to_act).unwrap();

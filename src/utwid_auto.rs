@@ -358,7 +358,7 @@ fn run_game(
                                 sample_actions(stdout, &state, 10000);
                                 None
                             }
-                            KeyCode::Char('1') => Some(UtwidAction::Conclusion), // Jump to a position
+                            KeyCode::Char('1') => Some(UtwidAction::Conclusion(Dir::N)), // Jump to a position
                             KeyCode::Char('2') => Some(UtwidAction::Assumption), // Take over a person
                             KeyCode::Char('3') => Some(UtwidAction::Demonstration), // Play two timelines at once
                             KeyCode::Char('4') => Some(UtwidAction::Redemption), // Jump through a line of actors, injuring all
