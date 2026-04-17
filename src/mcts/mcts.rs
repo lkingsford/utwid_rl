@@ -1,12 +1,12 @@
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
 use log::trace;
 
-use super::game_trait::{Action, Actor, State};
-use super::node::{create_expanded_node, Node};
-use super::tree::{Selection, Tree};
 use super::BestTurnPolicy;
+use super::game_trait::{Action, Actor, State};
+use super::node::{Node, create_expanded_node};
+use super::tree::{Selection, Tree};
 
 /// Run multiple iterations of the MCTS algorithm on a state.
 pub fn run_mcts_iterations<
@@ -26,21 +26,23 @@ pub fn run_mcts_iterations<
         let tree_clone: Arc<Tree<StateType, ActionType>> = Arc::clone(&tree);
         let finished_iterations_clone: Arc<AtomicUsize> = Arc::clone(&finished_iterations);
         let time_started = std::time::Instant::now();
-        threads.push(std::thread::spawn(move || loop {
-            {
-                trace!(
-                    "Starting iteration {}",
-                    finished_iterations_clone.load(std::sync::atomic::Ordering::SeqCst)
-                );
-                let result = tree_clone.iterate();
-                let current_iterations =
-                    finished_iterations_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                trace!("Finished iteration {}", current_iterations);
-                if current_iterations >= iterations
-                    || matches!(result, Selection::FullyExplored)
-                    || time_started.elapsed() > time_limit.unwrap_or(std::time::Duration::MAX)
+        threads.push(std::thread::spawn(move || {
+            loop {
                 {
-                    break;
+                    trace!(
+                        "Starting iteration {}",
+                        finished_iterations_clone.load(std::sync::atomic::Ordering::SeqCst)
+                    );
+                    let result = tree_clone.iterate();
+                    let current_iterations =
+                        finished_iterations_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    trace!("Finished iteration {}", current_iterations);
+                    if current_iterations >= iterations
+                        || matches!(result, Selection::FullyExplored)
+                        || time_started.elapsed() > time_limit.unwrap_or(std::time::Duration::MAX)
+                    {
+                        break;
+                    }
                 }
             }
         }));
@@ -141,20 +143,20 @@ where
             if let Node::Expanded { children, .. } = &*root {
                 log::debug!(
                     "Action, Visits, Value: {:?}",
-                        children
-                            .iter()
-                            .map(|(action, node)| {
-                                let node = node.read().unwrap();
-                                (
-                                    action.clone(),
-                                    node.visit_count(),
-                                    node.value_sums_ref()
-                                        .iter()
-                                        .map(|value| value.value_sum)
-                                        .collect::<Vec<_>>(),
-                                )
-                            })
-                            .collect::<Vec<_>>()
+                    children
+                        .iter()
+                        .map(|(action, node)| {
+                            let node = node.read().unwrap();
+                            (
+                                action.clone(),
+                                node.visit_count(),
+                                node.value_sums_ref()
+                                    .iter()
+                                    .map(|value| value.value_sum)
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
                 );
                 // Short circuit on a winning move
                 // Implemented because (I think) the UCB formula doesn't end up prioritizing

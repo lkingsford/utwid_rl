@@ -280,11 +280,7 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
                     }
                 }
 
-                if count == 0 {
-                    0.0
-                } else {
-                    sum / count as f64
-                }
+                if count == 0 { 0.0 } else { sum / count as f64 }
             }
             Node::Placeholder { .. } => 0.0,
         }
@@ -404,9 +400,11 @@ where
         let cached_player_value_sum = player_id
             .map(|player_id| child_node.value_sum_for_player(player_id))
             .unwrap_or(1.0);
-        if let Some(ucb) =
-            child_node.cached_ucb(cached_player_value_sum, child_visit_count, parent_visit_count)
-        {
+        if let Some(ucb) = child_node.cached_ucb(
+            cached_player_value_sum,
+            child_visit_count,
+            parent_visit_count,
+        ) {
             let q = if child_visit_count == 0 {
                 0.0
             } else {
@@ -423,10 +421,7 @@ where
         }
 
         let (visit_count, player_value_sum) = if game_action {
-            (
-                child_visit_count as f64 / child_node.weight() as f64,
-                1.0,
-            )
+            (child_visit_count as f64 / child_node.weight() as f64, 1.0)
         } else {
             (child_visit_count as f64, cached_player_value_sum)
         };
@@ -446,16 +441,14 @@ where
         let ucb = q + constant * u + r;
         trace!(
             "UCB action: {:?}, value_sum: {}, visit_count: {}, parent_visits: {}, q: {}, u: {}, c: {} ucb: {}",
-            action,
-            player_value_sum,
-            visit_count,
-            parent_visits,
-            q,
-            u,
-            constant,
-            ucb
+            action, player_value_sum, visit_count, parent_visits, q, u, constant, ucb
         );
-        child_node.cache_ucb(ucb, cached_player_value_sum, child_visit_count, parent_visit_count);
+        child_node.cache_ucb(
+            ucb,
+            cached_player_value_sum,
+            child_visit_count,
+            parent_visit_count,
+        );
         ucbs.push(BestPickEntry {
             action_to_take: action.clone(),
             ucb,

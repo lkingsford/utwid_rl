@@ -10,17 +10,17 @@ use crate::mcts::game_trait::{Action, Actor, State};
 use rand::{SeedableRng, prelude::*, rngs::SmallRng};
 
 type ActorId = usize; // If I keep using this code, this might need to be u64, or something else
-const CARDINAL_DIRS: [(UtwidAction, isize, isize); 4] = [
-    (UtwidAction::N, 0, -1),
-    (UtwidAction::S, 0, 1),
-    (UtwidAction::E, 1, 0),
-    (UtwidAction::W, -1, 0),
+const CARDINAL_DIRS: [(Dir, isize, isize); 4] = [
+    (Dir::N, 0, -1),
+    (Dir::S, 0, 1),
+    (Dir::E, 1, 0),
+    (Dir::W, -1, 0),
 ];
-const DIAGONAL_DIRS: [(UtwidAction, isize, isize); 4] = [
-    (UtwidAction::NE, 1, -1),
-    (UtwidAction::NW, -1, -1),
-    (UtwidAction::SE, 1, 1),
-    (UtwidAction::SW, -1, 1),
+const DIAGONAL_DIRS: [(Dir, isize, isize); 4] = [
+    (Dir::NE, 1, -1),
+    (Dir::NW, -1, -1),
+    (Dir::SE, 1, 1),
+    (Dir::SW, -1, 1),
 ];
 const ACTOR_TYPE_NAMES: [&str; 5] = ["you", "monte", "them", "are", "one"];
 const ACTOR_TYPE_YOU: usize = 0;
@@ -340,8 +340,8 @@ impl State for UtwidState {
 
         let permitted_actions: Vec<_> = board_permitted_moves
             .iter()
-            .filter(|action| {
-                let (x, y) = apply_dir(next_actor.x, next_actor.y, **action);
+            .filter(|direction| {
+                let (x, y) = apply_dir(next_actor.x, next_actor.y, **direction);
                 let on_point = self.actor_in_space(x, y);
                 if let Some(actor) = on_point {
                     (next_actor.traits.contains(ActorTraits::MELEE)
@@ -350,7 +350,7 @@ impl State for UtwidState {
                     true
                 }
             })
-            .map(|action_ref| *action_ref)
+            .map(|direction| UtwidAction::Move(*direction))
             .chain(
                 next_actor
                     .traits
@@ -461,8 +461,7 @@ impl State for UtwidState {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub enum UtwidAction {
-    NoAction,
+pub enum Dir {
     N,
     S,
     E,
@@ -471,6 +470,12 @@ pub enum UtwidAction {
     NW,
     SE,
     SW,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum UtwidAction {
+    NoAction,
+    Move(Dir),
     Wait,
     Explode,
 
@@ -492,14 +497,7 @@ impl Action for UtwidAction {
 
     fn execute(&self, state: &Self::StateType) -> Self::StateType {
         let mut new_state = match self {
-            UtwidAction::N
-            | UtwidAction::S
-            | UtwidAction::E
-            | UtwidAction::W
-            | UtwidAction::NE
-            | UtwidAction::NW
-            | UtwidAction::SE
-            | UtwidAction::SW => self.execute_move(state),
+            UtwidAction::Move(_) => self.execute_move(state),
             UtwidAction::Wait => state.clone(),
             UtwidAction::Explode => self.execute_explode(state),
             UtwidAction::Prescription => {
@@ -637,12 +635,16 @@ impl UtwidAction {
     fn execute_move(&self, state: &UtwidState) -> UtwidState {
         let mut new_state = state.clone();
         let actor_id = new_state.to_act;
+        let direction = match self {
+            UtwidAction::Move(direction) => *direction,
+            _ => unreachable!("execute_move only handles Move actions"),
+        };
 
         // --- Attack ---
         let (new_coords, damage) = {
             let actor = new_state.actor(actor_id).unwrap();
             (
-                apply_dir(actor.x, actor.y, *self),
+                apply_dir(actor.x, actor.y, direction),
                 actor.attack_damage.unwrap_or(0) as isize * -1,
             )
         };
@@ -824,7 +826,7 @@ pub struct Board {
     pub rng: SmallRng,
 }
 
-fn apply_dir(x: usize, y: usize, direction: UtwidAction) -> (usize, usize) {
+fn apply_dir(x: usize, y: usize, direction: Dir) -> (usize, usize) {
     let (_, dx, dy) = CARDINAL_DIRS
         .iter()
         .chain(DIAGONAL_DIRS.iter())
@@ -970,7 +972,7 @@ impl Board {
         cardinal: bool,
         diagonal: bool,
         melee: bool,
-    ) -> Vec<UtwidAction> {
+    ) -> Vec<Dir> {
         CARDINAL_DIRS
             .iter()
             .filter(|_| cardinal)
@@ -1232,7 +1234,7 @@ mod tests {
                 you.y = from_y as usize;
                 state.to_act = 0;
                 state.turn_order = VecDeque::from([0]);
-                return *action;
+                return UtwidAction::Move(*action);
             }
         }
         panic!("Expected a walkable tile adjacent to target");
@@ -1248,7 +1250,7 @@ mod tests {
             state.to_act = 2;
 
             let (stairs_x, stairs_y) = stair_location(&state);
-            state = UtwidAction::N.execute_stairs(&state);
+            state = UtwidAction::Move(Dir::N).execute_stairs(&state);
 
             assert_eq!(state.to_act, 0);
             assert_eq!(state.turn_order, VecDeque::from([0]));
@@ -1277,7 +1279,7 @@ mod tests {
             state.to_act = them_id;
 
             let (stairs_x, stairs_y) = stair_location(&state);
-            state = UtwidAction::N.execute_stairs(&state);
+            state = UtwidAction::Move(Dir::N).execute_stairs(&state);
 
             assert_eq!(state.to_act, 0);
             assert_eq!(state.turn_order, VecDeque::from([0]));

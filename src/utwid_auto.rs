@@ -23,7 +23,7 @@ use mon2y::mcts::game_trait::Action;
 use mon2y::mcts::tree::Tree;
 use mon2y::mcts::{BestTurnPolicy, calculate_best_turn};
 use mon2y::{
-    games::utwid::{ActorTraits, GameState, UtwidAction, UtwidState},
+    games::utwid::{ActorTraits, Dir, GameState, UtwidAction, UtwidState},
     mcts::mcts::run_mcts_iterations,
 };
 
@@ -344,14 +344,14 @@ fn run_game(
                 this_attempt = match read_event_result {
                     Ok(read_event) => match read_event {
                         event::Event::Key(key_event) => match key_event.code {
-                            KeyCode::Char('h') | KeyCode::Left => Some(UtwidAction::W),
-                            KeyCode::Char('l') | KeyCode::Right => Some(UtwidAction::E),
-                            KeyCode::Char('j') | KeyCode::Down => Some(UtwidAction::S),
-                            KeyCode::Char('k') | KeyCode::Up => Some(UtwidAction::N),
-                            KeyCode::Char('y') => Some(UtwidAction::NW),
-                            KeyCode::Char('u') => Some(UtwidAction::NE),
-                            KeyCode::Char('b') => Some(UtwidAction::SW),
-                            KeyCode::Char('n') => Some(UtwidAction::SE),
+                            KeyCode::Char('h') | KeyCode::Left => Some(UtwidAction::Move(Dir::W)),
+                            KeyCode::Char('l') | KeyCode::Right => Some(UtwidAction::Move(Dir::E)),
+                            KeyCode::Char('j') | KeyCode::Down => Some(UtwidAction::Move(Dir::S)),
+                            KeyCode::Char('k') | KeyCode::Up => Some(UtwidAction::Move(Dir::N)),
+                            KeyCode::Char('y') => Some(UtwidAction::Move(Dir::NW)),
+                            KeyCode::Char('u') => Some(UtwidAction::Move(Dir::NE)),
+                            KeyCode::Char('b') => Some(UtwidAction::Move(Dir::SW)),
+                            KeyCode::Char('n') => Some(UtwidAction::Move(Dir::SE)),
                             KeyCode::Char('x') => Some(UtwidAction::Explode),
                             KeyCode::Char('?') => {
                                 // This... is an abuse of side effects. I don't think I like this :s
