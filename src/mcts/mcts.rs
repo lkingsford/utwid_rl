@@ -141,17 +141,20 @@ where
             if let Node::Expanded { children, .. } = &*root {
                 log::debug!(
                     "Action, Visits, Value: {:?}",
-                    children
-                        .iter()
-                        .map(|(action, node)| {
-                            let node = node.read().unwrap();
-                            (
-                                action.clone(),
-                                node.visit_count(),
-                                node.value_sums_ref().to_vec(),
-                            )
-                        })
-                        .collect::<Vec<_>>()
+                        children
+                            .iter()
+                            .map(|(action, node)| {
+                                let node = node.read().unwrap();
+                                (
+                                    action.clone(),
+                                    node.visit_count(),
+                                    node.value_sums_ref()
+                                        .iter()
+                                        .map(|value| value.value_sum)
+                                        .collect::<Vec<_>>(),
+                                )
+                            })
+                            .collect::<Vec<_>>()
                 );
                 // Short circuit on a winning move
                 // Implemented because (I think) the UCB formula doesn't end up prioritizing

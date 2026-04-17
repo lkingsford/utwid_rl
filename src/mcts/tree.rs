@@ -1,7 +1,7 @@
+use super::Reward;
 use super::game_trait::{Action, Actor, State};
 use super::node::Node;
 use super::weighted_random::weighted_random;
-use super::Reward;
 use core::panic;
 use log::trace;
 use rand::Rng;
@@ -224,6 +224,17 @@ where
     }
 
     pub fn propagate_reward(
+        &self,
+        nodes: Vec<Arc<RwLock<Node<StateType, ActionType>>>>,
+        reward: &[Reward],
+    ) {
+        for node in nodes.iter() {
+            let mut cur_node = node.write().unwrap();
+            cur_node.visit(reward);
+        }
+    }
+
+    pub fn propagate_reward_filtered(
         &self,
         nodes: Vec<Arc<RwLock<Node<StateType, ActionType>>>>,
         reward: &[Reward],

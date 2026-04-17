@@ -31,6 +31,7 @@ const MON2Y_ID: usize = 1;
 const PLAYER_MAX_HEALTH: usize = 7;
 const ROOM_SPLITS_MIN: usize = 2;
 const ROOM_SPLITS_MAX: usize = 8;
+const PRESCRIPTION_TURNS: usize = 5;
 
 #[derive(Clone, std::fmt::Debug, PartialEq)]
 pub enum GameState {
@@ -54,10 +55,18 @@ pub struct UtwidState {
     pub turn_number: usize,
     pub short_circuit_at_turns: Option<usize>,
     pub short_circuit_at_turns_increment: Option<usize>,
+    pub witnessed_you_actions: WitnessedYouActions,
+    pub prescription_turns: Option<usize>,
 
     pub ai_turn_weight: f64,
     pub spawn_rng: SmallRng,
     pub actor_id_counter: ActorId,
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct WitnessedYouActions: u8 {
+    }
 }
 
 impl UtwidState {
@@ -79,6 +88,8 @@ impl UtwidState {
             ai_turn_weight: 0.0,
             spawn_rng,
             actor_id_counter: 1,
+            witnessed_you_actions: WitnessedYouActions::empty(),
+            prescription_turns: None,
         }
     }
 
@@ -317,6 +328,7 @@ impl State for UtwidState {
                 self.debug_summary()
             )
         });
+
         // board permitted doesn't look for actor health interactions
         let board_permitted_moves = self.board.board_permitted_moves(
             next_actor.x,
@@ -344,6 +356,24 @@ impl State for UtwidState {
                     .traits
                     .contains(ActorTraits::BOMB)
                     .then_some(UtwidAction::Explode),
+            )
+            .chain(
+                next_actor
+                    .actor_type
+                    .eq(&ACTOR_TYPE_YOU)
+                    .then_some(vec![
+                        //UtwidAction::Conclusion,
+                        //UtwidAction::Assumption,
+                        //UtwidAction::Demonstration,
+                        //UtwidAction::Redemption,
+                        //UtwidAction::Stagnation,
+                        //UtwidAction::Contemplation,
+                        UtwidAction::Prescription,
+                        //UtwidAction::Contention,
+                        //UtwidAction::Attention,
+                    ])
+                    .iter()
+                    .flat_map(|i| i.clone()),
             )
             .collect();
 
@@ -443,6 +473,16 @@ pub enum UtwidAction {
     SW,
     Wait,
     Explode,
+
+    Conclusion,    // Jump to a position
+    Assumption,    // Take over a person
+    Demonstration, // Play two timelines at once
+    Redemption,    // Jump through a line of actors, injuring all
+    Stagnation,    // Create a wall
+    Contemplation, // Push all adjacent away
+    Prescription,  // Take multiple moves in a row
+    Contention,    // Glitch swap two chunks of map
+    Attention,     // Pull a whole direction closer
 }
 
 const AI_TURN_WEIGHT: f64 = 1.0 / 1000.0;
@@ -462,6 +502,11 @@ impl Action for UtwidAction {
             | UtwidAction::SW => self.execute_move(state),
             UtwidAction::Wait => state.clone(),
             UtwidAction::Explode => self.execute_explode(state),
+            UtwidAction::Prescription => {
+                let mut new_state = state.clone();
+                new_state.prescription_turns = Some(PRESCRIPTION_TURNS);
+                new_state
+            }
             _ => unimplemented!(),
         };
         if state
@@ -470,7 +515,28 @@ impl Action for UtwidAction {
             .traits
             .contains(ActorTraits::HUMAN)
         {
-            new_state.turn_number += 1;
+            if let Some(_prescription_turns) = new_state.prescription_turns {
+                new_state.prescription_turns = if _prescription_turns > 0 {
+                    Some(_prescription_turns - 1)
+                } else {
+                    None
+                }
+            } else {
+                new_state.turn_number += 1;
+
+                if (new_state.turn_number % 9) == 0 {
+                    let spawn = new_state.suggest_spawn();
+                    new_state.add_actor(GameActor::are_actor(spawn.0, spawn.1));
+                }
+                if (new_state.turn_number % 13) == 0 {
+                    let spawn = new_state.suggest_spawn();
+                    new_state.add_actor(GameActor::them_actor(spawn.0, spawn.1));
+                }
+                if (new_state.turn_number % 5) == 0 {
+                    let spawn = new_state.suggest_spawn();
+                    new_state.add_actor(GameActor::one_actor(spawn.0, spawn.1));
+                }
+            }
 
             new_state.ai_turn_weight += AI_TURN_WEIGHT;
             if let Some(short_circuit_turns_remaining) = new_state.short_circuit_at_turns {
@@ -478,19 +544,6 @@ impl Action for UtwidAction {
                 if short_circuit_turns_remaining == 1 {
                     new_state.game_state = GameState::Mon2yShortcircuit;
                 }
-            }
-
-            if (new_state.turn_number % 9) == 0 {
-                let spawn = new_state.suggest_spawn();
-                new_state.add_actor(GameActor::are_actor(spawn.0, spawn.1));
-            }
-            if (new_state.turn_number % 13) == 0 {
-                let spawn = new_state.suggest_spawn();
-                new_state.add_actor(GameActor::them_actor(spawn.0, spawn.1));
-            }
-            if (new_state.turn_number % 5) == 0 {
-                let spawn = new_state.suggest_spawn();
-                new_state.add_actor(GameActor::one_actor(spawn.0, spawn.1));
             }
         }
         if matches!(state.game_state, GameState::Checkpoint)
@@ -537,6 +590,10 @@ impl Action for UtwidAction {
         if new_state.turn_order.is_empty() {
             new_state.game_state = GameState::Lost; // Or Won, depending on game rules
 
+            return new_state;
+        }
+
+        if new_state.prescription_turns.is_some() {
             return new_state;
         }
 

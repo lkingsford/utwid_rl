@@ -20,6 +20,12 @@ pub struct CachedUcb {
     parent_visit_count: u32,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VisitCountValue {
+    pub visit_count: u32,
+    pub value_sum: f64,
+}
+
 #[derive(Debug)]
 pub enum Node<StateType: State, ActionType: Action<StateType = StateType>> {
     Expanded {
@@ -27,7 +33,7 @@ pub enum Node<StateType: State, ActionType: Action<StateType = StateType>> {
         children: HashMap<ActionType, Arc<RwLock<Node<StateType, ActionType>>>>,
         visit_count: u32,
         /// Sum of rewards for each player from this state onward.
-        value_sums: Vec<f64>,
+        value_sums: Vec<VisitCountValue>,
         cached_ucb: RwLock<Option<CachedUcb>>,
         cached_fully_explored: RwLock<Option<bool>>,
         game_action: bool,
@@ -85,14 +91,14 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         }
     }
 
-    pub fn value_sums(&self) -> Vec<f64> {
+    pub fn value_sums(&self) -> Vec<VisitCountValue> {
         match self {
             Node::Expanded { value_sums, .. } => value_sums.clone(),
             Node::Placeholder { .. } => vec![],
         }
     }
 
-    pub fn value_sums_ref(&self) -> &[f64] {
+    pub fn value_sums_ref(&self) -> &[VisitCountValue] {
         match self {
             Node::Expanded { value_sums, .. } => value_sums,
             Node::Placeholder { .. } => &[],
@@ -101,24 +107,25 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
 
     pub fn value_sum_for_player(&self, player_id: u8) -> f64 {
         match self {
-            Node::Expanded { value_sums, .. } => {
-                *value_sums.get(player_id as usize).unwrap_or(&0.0)
-            }
+            Node::Expanded { value_sums, .. } => value_sums
+                .get(player_id as usize)
+                .map(|value| value.value_sum)
+                .unwrap_or(0.0),
             Node::Placeholder { .. } => 0.0,
         }
     }
 
     pub fn est_reward_for_player(&self, player_id: u8) -> f64 {
         match self {
-            Node::Expanded {
-                value_sums,
-                visit_count,
-                ..
-            } => {
-                if *visit_count == 0 {
-                    0.0
+            Node::Expanded { value_sums, .. } => {
+                if let Some(value_sum) = value_sums.get(player_id as usize) {
+                    if value_sum.visit_count == 0 {
+                        0.0
+                    } else {
+                        value_sum.value_sum / value_sum.visit_count as f64
+                    }
                 } else {
-                    *value_sums.get(player_id as usize).unwrap_or(&0.0) / *visit_count as f64
+                    0.0
                 }
             }
             Node::Placeholder { .. } => 0.0,
@@ -142,10 +149,11 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
             } => {
                 *visit_count += 1;
                 if value_sums.len() < reward.len() {
-                    value_sums.resize(reward.len(), 0.0);
+                    value_sums.resize(reward.len(), VisitCountValue::default());
                 }
                 for (i, reward_component) in reward.iter().enumerate() {
-                    value_sums[i] += reward_component;
+                    value_sums[i].visit_count += 1;
+                    value_sums[i].value_sum += reward_component;
                 }
                 if let Ok(mut cached_fully_explored) = cached_fully_explored.write() {
                     *cached_fully_explored = None;
@@ -316,7 +324,11 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
                             log::info!(
                                 "{} {:?} {}",
                                 "         | ".repeat(level),
-                                child_node.value_sums(),
+                                child_node
+                                    .value_sums()
+                                    .into_iter()
+                                    .map(|value| value.value_sum)
+                                    .collect::<Vec<_>>(),
                                 child_node.visit_count()
                             );
                             log::info!(
@@ -502,7 +514,7 @@ where
         state,
         children,
         visit_count: 0,
-        value_sums: vec![0.0; reward_len],
+        value_sums: vec![VisitCountValue::default(); reward_len],
         cached_ucb: RwLock::new(None),
         cached_fully_explored: RwLock::new(None),
         game_action,
@@ -530,7 +542,8 @@ mod tests {
         };
         let node = create_expanded_node(state, None);
         assert_eq!(node.visit_count(), 0);
-        assert_eq!(node.value_sums(), vec![0.0]);
+        assert_eq!(node.value_sums().len(), 1);
+        assert_eq!(node.value_sums()[0].value_sum, 0.0);
     }
 
     #[test]

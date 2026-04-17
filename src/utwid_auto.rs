@@ -274,10 +274,13 @@ fn sample_actions(stdout: &mut Stdout, state: &UtwidState, iterations: usize) {
                     "{:?} - V:{} E:{:?}\n",
                     action.clone(),
                     node.visit_count(),
-                    node.value_sums_ref()
-                        .to_vec()
-                        .iter()
-                        .map(|value_sum| *value_sum / (node.visit_count() as f64)),
+                    node.value_sums_ref().to_vec().iter().map(|value_sum| {
+                        if value_sum.visit_count == 0 {
+                            0.0
+                        } else {
+                            value_sum.value_sum / (value_sum.visit_count as f64)
+                        }
+                    }),
                 ))
             }))
         }
@@ -355,6 +358,15 @@ fn run_game(
                                 sample_actions(stdout, &state, 10000);
                                 None
                             }
+                            KeyCode::Char('1') => Some(UtwidAction::Conclusion), // Jump to a position
+                            KeyCode::Char('2') => Some(UtwidAction::Assumption), // Take over a person
+                            KeyCode::Char('3') => Some(UtwidAction::Demonstration), // Play two timelines at once
+                            KeyCode::Char('4') => Some(UtwidAction::Redemption), // Jump through a line of actors, injuring all
+                            KeyCode::Char('5') => Some(UtwidAction::Stagnation), // Create a wall
+                            KeyCode::Char('6') => Some(UtwidAction::Contemplation), // Push all adjacent away
+                            KeyCode::Char('7') => Some(UtwidAction::Prescription), // Take multiple moves in a row
+                            KeyCode::Char('8') => Some(UtwidAction::Contention), // Glitch swap two chunks of map
+                            KeyCode::Char('9') => Some(UtwidAction::Attention), // Pull a whole direction closer
                             KeyCode::Char('c') => {
                                 if key_event.modifiers.intersects(KeyModifiers::CONTROL) {
                                     return Ok(None);
