@@ -760,8 +760,8 @@ impl UtwidAction {
         let actor = state.actor(state.to_act).unwrap();
         let (split_x, split_y) = apply_dir(actor.x, actor.y, direction);
         let vertical = match direction {
-            Dir::N | Dir::S => true,
-            Dir::E | Dir::W => false,
+            Dir::N | Dir::S => false,
+            Dir::E | Dir::W => true,
             _ => unreachable!("Cardinal directions only."),
         };
 
@@ -773,6 +773,9 @@ impl UtwidAction {
                 if new_state.board.geography[idx]
                     .traits
                     .contains(TileTraits::WALKABLE)
+                    && !new_state.board.geography[idx]
+                        .traits
+                        .contains(TileTraits::STAIRS)
                     && new_state.actor_in_space(split_x, y).is_none()
                 {
                     new_state.board.geography[idx] = Tile::wall();
@@ -785,6 +788,9 @@ impl UtwidAction {
                 if new_state.board.geography[idx]
                     .traits
                     .contains(TileTraits::WALKABLE)
+                    && !new_state.board.geography[idx]
+                        .traits
+                        .contains(TileTraits::STAIRS)
                     && new_state.actor_in_space(split_x, y).is_none()
                 {
                     new_state.board.geography[idx] = Tile::wall();
@@ -798,6 +804,9 @@ impl UtwidAction {
                 if new_state.board.geography[idx]
                     .traits
                     .contains(TileTraits::WALKABLE)
+                    && !new_state.board.geography[idx]
+                        .traits
+                        .contains(TileTraits::STAIRS)
                     && new_state.actor_in_space(x, split_y).is_none()
                 {
                     new_state.board.geography[idx] = Tile::wall();
@@ -810,6 +819,9 @@ impl UtwidAction {
                 if new_state.board.geography[idx]
                     .traits
                     .contains(TileTraits::WALKABLE)
+                    && !new_state.board.geography[idx]
+                        .traits
+                        .contains(TileTraits::STAIRS)
                     && new_state.actor_in_space(x, split_y).is_none()
                 {
                     new_state.board.geography[idx] = Tile::wall();
