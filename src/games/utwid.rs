@@ -57,6 +57,7 @@ pub struct UtwidState {
     pub short_circuit_at_turns_increment: Option<usize>,
     pub witnessed_you_actions: WitnessedYouActions,
     pub prescription_turns: Option<usize>,
+    pub temporary_damage_bonus: Option<usize>,
 
     pub ai_turn_weight: f64,
     pub spawn_rng: SmallRng,
@@ -90,6 +91,7 @@ impl UtwidState {
             actor_id_counter: 1,
             witnessed_you_actions: WitnessedYouActions::empty(),
             prescription_turns: None,
+            temporary_damage_bonus: None,
         }
     }
 
@@ -647,7 +649,7 @@ impl UtwidAction {
         let damage = {
             let actor = new_state.actor(actor_id).unwrap();
             actor.attack_damage.unwrap_or(0) as isize * -1
-        };
+        } - new_state.temporary_damage_bonus.unwrap_or_default() as isize;
 
         for (_, actor) in new_state
             .actors_iter_mut()
@@ -703,16 +705,38 @@ impl UtwidAction {
         let actor = state.actor(state.to_act).unwrap();
 
         let (mut new_x, mut new_y) = apply_dir(actor.x, actor.y, direction);
+        let (mut last_x, mut last_y) = (new_x, new_y);
+        let mut damage_bonus: usize = 0;
 
         while state
+            .board
+            .board_permitted_moves(new_x, new_y, true, true, false)
+            .contains(&direction)
+            && !state
+                .actors_iter()
+                .any(|actor| actor.1.x == new_x && actor.1.y == new_y)
+        {
+            (last_x, last_y) = (new_x, new_y);
+            (new_x, new_y) = apply_dir(new_x, new_y, direction);
+            damage_bonus += 1;
+        }
+        // This is ugly
+        (new_x, new_y) = (last_x, last_y);
+
+        let mut new_state = self.move_to(state, new_x, new_y);
+        new_state.temporary_damage_bonus = Some(damage_bonus);
+        //
+        // Attack at end too
+        if new_state
             .board
             .board_permitted_moves(new_x, new_y, true, true, true)
             .contains(&direction)
         {
             (new_x, new_y) = apply_dir(new_x, new_y, direction);
+            self.move_to(&new_state, new_x, new_y)
+        } else {
+            new_state
         }
-
-        self.move_to(state, new_x, new_y)
     }
 
     fn execute_stairs(&self, state: &UtwidState) -> UtwidState {
@@ -1004,7 +1028,7 @@ impl Board {
 
                 if x >= 0 && (x as usize) < self.width && y >= 0 && (y as usize) < self.height {
                     let tile = self.get(x as usize, y as usize);
-                    (tile.traits.contains(TileTraits::WALKABLE) || tile.health.is_some())
+                    (tile.traits.contains(TileTraits::WALKABLE) || (melee && tile.health.is_some()))
                         .then_some(*action)
                 } else {
                     None
