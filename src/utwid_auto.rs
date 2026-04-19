@@ -130,21 +130,25 @@ fn poll_for_exit() -> std::io::Result<bool> {
     Ok(false)
 }
 
-fn direction_from_key(key_code: KeyCode) -> Option<Dir> {
+fn direction_from_key(key_code: KeyCode, diagonal: bool) -> Option<Dir> {
     match key_code {
         KeyCode::Char('h') | KeyCode::Left => Some(Dir::W),
         KeyCode::Char('l') | KeyCode::Right => Some(Dir::E),
         KeyCode::Char('j') | KeyCode::Down => Some(Dir::S),
         KeyCode::Char('k') | KeyCode::Up => Some(Dir::N),
-        KeyCode::Char('y') => Some(Dir::NW),
-        KeyCode::Char('u') => Some(Dir::NE),
-        KeyCode::Char('b') => Some(Dir::SW),
-        KeyCode::Char('n') => Some(Dir::SE),
+        KeyCode::Char('y') if diagonal => Some(Dir::NW),
+        KeyCode::Char('u') if diagonal => Some(Dir::NE),
+        KeyCode::Char('b') if diagonal => Some(Dir::SW),
+        KeyCode::Char('n') if diagonal => Some(Dir::SE),
         _ => None,
     }
 }
 
-fn prompt_direction(stdout: &mut Stdout, prompt: &str) -> std::io::Result<Option<Dir>> {
+fn prompt_direction(
+    stdout: &mut Stdout,
+    prompt: &str,
+    diagonal: bool,
+) -> std::io::Result<Option<Dir>> {
     let _ = queue!(
         stdout,
         MoveTo(0, STATUS_LINE_Y),
@@ -167,7 +171,7 @@ fn prompt_direction(stdout: &mut Stdout, prompt: &str) -> std::io::Result<Option
                 return Ok(None);
             }
 
-            direction_from_key(dir_key_event.code)
+            direction_from_key(dir_key_event.code, diagonal)
         }
         _ => None,
     };
@@ -410,13 +414,16 @@ fn run_game(
                                 None
                             }
                             KeyCode::Char('1') => {
-                                prompt_direction(stdout, "Conclusion: choose a direction")
+                                prompt_direction(stdout, "Conclusion: choose a direction", true)
                                     .map(|direction| direction.map(UtwidAction::Conclusion))?
                             } // Jump to a position
                             KeyCode::Char('2') => Some(UtwidAction::Assumption), // Take over a person
                             KeyCode::Char('3') => Some(UtwidAction::Demonstration), // Play two timelines at once
                             KeyCode::Char('4') => Some(UtwidAction::Redemption), // Jump through a line of actors, injuring all
-                            KeyCode::Char('5') => Some(UtwidAction::Stagnation), // Create a wall
+                            KeyCode::Char('5') => {
+                                prompt_direction(stdout, "Stagnation: choose a direction", false)
+                                    .map(|direction| direction.map(UtwidAction::Stagnation))?
+                            } // Create a wall
                             KeyCode::Char('6') => Some(UtwidAction::Contemplation), // Push all adjacent away
                             KeyCode::Char('7') => Some(UtwidAction::Prescription), // Take multiple moves in a row
                             KeyCode::Char('8') => Some(UtwidAction::Contention), // Glitch swap two chunks of map

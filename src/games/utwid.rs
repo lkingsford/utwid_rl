@@ -371,6 +371,17 @@ impl State for UtwidState {
                     .copied()
                     .map(UtwidAction::Conclusion),
             );
+            let stagnation_moves = CARDINAL_DIRS
+                .iter()
+                .filter_map(|(direction, _, _)| match direction {
+                    Dir::N if next_actor.y > 0 => Some(*direction),
+                    Dir::S if next_actor.y + 1 < self.board.height => Some(*direction),
+                    Dir::E if next_actor.x + 1 < self.board.width => Some(*direction),
+                    Dir::W if next_actor.x > 0 => Some(*direction),
+                    _ => None,
+                })
+                .map(UtwidAction::Stagnation);
+            permitted_actions.extend(stagnation_moves);
             permitted_actions.push(UtwidAction::Prescription);
         }
 
@@ -480,7 +491,7 @@ pub enum UtwidAction {
     Assumption,      // Take over a person
     Demonstration,   // Play two timelines at once
     Redemption,      // Jump through a line of actors, injuring all
-    Stagnation,      // Create a wall
+    Stagnation(Dir), // Create a wall
     Contemplation,   // Push all adjacent away
     Prescription,    // Take multiple moves in a row
     Contention,      // Glitch swap two chunks of map
@@ -503,6 +514,7 @@ impl Action for UtwidAction {
                 new_state
             }
             UtwidAction::Conclusion(_) => self.execute_conclusion(state),
+            UtwidAction::Stagnation(_) => self.execute_stagnation(state),
             _ => unimplemented!(),
         };
         if state
@@ -737,6 +749,76 @@ impl UtwidAction {
         } else {
             new_state
         }
+    }
+
+    fn execute_stagnation(&self, state: &UtwidState) -> UtwidState {
+        let direction = match self {
+            UtwidAction::Stagnation(direction) => *direction,
+            _ => unreachable!("execute_stagnation only handles Stagnation actions"),
+        };
+
+        let actor = state.actor(state.to_act).unwrap();
+        let (split_x, split_y) = apply_dir(actor.x, actor.y, direction);
+        let vertical = match direction {
+            Dir::N | Dir::S => true,
+            Dir::E | Dir::W => false,
+            _ => unreachable!("Cardinal directions only."),
+        };
+
+        let mut new_state = state.clone();
+        // I've basically copy/pasted this from rooms_builder... I probably should refactor it
+        if vertical {
+            for y in (0..=split_y).rev() {
+                let idx = split_x + y * new_state.board.width;
+                if new_state.board.geography[idx]
+                    .traits
+                    .contains(TileTraits::WALKABLE)
+                    && new_state.actor_in_space(split_x, y).is_none()
+                {
+                    new_state.board.geography[idx] = Tile::wall();
+                } else {
+                    break;
+                }
+            }
+            for y in (split_y + 1)..new_state.board.height {
+                let idx = split_x + y * new_state.board.width;
+                if new_state.board.geography[idx]
+                    .traits
+                    .contains(TileTraits::WALKABLE)
+                    && new_state.actor_in_space(split_x, y).is_none()
+                {
+                    new_state.board.geography[idx] = Tile::wall();
+                } else {
+                    break;
+                }
+            }
+        } else {
+            for x in (0..=split_x).rev() {
+                let idx = x + split_y * new_state.board.width;
+                if new_state.board.geography[idx]
+                    .traits
+                    .contains(TileTraits::WALKABLE)
+                    && new_state.actor_in_space(x, split_y).is_none()
+                {
+                    new_state.board.geography[idx] = Tile::wall();
+                } else {
+                    break;
+                }
+            }
+            for x in (split_x + 1)..new_state.board.width {
+                let idx = x + split_y * new_state.board.width;
+                if new_state.board.geography[idx]
+                    .traits
+                    .contains(TileTraits::WALKABLE)
+                    && new_state.actor_in_space(x, split_y).is_none()
+                {
+                    new_state.board.geography[idx] = Tile::wall();
+                } else {
+                    break;
+                }
+            }
+        }
+        new_state
     }
 
     fn execute_stairs(&self, state: &UtwidState) -> UtwidState {
