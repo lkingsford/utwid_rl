@@ -417,17 +417,17 @@ fn run_game(
                                 prompt_direction(stdout, "Conclusion: choose a direction", true)
                                     .map(|direction| direction.map(UtwidAction::Conclusion))?
                             } // Jump to a position
-                            KeyCode::Char('2') => Some(UtwidAction::Assumption), // Take over a person
-                            KeyCode::Char('3') => Some(UtwidAction::Demonstration), // Play two timelines at once
-                            KeyCode::Char('4') => Some(UtwidAction::Redemption), // Jump through a line of actors, injuring all
-                            KeyCode::Char('5') => {
+                            KeyCode::Char('2') => Some(UtwidAction::Redemption), // Jump through a line of actors, injuring all
+                            KeyCode::Char('3') => Some(UtwidAction::Contemplation), // Push all adjacent away
+                            KeyCode::Char('4') => {
                                 prompt_direction(stdout, "Stagnation: choose a direction", false)
                                     .map(|direction| direction.map(UtwidAction::Stagnation))?
                             } // Create a wall
-                            KeyCode::Char('6') => Some(UtwidAction::Contemplation), // Push all adjacent away
-                            KeyCode::Char('7') => Some(UtwidAction::Prescription), // Take multiple moves in a row
+                            KeyCode::Char('5') => Some(UtwidAction::Prescription), // Take multiple moves in a row
+                            KeyCode::Char('6') => Some(UtwidAction::Attention), // Pull a whole direction closer
+                            KeyCode::Char('7') => Some(UtwidAction::Demonstration), // Play two timelines at once
                             KeyCode::Char('8') => Some(UtwidAction::Contention), // Glitch swap two chunks of map
-                            KeyCode::Char('9') => Some(UtwidAction::Attention), // Pull a whole direction closer
+                            KeyCode::Char('9') => Some(UtwidAction::Assumption), // Take over a person
                             KeyCode::Char('c') => {
                                 if key_event.modifiers.intersects(KeyModifiers::CONTROL) {
                                     return Ok(None);

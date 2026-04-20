@@ -499,7 +499,7 @@ pub enum UtwidAction {
     Assumption,      // Take over a person
 }
 
-pub fn ActionCost(action: UtwidAction) -> usize {
+pub fn action_cost(action: UtwidAction) -> usize {
     match action {
         UtwidAction::Conclusion(_) => 1,
         UtwidAction::Redemption => 1,
@@ -533,6 +533,12 @@ impl Action for UtwidAction {
             UtwidAction::Stagnation(_) => self.execute_stagnation(state),
             _ => unimplemented!(),
         };
+
+        new_state
+            .actor_mut(state.to_act)
+            .unwrap()
+            .modify_health(-1 * action_cost(*self) as isize);
+
         if state
             .actor(state.to_act)
             .unwrap()
