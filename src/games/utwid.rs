@@ -1,7 +1,8 @@
 use std::cmp::{max, min};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use bitflags::bitflags;
+use lazy_static::lazy_static;
 
 use crate::game::Game;
 use crate::mcts::Reward;
@@ -488,14 +489,29 @@ pub enum UtwidAction {
     Explode,
 
     Conclusion(Dir), // Jump to a position
-    Assumption,      // Take over a person
-    Demonstration,   // Play two timelines at once
     Redemption,      // Jump through a line of actors, injuring all
-    Stagnation(Dir), // Create a wall
     Contemplation,   // Push all adjacent away
+    Stagnation(Dir), // Create a wall
     Prescription,    // Take multiple moves in a row
-    Contention,      // Glitch swap two chunks of map
     Attention,       // Pull a whole direction closer
+    Demonstration,   // Play two timelines at once
+    Contention,      // Glitch swap two chunks of map
+    Assumption,      // Take over a person
+}
+
+pub fn ActionCost(action: UtwidAction) -> usize {
+    match action {
+        UtwidAction::Conclusion(_) => 1,
+        UtwidAction::Redemption => 1,
+        UtwidAction::Contemplation => 1,
+        UtwidAction::Stagnation(_) => 2,
+        UtwidAction::Prescription => 2,
+        UtwidAction::Attention => 2,
+        UtwidAction::Demonstration => 3,
+        UtwidAction::Contention => 3,
+        UtwidAction::Assumption => 3,
+        _ => 0,
+    }
 }
 
 const AI_TURN_WEIGHT: f64 = 1.0 / 1000.0;
@@ -767,9 +783,29 @@ impl UtwidAction {
 
         let mut new_state = state.clone();
         // I've basically copy/pasted this from rooms_builder... I probably should refactor it
+        {
+            let idx = split_x + split_y * new_state.board.width;
+            if new_state.board.geography[idx]
+                .traits
+                .contains(TileTraits::WALKABLE)
+                && !new_state.board.geography[idx]
+                    .traits
+                    .contains(TileTraits::STAIRS)
+                && new_state.actor_in_space(split_x, split_y).is_none()
+            {
+                new_state.board.geography[idx] = Tile::wall();
+            }
+        }
         if vertical {
-            for y in (0..=split_y).rev() {
+            for y in (0..=split_y as isize - 1).rev() {
+                if y < 0 {
+                    continue;
+                };
+                let y = y as usize;
                 let idx = split_x + y * new_state.board.width;
+                if idx > new_state.board.geography.len() {
+                    continue;
+                }
                 if new_state.board.geography[idx]
                     .traits
                     .contains(TileTraits::WALKABLE)
@@ -799,7 +835,11 @@ impl UtwidAction {
                 }
             }
         } else {
-            for x in (0..=split_x).rev() {
+            for x in (0..=split_x as isize - 1).rev() {
+                if x < 0 {
+                    continue;
+                };
+                let x = x as usize;
                 let idx = x + split_y * new_state.board.width;
                 if new_state.board.geography[idx]
                     .traits
