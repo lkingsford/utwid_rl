@@ -488,27 +488,27 @@ pub enum UtwidAction {
     Wait,
     Explode,
 
-    Conclusion(Dir), // Jump to a position
-    Redemption,      // Jump through a line of actors, injuring all
-    Contemplation,   // Push all adjacent away
-    Stagnation(Dir), // Create a wall
-    Prescription,    // Take multiple moves in a row
-    Attention,       // Pull a whole direction closer
-    Demonstration,   // Play two timelines at once
-    Contention,      // Glitch swap two chunks of map
-    Assumption,      // Take over a person
+    Conclusion(Dir),    // Jump to a position
+    Redemption,         // Jump through a line of actors, injuring all
+    Contemplation(Dir), // Hit adjacent into wall
+    Stagnation(Dir),    // Create a wall
+    Prescription,       // Take multiple moves in a row
+    Attention,          // Pull a whole direction closer
+    Demonstration,      // Play two timelines at once
+    Contention(Dir),    // Glitch the map
+    Assumption,         // Take over a person
 }
 
 pub fn action_cost(action: UtwidAction) -> usize {
     match action {
         UtwidAction::Conclusion(_) => 1,
         UtwidAction::Redemption => 1,
-        UtwidAction::Contemplation => 1,
+        UtwidAction::Attention => 1,
         UtwidAction::Stagnation(_) => 2,
         UtwidAction::Prescription => 2,
-        UtwidAction::Attention => 2,
+        UtwidAction::Contemplation(_) => 2,
         UtwidAction::Demonstration => 3,
-        UtwidAction::Contention => 3,
+        UtwidAction::Contention(_) => 0,
         UtwidAction::Assumption => 3,
         _ => 0,
     }
@@ -531,6 +531,7 @@ impl Action for UtwidAction {
             }
             UtwidAction::Conclusion(_) => self.execute_conclusion(state),
             UtwidAction::Stagnation(_) => self.execute_stagnation(state),
+            UtwidAction::Contention(_) => self.execute_contention(state),
             _ => unimplemented!(),
         };
 
@@ -876,6 +877,64 @@ impl UtwidAction {
                 }
             }
         }
+        new_state
+    }
+
+    fn execute_contention(&self, state: &UtwidState) -> UtwidState {
+        let direction = match self {
+            UtwidAction::Contention(direction) => *direction,
+            _ => unreachable!("execute_contention only handles Contention actions"),
+        };
+        let actor = state.actor(state.to_act).unwrap();
+
+        let (mut action, dx, dy) = CARDINAL_DIRS
+            .iter()
+            .chain(DIAGONAL_DIRS.iter())
+            .find(|(action, _, _)| action == &direction)
+            .unwrap()
+            .clone();
+        let (mut target_x, mut target_y) = (actor.x as isize + dx, actor.y as isize + dy);
+        while target_x >= 0
+            && target_x < state.board.width as isize
+            && target_y >= 0
+            && target_y < state.board.height as isize
+            && state.board.geography[target_x as usize + target_y as usize * state.board.width]
+                .traits
+                .contains(TileTraits::WALKABLE)
+        {
+            target_x += dx;
+            target_y += dy;
+        }
+
+        let idx_rotation = -1 * (actor.x as isize - target_x)
+            + (actor.y as isize - target_y) * state.board.width as isize;
+        let idx_rotation = if idx_rotation >= 0 {
+            idx_rotation as usize
+        } else {
+            (idx_rotation + state.board.width as isize * state.board.height as isize) as usize
+        };
+
+        let mut new_state = state.clone();
+
+        new_state.board.geography = (0..(new_state.board.width * new_state.board.height))
+            .map(|idx| {
+                state.board.geography
+                    [(idx + idx_rotation) % (state.board.width * state.board.height)]
+                    .clone()
+            })
+            .collect();
+
+        for mut actor_to_move in new_state
+            .actors_iter_mut()
+            .filter(|actor_to_move| actor_to_move.0 != state.to_act)
+        {
+            let old_idx = actor.x + actor.y * state.board.width;
+            let new_idx = (old_idx + idx_rotation) % (state.board.width * state.board.height);
+            let actor = actor_to_move.1;
+            actor.x = new_idx % state.board.width;
+            actor.y = new_idx / state.board.width;
+        }
+
         new_state
     }
 
