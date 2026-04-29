@@ -149,38 +149,30 @@ where
         if let Selection::Selection(selection_result) = selection {
             for action in selection_result.selection.iter() {
                 let child_node = {
-                    let node = cur_node.read().unwrap();
-                    if let Node::Expanded { .. } = &*node {
-                        node.get_child(action)
-                    } else {
-                        continue;
-                    }
-                };
+                    let mut write_cur_node = cur_node.write().unwrap();
+                    if let Node::Expanded { .. } = &*write_cur_node {
+                        let child_node_in_map = write_cur_node.get_child(action);
 
-                let expanded_child = {
-                    let read_node = child_node.read().unwrap();
-                    if let Node::Placeholder { .. } = &*read_node {
-                        let cur_state = {
-                            let node = cur_node.read().unwrap();
-                            node.state().clone()
+                        let expanded_child = {
+                            let read_node = child_node_in_map.read().unwrap();
+                            if let Node::Placeholder { .. } = &*read_node {
+                                let cur_state = write_cur_node.state().clone();
+                                Some(read_node.expansion(action.clone(), &cur_state))
+                            } else {
+                                None
+                            }
                         };
-                        Some(read_node.expansion(action.clone(), &cur_state))
+
+                        if let Some(expanded_child) = expanded_child {
+                            write_cur_node.insert_child(action.clone(), expanded_child);
+                        }
+
+                        write_cur_node.get_child(action)
                     } else {
-                        None
+                        panic!("Expansion called on a non-expanded node in path");
                     }
                 };
-
-                if let Some(expanded_child) = expanded_child {
-                    cur_node
-                        .write()
-                        .unwrap()
-                        .insert_child(action.clone(), expanded_child);
-                }
-
-                cur_node = {
-                    let node = cur_node.read().unwrap();
-                    node.get_child(action)
-                };
+                cur_node = child_node;
                 result.push(cur_node.clone());
             }
         }
