@@ -140,43 +140,50 @@ where
         selection: &Selection<ActionType>,
     ) -> Vec<Arc<RwLock<Node<StateType, ActionType>>>> {
         trace!("Expansion: Selection: {:#?}", selection);
-        let mut cur_node = self.root.clone();
-        // This root is needed as part of the output to ensure that propagate can work
-        // It was either here or selection. Could fit in either place.
-        // Could also be in iterate, but that was going to result in more memory allocations.
-        let mut result: Vec<Arc<RwLock<Node<StateType, ActionType>>>> = vec![self.root.clone()];
+        let mut path: Vec<Arc<RwLock<Node<StateType, ActionType>>>> = vec![self.root.clone()];
 
         if let Selection::Selection(selection_result) = selection {
-            for action in selection_result.selection.iter() {
-                let child_node = {
-                    let mut write_cur_node = cur_node.write().unwrap();
-                    if let Node::Expanded { .. } = &*write_cur_node {
-                        let child_node_in_map = write_cur_node.get_child(action);
-
-                        let expanded_child = {
-                            let read_node = child_node_in_map.read().unwrap();
-                            if let Node::Placeholder { .. } = &*read_node {
-                                let cur_state = write_cur_node.state().clone();
-                                Some(read_node.expansion(action.clone(), &cur_state))
-                            } else {
-                                None
-                            }
-                        };
-
-                        if let Some(expanded_child) = expanded_child {
-                            write_cur_node.insert_child(action.clone(), expanded_child);
-                        }
-
-                        write_cur_node.get_child(action)
-                    } else {
-                        panic!("Expansion called on a non-expanded node in path");
-                    }
-                };
-                cur_node = child_node;
-                result.push(cur_node.clone());
+            if selection_result.selection.is_empty() {
+                return path;
             }
+
+            let mut parent_node = self.root.clone();
+            for action in selection_result
+                .selection
+                .iter()
+                .take(selection_result.selection.len() - 1)
+            {
+                let child = parent_node.read().unwrap().get_child(action);
+                parent_node = child;
+                path.push(parent_node.clone());
+            }
+
+            let leaf_action = selection_result.selection.last().unwrap();
+            let leaf_node_arc = parent_node.read().unwrap().get_child(leaf_action);
+
+            let is_placeholder = {
+                let leaf_guard = leaf_node_arc.read().unwrap();
+                matches!(&*leaf_guard, Node::Placeholder { .. })
+            };
+
+            if is_placeholder {
+                let mut parent_guard = parent_node.write().unwrap();
+                let current_leaf_arc = parent_guard.get_child(leaf_action);
+
+                if Arc::ptr_eq(&leaf_node_arc, &current_leaf_arc) {
+                    let parent_state = parent_guard.state().clone();
+                    let expanded_node = current_leaf_arc
+                        .read()
+                        .unwrap()
+                        .expansion(leaf_action.clone(), &parent_state);
+                    parent_guard.insert_child(leaf_action.clone(), expanded_node);
+                }
+            }
+
+            let final_leaf_node = parent_node.read().unwrap().get_child(leaf_action);
+            path.push(final_leaf_node);
         }
-        result
+        path
     }
 
     pub fn play_out(&self, state: StateType) -> PlayOutResult<StateType::GameHyperrewardType> {
