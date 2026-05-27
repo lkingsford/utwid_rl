@@ -315,7 +315,7 @@ fn append_exploration_log(
 
 fn sample_actions(stdout: &mut Stdout, state: &UtwidState, iterations: usize) {
     let tree = std::sync::Arc::new(mon2y::mcts::tree::Tree::new(
-        mon2y::mcts::node::create_expanded_node(state.clone(), None),
+        mon2y::mcts::node::create_expanded_node(state.clone(), None, None),
     ));
     run_mcts_iterations(tree.clone(), iterations, None, 8);
     let root_ref = tree.root.clone();

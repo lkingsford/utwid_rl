@@ -25,7 +25,7 @@ pub trait State: Clone {
     type ActionType: Action<StateType = Self>;
     type GameHyperrewardType: std::fmt::Debug + Clone + Send + Sync;
 
-    fn permitted_actions(&self) -> Vec<Self::ActionType>;
+    fn permitted_actions(&self, per: Option<u8>) -> Vec<Self::ActionType>;
     fn possible_non_player_actions(&self) -> Vec<(Self::ActionType, u32)> {
         vec![]
     }

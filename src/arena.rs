@@ -51,7 +51,7 @@ fn run_episode<G: Game>(game: G, players: Vec<PlayerSettings>) -> Vec<f64> {
             Actor::Player(player) => {
                 let action: G::ActionType = match players.get(player as usize) {
                     Some(PlayerSettings::Random) => {
-                        let permitted_actions = state.permitted_actions();
+                        let permitted_actions = state.permitted_actions(None);
                         permitted_actions[rand::thread_rng().gen_range(0..permitted_actions.len())]
                             .clone()
                     }
@@ -74,6 +74,7 @@ fn run_episode<G: Game>(game: G, players: Vec<PlayerSettings>) -> Vec<f64> {
                             Some(constant) => constant,
                         },
                         false,
+                        None,
                     ),
                     _ => todo!(),
                 };

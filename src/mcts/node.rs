@@ -225,6 +225,7 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         &self,
         action: ActionType,
         parent_state: &<ActionType as Action>::StateType,
+        per: Option<u8>,
     ) -> Node<StateType, <StateType as State>::ActionType> {
         match self {
             Node::Expanded { .. } => {
@@ -232,7 +233,7 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
             }
             Node::Placeholder { weight, .. } => {
                 let state = action.execute(parent_state);
-                Self::new_expanded(state, *weight)
+                Self::new_expanded(state, *weight, per)
             }
         }
     }
@@ -263,8 +264,9 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
     pub fn new_expanded(
         state: StateType,
         weight: Option<u32>,
+        per: Option<u8>,
     ) -> Node<StateType, <StateType as State>::ActionType> {
-        create_expanded_node(state, weight)
+        create_expanded_node(state, weight, per)
     }
 
     pub fn mean_child_est_reward_for_player(&self, player_id: u8) -> f64 {
@@ -463,6 +465,7 @@ where
 pub fn create_expanded_node<StateType>(
     state: StateType,
     weight: Option<u32>,
+    per: Option<u8>,
 ) -> Node<StateType, StateType::ActionType>
 where
     StateType: State,
@@ -481,7 +484,7 @@ where
     } else {
         match state.next_actor() {
             Actor::Player(_) => {
-                for action in state.permitted_actions() {
+                for action in state.permitted_actions(per) {
                     children.insert(
                         action,
                         Arc::new(RwLock::new(Node::Placeholder { weight: None })),
@@ -528,12 +531,13 @@ mod tests {
             injected_reward: vec![0.0],
             injected_terminal: false,
             injected_permitted_actions: vec![InjectableGameAction::Win],
+            perceived_permitted_actions: Default::default(),
             player_count: 1,
             next_actor: Actor::Player(0),
             injected_hyperreward: TestHyperreward { value: 0 },
             terminal_hyperreward: TestHyperreward { value: 1 },
         };
-        let node = create_expanded_node(state, None);
+        let node = create_expanded_node(state, None, None);
         assert_eq!(node.visit_count(), 0);
         assert_eq!(node.value_sums().len(), 1);
         assert_eq!(node.value_sums()[0].value_sum, 0.0);
@@ -545,12 +549,13 @@ mod tests {
             injected_reward: vec![1.0],
             injected_terminal: true,
             injected_permitted_actions: vec![InjectableGameAction::Win],
+            perceived_permitted_actions: Default::default(),
             player_count: 1,
             next_actor: Actor::Player(0),
             injected_hyperreward: TestHyperreward { value: 0 },
             terminal_hyperreward: TestHyperreward { value: 1 },
         };
-        let node = create_expanded_node(state, None);
+        let node = create_expanded_node(state, None, None);
         match node {
             Node::Expanded { children, .. } => assert!(children.is_empty()),
             Node::Placeholder { .. } => std::panic!("Expected expanded node"),
@@ -570,6 +575,7 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::GameAction(vec![
                     (InjectableGameAction::WinInXTurns(1), 1),
@@ -577,6 +583,7 @@ mod tests {
                 ]),
                 injected_hyperreward: TestHyperreward { value: 0 },
             },
+            None,
             None,
         );
 
@@ -586,11 +593,13 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::Player(0),
                 injected_hyperreward: TestHyperreward { value: 0 },
             },
             Some(1),
+            None,
         );
 
         let mut win_in_x_turns_2 = create_expanded_node(
@@ -599,11 +608,13 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::Player(0),
                 injected_hyperreward: TestHyperreward { value: 0 },
             },
             Some(2),
+            None,
         );
 
         root_node.visit(&[0.0f64]);
@@ -684,11 +695,13 @@ mod tests {
                     InjectableGameAction::WinInXTurns(1),
                     InjectableGameAction::WinInXTurns(2),
                 ],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 injected_hyperreward: TestHyperreward { value: 0 },
                 next_actor: Actor::Player(0),
                 terminal_hyperreward: TestHyperreward { value: 1 },
             },
+            None,
             None,
         );
 
@@ -697,11 +710,13 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![InjectableGameAction::Win],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::Player(0),
                 injected_hyperreward: TestHyperreward { value: 0 },
                 terminal_hyperreward: TestHyperreward { value: 1 },
             },
+            None,
             None,
         );
         child1.visit(&[10.0]);
@@ -712,11 +727,13 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![InjectableGameAction::Win],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::Player(0),
                 injected_hyperreward: TestHyperreward { value: 0 },
                 terminal_hyperreward: TestHyperreward { value: 1 },
             },
+            None,
             None,
         );
 
@@ -748,12 +765,13 @@ mod tests {
             injected_reward: vec![0.0],
             injected_terminal: false,
             injected_permitted_actions: vec![],
+            perceived_permitted_actions: Default::default(),
             player_count: 1,
             next_actor: Actor::Player(0),
             injected_hyperreward: TestHyperreward { value: 0 },
             terminal_hyperreward: TestHyperreward { value: 1 },
         };
-        let mut node = create_expanded_node(state, None);
+        let mut node = create_expanded_node(state, None, None);
         assert_eq!(node.est_reward_for_player(0), 0.0);
         node.visit(&[10.0]);
         assert_eq!(node.est_reward_for_player(0), 10.0);
@@ -771,11 +789,13 @@ mod tests {
                     InjectableGameAction::WinInXTurns(1),
                     InjectableGameAction::WinInXTurns(2),
                 ],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 injected_hyperreward: TestHyperreward { value: 0 },
                 next_actor: Actor::Player(0),
                 terminal_hyperreward: TestHyperreward { value: 1 },
             },
+            None,
             None,
         );
 
@@ -784,11 +804,13 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::Player(0),
                 injected_hyperreward: TestHyperreward { value: 0 },
                 terminal_hyperreward: TestHyperreward { value: 1 },
             },
+            None,
             None,
         );
         child1.visit(&[10.0]); // est_reward = 10.0
@@ -798,11 +820,13 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::Player(0),
                 injected_hyperreward: TestHyperreward { value: 0 },
                 terminal_hyperreward: TestHyperreward { value: 1 },
             },
+            None,
             None,
         );
         child2.visit(&[20.0]);

@@ -7,7 +7,7 @@ pub trait Game {
     /// Values to inject to modify game for shape exploration.
     type HyperrewardsType;
     fn get_human_turn(&self, state: &Self::StateType) -> Self::ActionType {
-        for (i, action) in state.permitted_actions().iter().enumerate() {
+        for (i, action) in state.permitted_actions(None).iter().enumerate() {
             println!("{} {:?}", i, action);
         }
         loop {
@@ -19,8 +19,8 @@ pub trait Game {
             }
             match input.trim().parse::<usize>() {
                 Ok(action) => {
-                    if action < state.permitted_actions().len() {
-                        return state.permitted_actions()[action].clone();
+                    if action < state.permitted_actions(None).len() {
+                        return state.permitted_actions(None)[action].clone();
                     } else {
                         println!("Action {} is out of range. Please try again.", action);
                         continue;

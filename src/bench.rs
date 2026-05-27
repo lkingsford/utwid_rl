@@ -32,6 +32,7 @@ fn run_benchmark<G: Game>(game: G, iterations: usize, thread_count: usize) -> f6
         BestTurnPolicy::MostVisits,
         2.0_f64.sqrt(),
         false,
+        None,
     );
     let elapsed = start.elapsed();
     let iterations_per_second = iterations as f64 / elapsed.as_secs_f64();

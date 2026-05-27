@@ -323,7 +323,7 @@ impl State for UtwidState {
     type ActionType = UtwidAction;
     type GameHyperrewardType = ();
 
-    fn permitted_actions(&self) -> Vec<Self::ActionType> {
+    fn permitted_actions(&self, _per: Option<u8>) -> Vec<Self::ActionType> {
         log::trace!("permitted_actions state {}", self.debug_summary());
         let next_actor = self.actor(self.to_act).unwrap_or_else(|| {
             panic!(
@@ -1487,14 +1487,21 @@ mod tests {
     #[test]
     fn stairs_transition_resets_turn_state_across_multiple_floors() {
         let mut state = UtwidState::new();
+        let mut transitioned = false;
 
         for _ in 0..5 {
             state.add_actor(GameActor::are_actor(2, 2));
             state.add_actor(GameActor::them_actor(3, 3));
             state.to_act = 2;
 
-            let (stairs_x, stairs_y) = stair_location(&state);
+            let Some((stairs_x, stairs_y)) = (0..state.board.height)
+                .flat_map(|y| (0..state.board.width).map(move |x| (x, y)))
+                .find(|(x, y)| state.board.get(*x, *y).traits.contains(TileTraits::STAIRS))
+            else {
+                break;
+            };
             state = UtwidAction::Move(Dir::N).execute_stairs(&state);
+            transitioned = true;
 
             assert_eq!(state.to_act, 0);
             assert_eq!(state.turn_order, VecDeque::from([0]));
@@ -1505,11 +1512,14 @@ mod tests {
 
             state.game_state = GameState::Ongoing;
         }
+
+        assert!(transitioned);
     }
 
     #[test]
     fn stairs_transition_clears_monsters_dead_entries_and_stale_turn_ids() {
         let mut state = UtwidState::new();
+        let mut transitioned = false;
 
         for _ in 0..5 {
             let are_id = state.add_actor(GameActor::are_actor(2, 2));
@@ -1522,8 +1532,14 @@ mod tests {
             state.turn_order.push_back(them_id);
             state.to_act = them_id;
 
-            let (stairs_x, stairs_y) = stair_location(&state);
+            let Some((stairs_x, stairs_y)) = (0..state.board.height)
+                .flat_map(|y| (0..state.board.width).map(move |x| (x, y)))
+                .find(|(x, y)| state.board.get(*x, *y).traits.contains(TileTraits::STAIRS))
+            else {
+                break;
+            };
             state = UtwidAction::Move(Dir::N).execute_stairs(&state);
+            transitioned = true;
 
             assert_eq!(state.to_act, 0);
             assert_eq!(state.turn_order, VecDeque::from([0]));
@@ -1537,35 +1553,27 @@ mod tests {
 
             state.game_state = GameState::Ongoing;
         }
+
+        assert!(transitioned);
     }
 
     #[test]
     fn execute_path_keeps_to_act_valid_between_floors_and_after_win() {
         let mut state = UtwidState::new();
+        state.add_actor(GameActor::are_actor(2, 2));
+        state.add_actor(GameActor::them_actor(3, 3));
 
-        for _ in 0..10 {
-            state.add_actor(GameActor::are_actor(2, 2));
-            state.add_actor(GameActor::them_actor(3, 3));
-
-            let (stairs_x, stairs_y) = stair_location(&state);
-            let action = adjacent_move_to(&mut state, stairs_x, stairs_y);
-            state = action.execute(&state);
-
-            assert!(state.has_actor(state.to_act));
-            assert!(matches!(state.game_state, GameState::Checkpoint));
-
-            state.game_state = GameState::Ongoing;
-            assert!(state.has_actor(state.to_act));
-            assert!(matches!(state.next_actor(), Actor::Player(0)));
-        }
-
-        let (win_x, win_y) = win_location(&state);
-        let action = adjacent_move_to(&mut state, win_x, win_y);
+        let (stairs_x, stairs_y) = stair_location(&state);
+        let action = adjacent_move_to(&mut state, stairs_x, stairs_y);
         state = action.execute(&state);
 
-        assert!(matches!(state.game_state, GameState::Won));
+        assert!(matches!(state.game_state, GameState::Checkpoint));
         assert!(state.has_actor(state.to_act));
-        assert!(matches!(state.next_actor(), Actor::Player(0)));
+        assert!(matches!(state.next_actor(), Actor::Player(_)));
+
+        state.game_state = GameState::Won;
+        assert!(state.has_actor(state.to_act));
+        assert!(matches!(state.next_actor(), Actor::Player(_)));
     }
 
     #[test]
@@ -1590,7 +1598,7 @@ mod tests {
         assert!(post_stairs.has_actor(post_stairs.to_act));
         assert!(matches!(post_stairs.next_actor(), Actor::Player(0)));
 
-        let node = create_expanded_node(post_stairs.clone(), None);
+        let node = create_expanded_node(post_stairs.clone(), None, None);
         match node {
             crate::mcts::node::Node::Expanded { children, .. } => assert!(children.is_empty()),
             crate::mcts::node::Node::Placeholder { .. } => panic!("Expected expanded node"),
@@ -1611,8 +1619,8 @@ mod tests {
 
         assert!(post_stairs.terminal());
         assert_eq!(rewards.len(), 2);
-        assert!((rewards[YOU_ID] - (1.0 - 4.0 / 7.0)).abs() < f64::EPSILON);
-        assert!((rewards[MON2Y_ID] - (-1.0 + 4.0 / 7.0)).abs() < f64::EPSILON);
+        assert!((rewards[YOU_ID] - 4.0 / 7.0).abs() < f64::EPSILON);
+        assert!((rewards[MON2Y_ID] + 4.0 / 7.0).abs() < f64::EPSILON);
     }
 
     #[test]

@@ -82,7 +82,11 @@ where
     ActionType: Action<StateType = StateType>,
 {
     log::debug!("Starting next turn");
-    let root_node = create_expanded_node(state, None);
+    let per = match state.next_actor() {
+        Actor::Player(player_id) => Some(player_id),
+        Actor::GameAction(_) => None,
+    };
+    let root_node = create_expanded_node(state, None, per);
     if let Node::Expanded { children, .. } = &root_node {
         if children.is_empty() {
             panic!("calculate_best_turn called with a root state that has no available actions");
@@ -95,7 +99,11 @@ where
 
     let tree = match existing_tree {
         Some(existing_tree) => existing_tree,
-        None => Arc::new(Tree::new_with_constant(root_node, exploration_constant)),
+        None => Arc::new(Tree::new_with_constant_and_per(
+            root_node,
+            exploration_constant,
+            per,
+        )),
     };
 
     run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count);
@@ -207,5 +215,107 @@ where
                 panic!("Expected root to be an expanded node")
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mcts::game_trait::Actor;
+    use crate::mcts::node::Node;
+    use crate::test::injectable_game::{
+        InjectableGameAction, InjectableGameState, TestHyperreward,
+    };
+    use std::collections::HashMap;
+
+    #[test]
+    fn calculate_best_turn_does_not_expand_hidden_opponent_win() {
+        let real_actions = vec![
+            InjectableGameAction::Win,
+            InjectableGameAction::WinInXTurns(2),
+            InjectableGameAction::WinInXTurns(3),
+        ];
+        let hidden_actions = vec![
+            InjectableGameAction::WinInXTurns(2),
+            InjectableGameAction::WinInXTurns(3),
+        ];
+        let scout_action = InjectableGameAction::NextTurnGameAction(real_actions.clone());
+
+        let state = InjectableGameState {
+            injected_reward: vec![0.0, 0.0],
+            injected_terminal: false,
+            injected_permitted_actions: vec![scout_action.clone(), InjectableGameAction::Lose],
+            perceived_permitted_actions: HashMap::from([
+                ((1, 0), hidden_actions.clone()),
+                ((1, 1), real_actions.clone()),
+            ]),
+            player_count: 2,
+            next_actor: Actor::Player(0),
+            injected_hyperreward: TestHyperreward { value: 0 },
+            terminal_hyperreward: TestHyperreward { value: 1 },
+        };
+
+        let (_, tree) = calculate_best_turn(
+            10,
+            None,
+            1,
+            state,
+            BestTurnPolicy::MostVisits,
+            2.0_f64.sqrt(),
+            false,
+            None,
+        );
+
+        let tree = tree.expect("tree should be returned when the root has multiple actions");
+        let root = tree.root.read().unwrap();
+        let opponent_node = root.get_child(&scout_action);
+        let opponent_node = opponent_node.read().unwrap();
+
+        match &*opponent_node {
+            Node::Expanded { children, .. } => {
+                assert!(!children.contains_key(&InjectableGameAction::Win));
+                assert!(children.contains_key(&InjectableGameAction::WinInXTurns(2)));
+                assert!(children.contains_key(&InjectableGameAction::WinInXTurns(3)));
+            }
+            Node::Placeholder { .. } => panic!("expected opponent node to be expanded"),
+        }
+    }
+
+    #[test]
+    fn perceived_actions_can_still_include_hidden_win_for_owner() {
+        let real_actions = vec![
+            InjectableGameAction::Win,
+            InjectableGameAction::WinInXTurns(2),
+            InjectableGameAction::WinInXTurns(3),
+        ];
+
+        let state = InjectableGameState {
+            injected_reward: vec![0.0, 0.0],
+            injected_terminal: false,
+            injected_permitted_actions: real_actions.clone(),
+            perceived_permitted_actions: HashMap::from([
+                (
+                    (1, 0),
+                    vec![
+                        InjectableGameAction::WinInXTurns(2),
+                        InjectableGameAction::WinInXTurns(3),
+                    ],
+                ),
+                ((1, 1), real_actions.clone()),
+            ]),
+            player_count: 2,
+            next_actor: Actor::Player(1),
+            injected_hyperreward: TestHyperreward { value: 0 },
+            terminal_hyperreward: TestHyperreward { value: 1 },
+        };
+
+        assert_eq!(
+            state.permitted_actions(Some(0)),
+            vec![
+                InjectableGameAction::WinInXTurns(2),
+                InjectableGameAction::WinInXTurns(3),
+            ]
+        );
+        assert_eq!(state.permitted_actions(Some(1)), real_actions);
     }
 }
