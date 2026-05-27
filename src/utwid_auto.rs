@@ -23,12 +23,26 @@ use mon2y::mcts::game_trait::Action;
 use mon2y::mcts::tree::Tree;
 use mon2y::mcts::{BestTurnPolicy, calculate_best_turn};
 use mon2y::{
-    games::utwid::{ActorTraits, Dir, GameState, UtwidAction, UtwidState},
+    games::utwid::{ActorTraits, Dir, GameState, Repr, UtwidAction, UtwidState},
     mcts::mcts::run_mcts_iterations,
 };
 
 const DRAW_BOARD_X: u16 = 3;
 const DRAW_BOARD_Y: u16 = 3;
+
+fn repr_to_char(repr: Repr) -> char {
+    match repr {
+        Repr::Floor => '.',
+        Repr::Wall => '#',
+        Repr::Stairs => '>',
+        Repr::Win => 'W',
+        Repr::You => '@',
+        Repr::Monte => '&',
+        Repr::Them => 't',
+        Repr::Are => 'r',
+        Repr::One => '1',
+    }
+}
 
 fn draw_board(stdout: &mut Stdout, state: UtwidState) -> std::io::Result<()> {
     for iy in 0..state.board.height {
@@ -39,14 +53,17 @@ fn draw_board(stdout: &mut Stdout, state: UtwidState) -> std::io::Result<()> {
                 .iter()
                 .filter_map(|actor| actor.as_ref())
                 .find(|actor| actor.x == ix && actor.y == iy)
-                .and_then(|actor| actor.console_repr());
+                .and_then(|actor| actor.repr())
+                .map(repr_to_char);
 
             queue!(
                 stdout,
                 Print(if let Some(actor_repr) = actor_repr {
                     actor_repr
-                } else if let Some(tile_repr) =
-                    state.board.geography[(ix + iy * state.board.width) as usize].console_repr()
+                } else if let Some(tile_repr) = state.board.geography
+                    [(ix + iy * state.board.width) as usize]
+                    .repr()
+                    .map(repr_to_char)
                 {
                     tile_repr
                 } else {
@@ -70,7 +87,7 @@ fn draw_monsters(stdout: &mut Stdout, state: &UtwidState) -> std::io::Result<()>
                 MoveTo(DRAW_MONSTER_X, DRAW_MONSTER_Y + i as u16),
                 Print(format!(
                     "{} ({}, {}) - {}  ",
-                    actor.console_repr().unwrap_or(' '),
+                    actor.repr().map(repr_to_char).unwrap_or(' '),
                     actor.x,
                     actor.y,
                     actor.health.unwrap_or(0)

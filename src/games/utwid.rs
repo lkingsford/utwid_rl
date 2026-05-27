@@ -45,6 +45,24 @@ pub enum GameState {
 
 const YOU_ID: usize = 0;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Repr {
+    Floor,
+    Wall,
+    Stairs,
+    Win,
+    You,
+    Monte,
+    Them,
+    Are,
+    One,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ReprSet {
+    Room1,
+}
+
 #[derive(Clone)]
 pub struct UtwidState {
     pub current_level: usize,
@@ -211,7 +229,7 @@ impl UtwidState {
                     actor.actor_type_name(),
                     actor.x,
                     actor.y,
-                    actor.console_repr(),
+                    actor.repr(),
                     label,
                     actor.traits.contains(ActorTraits::DEAD),
                     actor.health,
@@ -250,7 +268,7 @@ impl UtwidState {
                                 actor_id,
                                 actor.actor_type,
                                 actor.actor_type_name(),
-                                actor.console_repr(),
+                                actor.repr(),
                                 actor.allegiance,
                                 actor.traits.contains(ActorTraits::DEAD),
                             )
@@ -263,7 +281,7 @@ impl UtwidState {
                     target_y,
                     tile.traits.contains(TileTraits::WALKABLE),
                     tile.health,
-                    tile.console_repr(),
+                    tile.repr(),
                     occupant.unwrap_or_else(|| "none".to_string()),
                 )
             })
@@ -1009,14 +1027,16 @@ bitflags! {
 pub struct Tile {
     traits: TileTraits,
     health: Option<isize>,
-    pub console_repr: Option<char>,
+    pub repr: Option<Repr>,
+    pub repr_set: ReprSet,
 }
 
 impl Tile {
     fn floor() -> Tile {
         Tile {
             traits: TileTraits::WALKABLE,
-            console_repr: Some('.'),
+            repr: Some(Repr::Floor),
+            repr_set: ReprSet::Room1,
             health: None,
         }
     }
@@ -1024,7 +1044,8 @@ impl Tile {
     fn wall() -> Tile {
         Tile {
             traits: TileTraits::empty(),
-            console_repr: Some('#'),
+            repr: Some(Repr::Wall),
+            repr_set: ReprSet::Room1,
             health: Some(5),
         }
     }
@@ -1032,7 +1053,8 @@ impl Tile {
     fn stair() -> Tile {
         Tile {
             traits: TileTraits::STAIRS | TileTraits::WALKABLE,
-            console_repr: Some('>'),
+            repr: Some(Repr::Stairs),
+            repr_set: ReprSet::Room1,
             health: None,
         }
     }
@@ -1040,13 +1062,14 @@ impl Tile {
     fn win() -> Tile {
         Tile {
             traits: TileTraits::WALKABLE | TileTraits::WIN,
-            console_repr: Some('W'),
+            repr: Some(Repr::Win),
+            repr_set: ReprSet::Room1,
             health: None,
         }
     }
 
-    pub fn console_repr(&self) -> Option<char> {
-        self.console_repr
+    pub fn repr(&self) -> Option<Repr> {
+        self.repr
     }
 
     pub fn modify_health(&mut self, dhealth: isize) {
@@ -1055,7 +1078,7 @@ impl Tile {
 
             if self.health.unwrap() <= 0 {
                 self.traits = TileTraits::WALKABLE;
-                self.console_repr = Some('.');
+                self.repr = Some(Repr::Floor);
                 self.health = None;
             }
         }
@@ -1270,15 +1293,16 @@ pub struct GameActor {
     pub actor_type: usize,
     pub traits: ActorTraits,
     pub mon2y: Option<Mon2yData>,
-    pub console_repr: Option<char>,
+    pub repr: Option<Repr>,
+    pub repr_set: ReprSet,
     pub health: Option<usize>,
     pub attack_damage: Option<usize>,
     pub allegiance: Allegiance,
 }
 
 impl GameActor {
-    pub fn console_repr(&self) -> Option<char> {
-        self.console_repr
+    pub fn repr(&self) -> Option<Repr> {
+        self.repr
     }
 
     pub fn actor_type_name(&self) -> &'static str {
@@ -1311,7 +1335,8 @@ impl GameActor {
                 | ActorTraits::DIAGONAL_MOVE
                 | ActorTraits::MELEE,
             mon2y: None,
-            console_repr: Some('@'),
+            repr: Some(Repr::You),
+            repr_set: ReprSet::Room1,
             health: Some(7),
             attack_damage: Some(1),
             allegiance: Allegiance::You,
@@ -1332,7 +1357,8 @@ impl GameActor {
                 tree_id: 1,
                 iterations: 1000,
             }),
-            console_repr: Some('&'),
+            repr: Some(Repr::Monte),
+            repr_set: ReprSet::Room1,
             health: Some(7),
             attack_damage: Some(1),
             allegiance: Allegiance::Monty,
@@ -1349,7 +1375,8 @@ impl GameActor {
                 tree_id: 1,
                 iterations: 1000,
             }),
-            console_repr: Some('t'),
+            repr: Some(Repr::Them),
+            repr_set: ReprSet::Room1,
             health: Some(2),
             attack_damage: Some(1),
             allegiance: Allegiance::Monty,
@@ -1366,7 +1393,8 @@ impl GameActor {
                 tree_id: 1,
                 iterations: 1000,
             }),
-            console_repr: Some('r'),
+            repr: Some(Repr::Are),
+            repr_set: ReprSet::Room1,
             health: Some(3),
             attack_damage: Some(2),
             allegiance: Allegiance::Monty,
@@ -1386,7 +1414,8 @@ impl GameActor {
                 tree_id: 1,
                 iterations: 500,
             }),
-            console_repr: Some('1'),
+            repr: Some(Repr::One),
+            repr_set: ReprSet::Room1,
             health: Some(4),
             attack_damage: Some(5),
             allegiance: Allegiance::Monty,
@@ -1402,26 +1431,7 @@ impl Game for Utwid {
     type HyperrewardsType = ();
 
     fn visualise_state(&self, state: &Self::StateType) {
-        for iy in 0..state.board.height {
-            for ix in 0..state.board.width {
-                let actor_repr = state
-                    .actors_iter()
-                    .map(|(_, actor)| actor)
-                    .find(|actor| actor.x == ix && actor.y == iy)
-                    .and_then(|actor| actor.console_repr());
-                print!(
-                    "{}",
-                    actor_repr.unwrap_or_else(|| {
-                        state.board.geography[ix + iy * state.board.width]
-                            .console_repr()
-                            .unwrap_or(' ')
-                    })
-                );
-            }
-            println!();
-        }
-        println!("Turn: {}", state.turn_number);
-        println!("State: {:?}", state.game_state);
+        println!("{}", state.debug_summary());
     }
 
     fn init_game(&self) -> Self::StateType {
