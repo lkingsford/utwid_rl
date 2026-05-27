@@ -5,7 +5,7 @@ use crossterm::{
     cursor::MoveTo,
     event::{self, KeyCode, KeyModifiers},
     queue,
-    style::{Color, Print, SetForegroundColor},
+    style::{Color, Print, SetBackgroundColor, SetForegroundColor},
     terminal::{self, Clear, ClearType},
 };
 use env_logger::fmt::Formatter;
@@ -19,9 +19,9 @@ use std::{
     time::Duration,
 };
 
-use mon2y::mcts::game_trait::Action;
 use mon2y::mcts::tree::Tree;
 use mon2y::mcts::{BestTurnPolicy, calculate_best_turn};
+use mon2y::{games::utwid::ReprSet, mcts::game_trait::Action};
 use mon2y::{
     games::utwid::{ActorTraits, Dir, GameState, Repr, UtwidAction, UtwidState},
     mcts::mcts::run_mcts_iterations,
@@ -44,20 +44,45 @@ fn repr_to_char(repr: Repr) -> char {
     }
 }
 
+fn repr_set_to_color(repr_set: ReprSet) -> Color {
+    match repr_set {
+        ReprSet::Room1 => Color::Black,
+        ReprSet::Room2 => Color::DarkBlue,
+        ReprSet::Room3 => Color::DarkMagenta,
+        ReprSet::Room4 => Color::DarkYellow,
+        ReprSet::Room5 => Color::DarkRed,
+        ReprSet::Room6 => Color::DarkGreen,
+        ReprSet::Room7 => Color::DarkGrey,
+        _ => Color::Black,
+    }
+}
+
 fn draw_board(stdout: &mut Stdout, state: UtwidState) -> std::io::Result<()> {
     for iy in 0..state.board.height {
         queue!(stdout, MoveTo(DRAW_BOARD_X, DRAW_BOARD_Y + iy as u16))?;
         for ix in 0..state.board.width {
-            let actor_repr = state
+            let actor = state
                 .actors
                 .iter()
                 .filter_map(|actor| actor.as_ref())
-                .find(|actor| actor.x == ix && actor.y == iy)
-                .and_then(|actor| actor.repr())
-                .map(repr_to_char);
+                .find(|actor| actor.x == ix && actor.y == iy);
+
+            let actor_repr = actor.and_then(|actor| actor.repr()).map(repr_to_char);
 
             queue!(
                 stdout,
+                SetBackgroundColor(
+                    if actor
+                        .and_then(|actor| actor.health)
+                        .is_some_and(|health| health <= 0)
+                    {
+                        Color::DarkRed
+                    } else {
+                        repr_set_to_color(
+                            state.board.geography[(ix + iy * state.board.width) as usize].repr_set,
+                        )
+                    }
+                ),
                 Print(if let Some(actor_repr) = actor_repr {
                     actor_repr
                 } else if let Some(tile_repr) = state.board.geography
@@ -72,6 +97,8 @@ fn draw_board(stdout: &mut Stdout, state: UtwidState) -> std::io::Result<()> {
             )?;
         }
     }
+    queue!(stdout, SetBackgroundColor(Color::Black));
+
     Ok(())
 }
 

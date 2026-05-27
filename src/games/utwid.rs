@@ -61,6 +61,12 @@ pub enum Repr {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ReprSet {
     Room1,
+    Room2,
+    Room3,
+    Room4,
+    Room5,
+    Room6,
+    Room7,
 }
 
 #[derive(Clone)]
