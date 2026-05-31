@@ -33,6 +33,7 @@ const PLAYER_MAX_HEALTH: usize = 7;
 const ROOM_SPLITS_MIN: usize = 2;
 const ROOM_SPLITS_MAX: usize = 8;
 const PRESCRIPTION_TURNS: usize = 5;
+const VISUAL_ROOMS: usize = 7;
 
 #[derive(Clone, std::fmt::Debug, PartialEq)]
 pub enum GameState {
@@ -1115,6 +1116,19 @@ fn apply_dir(x: usize, y: usize, direction: Dir) -> (usize, usize) {
     (new_x as usize, new_y as usize)
 }
 
+fn room_to_repr_set(room: usize) -> ReprSet {
+    match room % VISUAL_ROOMS {
+        0 => ReprSet::Room1,
+        1 => ReprSet::Room2,
+        2 => ReprSet::Room3,
+        3 => ReprSet::Room4,
+        4 => ReprSet::Room5,
+        5 => ReprSet::Room6,
+        6 => ReprSet::Room7,
+        _ => ReprSet::Room1,
+    }
+}
+
 impl Board {
     pub fn new(_level: usize, rng: &mut SmallRng) -> Self {
         let (geography, width, height, rng) = Board::rooms_builder(_level, rng);
@@ -1135,6 +1149,7 @@ impl Board {
         let mut used_x: Vec<usize> = Vec::new();
         let mut used_y: Vec<usize> = Vec::new();
         let mut splits: Vec<(usize, usize)> = Vec::new();
+        let mut room_number: usize = 0;
 
         'split_attempt: for _ in
             0..rng.random_range(ROOM_SPLITS_MIN + _level..ROOM_SPLITS_MAX + _level)
@@ -1171,6 +1186,35 @@ impl Board {
                         break;
                     }
                 }
+
+                for x in (split_x + 1)..width {
+                    let mut any_stopped = false;
+                    let idx = x + split_y * width;
+                    if !geography[idx].traits.contains(TileTraits::WALKABLE) {
+                        break;
+                    }
+                    for y in (0..=split_y).rev() {
+                        let idx = x + y * width;
+                        if geography[idx].traits.contains(TileTraits::WALKABLE)
+                            && !splits.contains(&(x, y))
+                        {
+                            geography[idx].repr_set = room_to_repr_set(room_number);
+                        } else {
+                            break;
+                        }
+                    }
+                    for y in (split_y + 1)..height {
+                        let idx = x + y * width;
+                        if geography[idx].traits.contains(TileTraits::WALKABLE)
+                            && !splits.contains(&(x, y))
+                        {
+                            geography[idx].repr_set = room_to_repr_set(room_number);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
                 used_x.push(split_x);
             } else {
                 if used_y.iter().any(|&y| split_y.abs_diff(y) <= 3) {
@@ -1203,6 +1247,9 @@ impl Board {
                 used_y.push(split_y);
             }
             geography[split_x + split_y * width] = Tile::floor();
+
+            room_number += 1;
+
             splits.push((split_x, split_y));
         }
 

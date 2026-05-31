@@ -74,7 +74,7 @@ fn draw_board(stdout: &mut Stdout, state: UtwidState) -> std::io::Result<()> {
                 SetBackgroundColor(
                     if actor
                         .and_then(|actor| actor.health)
-                        .is_some_and(|health| health <= 0)
+                        .is_some_and(|health| health <= 1)
                     {
                         Color::DarkRed
                     } else {
