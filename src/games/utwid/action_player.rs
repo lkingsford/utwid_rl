@@ -199,17 +199,17 @@ impl UtwidAction {
         let dest_y = (target_y - CONTENTION_R_WIDTH as isize)
             .clamp(0, (BOARD_HEIGHT - CONTENTION_NET_WIDTH) as isize) as usize;
 
-        let source_geography: Vec<_> = (source_x..source_x + CONTENTION_NET_WIDTH)
-            .flat_map(|x| {
+        let source_geography: Vec<_> = (source_y..source_y + CONTENTION_NET_WIDTH)
+            .flat_map(|y| {
                 (source_y..source_y + CONTENTION_R_WIDTH * 2 + 1)
-                    .map(move |y| state.board.geography[x + y * state.board.width].clone())
+                    .map(move |x| state.board.geography[x + y * state.board.width].clone())
             })
             .collect();
 
-        let dest_geography: Vec<_> = (dest_x..dest_x + CONTENTION_NET_WIDTH)
-            .flat_map(|x| {
+        let dest_geography: Vec<_> = (dest_y..dest_y + CONTENTION_NET_WIDTH)
+            .flat_map(|y| {
                 (dest_y..dest_y + CONTENTION_NET_WIDTH)
-                    .map(move |y| state.board.geography[x + y * state.board.width].clone())
+                    .map(move |x| state.board.geography[x + y * state.board.width].clone())
             })
             .collect();
 
