@@ -201,14 +201,14 @@ impl UtwidAction {
 
         let source_geography: Vec<_> = (source_y..source_y + CONTENTION_NET_WIDTH)
             .flat_map(|y| {
-                (source_y..source_y + CONTENTION_R_WIDTH * 2 + 1)
+                (source_x..source_x + CONTENTION_NET_WIDTH)
                     .map(move |x| state.board.geography[x + y * state.board.width].clone())
             })
             .collect();
 
         let dest_geography: Vec<_> = (dest_y..dest_y + CONTENTION_NET_WIDTH)
             .flat_map(|y| {
-                (dest_y..dest_y + CONTENTION_NET_WIDTH)
+                (dest_x..dest_x + CONTENTION_NET_WIDTH)
                     .map(move |x| state.board.geography[x + y * state.board.width].clone())
             })
             .collect();
@@ -218,14 +218,14 @@ impl UtwidAction {
         for (i, tile) in source_geography.iter().enumerate() {
             let ix = i % CONTENTION_NET_WIDTH;
             let iy = i / CONTENTION_NET_WIDTH;
-            new_state.board.geography[ix + dest_x + (iy + dest_y) * state.board.height] =
+            new_state.board.geography[ix + dest_x + (iy + dest_y) * state.board.width] =
                 tile.clone();
         }
 
         for (i, tile) in dest_geography.iter().enumerate() {
             let ix = i % CONTENTION_NET_WIDTH;
             let iy = i / CONTENTION_NET_WIDTH;
-            new_state.board.geography[ix + source_x + (iy + source_y) * state.board.height] =
+            new_state.board.geography[ix + source_x + (iy + source_y) * state.board.width] =
                 tile.clone();
         }
 
