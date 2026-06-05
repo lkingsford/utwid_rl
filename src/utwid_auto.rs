@@ -145,14 +145,18 @@ fn draw_status_mcts(
         Print("|"),
         SetForegroundColor(Color::Blue),
     )?;
-    let completed_length = ((MCTS_STATUS_LINE_X2 - MCTS_STATUS_LINE_X1) as f32
-        * (completed_iterations as f32)
-        / (mcts_iterations as f32)) as u16;
+    let width = (MCTS_STATUS_LINE_X2 - MCTS_STATUS_LINE_X1);
+    let completed_length =
+        (width as f32 * (completed_iterations as f32) / (mcts_iterations as f32)) as u16;
     for _ in 0..completed_length {
         queue!(stdout, Print("-"))?;
     }
 
-    let to_go_length = (MCTS_STATUS_LINE_X2 - MCTS_STATUS_LINE_X1) - completed_length;
+    let to_go_length = if width > completed_length {
+        (width - completed_length)
+    } else {
+        0
+    };
     for _ in 0..to_go_length {
         queue!(stdout, Print(" "))?;
     }
