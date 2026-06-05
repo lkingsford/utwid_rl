@@ -348,6 +348,14 @@ impl State for UtwidState {
                 })
                 .map(UtwidAction::Stagnation);
             permitted_actions.extend(stagnation_moves);
+
+            let contention_moves = CARDINAL_DIRS
+                .iter()
+                .chain(DIAGONAL_DIRS.iter())
+                .map(|d| d.0)
+                .map(UtwidAction::Contention);
+            permitted_actions.extend(contention_moves);
+
             permitted_actions.push(UtwidAction::Prescription);
         }
 
