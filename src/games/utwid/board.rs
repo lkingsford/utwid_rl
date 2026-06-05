@@ -124,8 +124,8 @@ impl Board {
     }
     fn rooms_builder(_level: usize, rng: &mut SmallRng) -> (Vec<Tile>, usize, usize, SmallRng) {
         let mut rng = rng.clone();
-        let width: usize = 11;
-        let height: usize = 11;
+        let width: usize = BOARD_WIDTH;
+        let height: usize = BOARD_HEIGHT;
         let mut geography = vec![Tile::floor(); width * height];
 
         // Track vertical and horizontal positions separately to prevent parallel crowding

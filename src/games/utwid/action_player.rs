@@ -186,34 +186,69 @@ impl UtwidAction {
             _d += 1;
         }
 
-        let idx_rotation = -1 * (actor.x as isize - target_x)
-            + (actor.y as isize - target_y) * state.board.width as isize;
-        let idx_rotation = if idx_rotation >= 0 {
-            idx_rotation as usize
-        } else {
-            (idx_rotation + state.board.width as isize * state.board.height as isize) as usize
-        };
+        // source is the area around the player
+        // dest is the area being swapped with it
+        let source_x = ((actor.x as isize) - CONTENTION_R_WIDTH as isize)
+            .clamp(0, (BOARD_WIDTH - CONTENTION_NET_WIDTH) as isize)
+            as usize;
+        let source_y = ((actor.y as isize) - CONTENTION_R_WIDTH as isize)
+            .clamp(0, (BOARD_HEIGHT - CONTENTION_NET_WIDTH) as isize)
+            as usize;
+        let dest_x = (target_x - CONTENTION_R_WIDTH as isize)
+            .clamp(0, (BOARD_WIDTH - CONTENTION_NET_WIDTH) as isize) as usize;
+        let dest_y = (target_y - CONTENTION_R_WIDTH as isize)
+            .clamp(0, (BOARD_HEIGHT - CONTENTION_NET_WIDTH) as isize) as usize;
 
-        let mut new_state = state.clone();
-
-        new_state.board.geography = (0..(new_state.board.width * new_state.board.height))
-            .map(|idx| {
-                state.board.geography
-                    [(idx + idx_rotation) % (state.board.width * state.board.height)]
-                    .clone()
+        let source_geography: Vec<_> = (source_x..source_x + CONTENTION_NET_WIDTH)
+            .flat_map(|x| {
+                (source_y..source_y + CONTENTION_R_WIDTH * 2 + 1)
+                    .map(move |y| state.board.geography[x + y * state.board.width].clone())
             })
             .collect();
 
-        for actor_to_move in new_state
-            .actors_iter_mut()
-            .filter(|actor_to_move| actor_to_move.0 != state.to_act)
-        {
-            let old_idx = actor.x + actor.y * state.board.width;
-            let new_idx = (old_idx + idx_rotation) % (state.board.width * state.board.height);
-            let actor = actor_to_move.1;
-            actor.x = new_idx % state.board.width;
-            actor.y = new_idx / state.board.width;
+        let dest_geography: Vec<_> = (dest_x..dest_x + CONTENTION_NET_WIDTH)
+            .flat_map(|x| {
+                (dest_y..dest_y + CONTENTION_NET_WIDTH)
+                    .map(move |y| state.board.geography[x + y * state.board.width].clone())
+            })
+            .collect();
+
+        let mut new_state = state.clone();
+
+        for (i, tile) in source_geography.iter().enumerate() {
+            let ix = i % CONTENTION_NET_WIDTH;
+            let iy = i / CONTENTION_NET_WIDTH;
+            new_state.board.geography[ix + dest_x + (iy + dest_y) * state.board.height] =
+                tile.clone();
         }
+
+        for (i, tile) in dest_geography.iter().enumerate() {
+            let ix = i % CONTENTION_NET_WIDTH;
+            let iy = i / CONTENTION_NET_WIDTH;
+            new_state.board.geography[ix + source_x + (iy + source_y) * state.board.height] =
+                tile.clone();
+        }
+
+        /*
+            new_state.board.geography = (0..(new_state.board.width * new_state.board.height))
+                .map(|idx| {
+                    state.board.geography
+                        [(idx + idx_rotation) % (state.board.width * state.board.height)]
+                        .clone()
+                })
+                .collect();
+
+            for actor_to_move in new_state
+                .actors_iter_mut()
+                .filter(|actor_to_move| actor_to_move.0 != state.to_act)
+            {
+                let old_idx = actor.x + actor.y * state.board.width;
+                let new_idx = (old_idx + idx_rotation) % (state.board.width * state.board.height);
+                let actor = actor_to_move.1;
+                actor.x = new_idx % state.board.width;
+                actor.y = new_idx / state.board.width;
+            }
+        */
 
         new_state
     }
