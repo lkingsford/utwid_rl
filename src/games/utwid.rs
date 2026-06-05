@@ -34,6 +34,7 @@ const ROOM_SPLITS_MIN: usize = 2;
 const ROOM_SPLITS_MAX: usize = 8;
 const PRESCRIPTION_TURNS: usize = 5;
 const VISUAL_ROOMS: usize = 7;
+const CONTENTION_WIDTH: usize = 4;
 
 #[derive(Clone, std::fmt::Debug, PartialEq)]
 pub enum GameState {
@@ -919,6 +920,7 @@ impl UtwidAction {
             .unwrap()
             .clone();
         let (mut target_x, mut target_y) = (actor.x as isize + dx, actor.y as isize + dy);
+        let mut d = 0;
         while target_x >= 0
             && target_x < state.board.width as isize
             && target_y >= 0
@@ -929,6 +931,7 @@ impl UtwidAction {
         {
             target_x += dx;
             target_y += dy;
+            d += 1;
         }
 
         let idx_rotation = -1 * (actor.x as isize - target_x)

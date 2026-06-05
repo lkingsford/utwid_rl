@@ -48,18 +48,22 @@ fn repr_set_to_color(repr_set: ReprSet) -> Color {
     match repr_set {
         ReprSet::Room1 => Color::Black,
         ReprSet::Room2 => Color::DarkBlue,
-        ReprSet::Room3 => Color::DarkMagenta,
-        ReprSet::Room4 => Color::DarkYellow,
-        ReprSet::Room5 => Color::DarkRed,
-        ReprSet::Room6 => Color::DarkGreen,
-        ReprSet::Room7 => Color::DarkGrey,
+        ReprSet::Room3 => Color::DarkGrey,
+        ReprSet::Room4 => Color::DarkRed,
+        ReprSet::Room5 => Color::DarkGreen,
+        ReprSet::Room6 => Color::DarkYellow,
+        ReprSet::Room7 => Color::DarkMagenta,
         _ => Color::Black,
     }
 }
 
 fn draw_board(stdout: &mut Stdout, state: UtwidState) -> std::io::Result<()> {
     for iy in 0..state.board.height {
-        queue!(stdout, MoveTo(DRAW_BOARD_X, DRAW_BOARD_Y + iy as u16))?;
+        queue!(
+            stdout,
+            MoveTo(DRAW_BOARD_X, DRAW_BOARD_Y + iy as u16),
+            SetForegroundColor(Color::White)
+        )?;
         for ix in 0..state.board.width {
             let actor = state
                 .actors
