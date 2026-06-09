@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use super::board::apply_dir;
+use super::types::*;
 use super::*;
 
 impl UtwidAction {
@@ -25,11 +26,29 @@ impl UtwidAction {
             actor.attack_damage.unwrap_or(0) as isize * -1
         } - new_state.temporary_damage_bonus.unwrap_or_default() as isize;
 
+        let mut human_died = false;
         for (_, actor) in new_state
             .actors_iter_mut()
             .filter(|(_, actor)| actor.x == new_x && actor.y == new_y)
         {
             actor.modify_health(damage);
+            //
+            // Specific special case for the 'mutiplication' to make sure you human control a character
+            // again if you die and there's a clone around
+            if actor.traits.contains(ActorTraits::DEAD) && actor.traits.contains(ActorTraits::HUMAN)
+            {
+                human_died = true;
+            }
+        }
+
+        if human_died {
+            for (_, actor) in new_state.actors_iter_mut().filter(|(_, actor)| {
+                actor.actor_type == ACTOR_TYPE_YOU
+                    && !actor.traits.contains(ActorTraits::HUMAN)
+                    && !actor.traits.contains(ActorTraits::DEAD)
+            }) {
+                actor.traits.insert(ActorTraits::HUMAN)
+            }
         }
 
         let tile = new_state.board.get_mut(new_x, new_y);
@@ -56,10 +75,10 @@ impl UtwidAction {
 
         let actor_ref = new_state.actor(actor_id).unwrap();
 
-        if actor_ref.traits.contains(ActorTraits::HUMAN) {
+        if actor_ref.actor_type == ACTOR_TYPE_YOU {
             let tile = new_state.board.get(actor_ref.x, actor_ref.y);
             if tile.traits.contains(TileTraits::STAIRS) {
-                self.execute_stairs(&new_state)
+                self.execute_stairs(actor_ref, &new_state)
             } else if tile.traits.contains(TileTraits::WIN) {
                 self.execute_win(&new_state)
             } else {
@@ -70,17 +89,22 @@ impl UtwidAction {
         }
     }
 
-    pub(crate) fn execute_stairs(&self, state: &UtwidState) -> UtwidState {
+    pub(crate) fn execute_stairs(
+        &self,
+        acting_character: &GameActor,
+        state: &UtwidState,
+    ) -> UtwidState {
         log::debug!("execute_stairs before {}", state.debug_summary());
         let mut new_state = state.clone();
         new_state.current_level = state.current_level + 1;
         new_state.game_state = GameState::Checkpoint;
         let mut board_rng = state.board.rng.clone();
         new_state.board = Board::new(new_state.current_level, &mut board_rng);
-        let mut you = state.actor(0).cloned().unwrap_or_else(GameActor::you_actor);
+        let mut you = acting_character.clone();
         you.x = 1;
         you.y = 3;
         you.traits.remove(ActorTraits::DEAD);
+        you.traits.insert(ActorTraits::HUMAN); // Possible a multiplication clone went down the stairs
         new_state.actors = vec![Some(you)];
         new_state.turn_order = VecDeque::from([0]);
         new_state.to_act = 0;

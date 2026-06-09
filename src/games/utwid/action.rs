@@ -124,11 +124,10 @@ impl Action for UtwidAction {
         {
             dead_actor_ids.push(actor_id);
         }
-        if dead_actor_ids.iter().any(|actor_id| {
-            new_state
-                .actor(*actor_id)
-                .map(|actor| actor.traits.contains(ActorTraits::HUMAN))
-                .unwrap_or(false)
+
+        // At least one 'you' needs to be there as not to lose
+        if !new_state.actors_iter().any(|(_, actor)| {
+            actor.actor_type == ACTOR_TYPE_YOU && !actor.traits.contains(ActorTraits::DEAD)
         }) {
             new_state.game_state = GameState::Lost;
         }
