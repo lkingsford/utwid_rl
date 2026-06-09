@@ -22,15 +22,15 @@ pub enum UtwidAction {
     Wait,
     Explode,
 
-    Conclusion(Dir),    // Jump to a position
-    Redemption,         // Jump through a line of actors, injuring all
-    Contemplation(Dir), // Hit adjacent into wall
-    Stagnation(Dir),    // Create a wall
-    Prescription,       // Take multiple moves in a row
-    Attention,          // Pull a whole direction closer
-    Demonstration,      // Play two timelines at once
-    Contention(Dir),    // Glitch the map
-    Assumption,         // Take over a person
+    Conclusion(Dir),     // Jump to a position
+    Redemption,          // Jump through a line of actors, injuring all
+    Contemplation(Dir),  // Hit adjacent into wall
+    Stagnation(Dir),     // Create a wall
+    Prescription,        // Take multiple moves in a row
+    Attention,           // Pull a whole direction closer
+    Multiplication(Dir), // Create a duplicate player
+    Contention(Dir),     // Glitch the map
+    Assumption,          // Take over a person
 }
 
 pub fn action_cost(action: UtwidAction) -> usize {
@@ -41,8 +41,8 @@ pub fn action_cost(action: UtwidAction) -> usize {
         UtwidAction::Stagnation(_) => 2,
         UtwidAction::Prescription => 2,
         UtwidAction::Contemplation(_) => 2,
-        UtwidAction::Demonstration => 3,
-        UtwidAction::Contention(_) => 0,
+        UtwidAction::Multiplication(_) => 3,
+        UtwidAction::Contention(_) => 3,
         UtwidAction::Assumption => 3,
         _ => 0,
     }
@@ -62,6 +62,7 @@ impl Action for UtwidAction {
             UtwidAction::Conclusion(_) => self.execute_conclusion(state),
             UtwidAction::Stagnation(_) => self.execute_stagnation(state),
             UtwidAction::Contention(_) => self.execute_contention(state),
+            UtwidAction::Multiplication(_) => self.execute_multiplication(state),
             _ => unimplemented!(),
         };
 

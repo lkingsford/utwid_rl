@@ -282,6 +282,30 @@ impl UtwidState {
             );
         }
     }
+
+    /// Convenience method for that particulary filter that's used in a few places in permitted
+    /// action
+    fn filter_directions_by_board_space<I>(&self, directions: I, actor: &GameActor) -> Vec<Dir>
+    where
+        I: IntoIterator<Item = (Dir, isize, isize)>,
+    {
+        directions
+            .into_iter()
+            .filter_map(|(direction, _, _)| match direction {
+                Dir::N if actor.y > 0 => Some(direction),
+                Dir::S if actor.y + 1 < self.board.height => Some(direction),
+                Dir::E if actor.x + 1 < self.board.width => Some(direction),
+                Dir::W if actor.x > 0 => Some(direction),
+                Dir::NE if actor.y > 0 && actor.x + 1 < self.board.width => Some(direction),
+                Dir::SE if actor.y + 1 < self.board.height && actor.x + 1 < self.board.width => {
+                    Some(direction)
+                }
+                Dir::NW if actor.y > 0 && actor.x > 0 => Some(direction),
+                Dir::SW if actor.y + 1 < self.board.height && actor.x > 0 => Some(direction),
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 impl State for UtwidState {
@@ -337,15 +361,9 @@ impl State for UtwidState {
                     .copied()
                     .map(UtwidAction::Conclusion),
             );
-            let stagnation_moves = CARDINAL_DIRS
-                .iter()
-                .filter_map(|(direction, _, _)| match direction {
-                    Dir::N if next_actor.y > 0 => Some(*direction),
-                    Dir::S if next_actor.y + 1 < self.board.height => Some(*direction),
-                    Dir::E if next_actor.x + 1 < self.board.width => Some(*direction),
-                    Dir::W if next_actor.x > 0 => Some(*direction),
-                    _ => None,
-                })
+            let stagnation_moves = self
+                .filter_directions_by_board_space(CARDINAL_DIRS.to_vec(), next_actor)
+                .into_iter()
                 .map(UtwidAction::Stagnation);
             permitted_actions.extend(stagnation_moves);
 
@@ -357,6 +375,15 @@ impl State for UtwidState {
             permitted_actions.extend(contention_moves);
 
             permitted_actions.push(UtwidAction::Prescription);
+
+            let multiplication_moves = self
+                .filter_directions_by_board_space(
+                    CARDINAL_DIRS.iter().chain(DIAGONAL_DIRS.iter()).copied(),
+                    next_actor,
+                )
+                .into_iter()
+                .map(UtwidAction::Multiplication);
+            permitted_actions.extend(multiplication_moves)
         }
 
         if permitted_actions.is_empty() {

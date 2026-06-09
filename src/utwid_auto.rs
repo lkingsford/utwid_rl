@@ -480,7 +480,10 @@ fn run_game(
                                 prompt_direction(stdout, "Contemplation: choose a direction", true)
                                     .map(|direction| direction.map(UtwidAction::Contemplation))?
                             }
-                            KeyCode::Char('7') => Some(UtwidAction::Demonstration), // Play two timelines at once
+                            KeyCode::Char('7') => {
+                                prompt_direction(stdout, "Multiplication: choose a direction", true)
+                                    .map(|direction| direction.map(UtwidAction::Multiplication))?
+                            }
                             KeyCode::Char('8') => {
                                 prompt_direction(stdout, "Contention: choose a direction", true)
                                     .map(|direction| direction.map(UtwidAction::Contention))?

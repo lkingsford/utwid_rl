@@ -252,4 +252,39 @@ impl UtwidAction {
 
         new_state
     }
+
+    pub(super) fn execute_multiplication(&self, state: &UtwidState) -> UtwidState {
+        let direction = match self {
+            UtwidAction::Contention(direction) => *direction,
+            _ => unreachable!("execute_multiplication only handles Multiplication actions"),
+        };
+        let actor = state.actor(state.to_act).unwrap();
+
+        let (_action, dx, dy) = CARDINAL_DIRS
+            .iter()
+            .chain(DIAGONAL_DIRS.iter())
+            .find(|(action, _, _)| action == &direction)
+            .unwrap()
+            .clone();
+        let (mut target_x, mut target_y) = (actor.x as isize + dx, actor.y as isize + dy);
+        let mut _d = 0;
+        while target_x >= 0
+            && target_x < state.board.width as isize
+            && target_y >= 0
+            && target_y < state.board.height as isize
+            && state.board.geography[target_x as usize + target_y as usize * state.board.width]
+                .traits
+                .contains(TileTraits::WALKABLE)
+            && state
+                .actors_iter()
+                .all(|(_, actor)| !(actor.x as isize == target_x && actor.y as isize == target_y))
+        {
+            target_x += dx;
+            target_y += dy;
+            _d += 1;
+        }
+
+        let mut new_state = state.clone();
+        new_state
+    }
 }
