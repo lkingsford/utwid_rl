@@ -152,11 +152,6 @@ impl Action for UtwidAction {
         // If the turn order is empty after removing dead actors, game is over.
         if new_state.turn_order.is_empty() {
             new_state.game_state = GameState::Lost; // Or Won, depending on game rules
-
-            return new_state;
-        }
-
-        if new_state.prescription_turns.is_some() {
             return new_state;
         }
 
@@ -186,7 +181,10 @@ impl Action for UtwidAction {
         }
 
         // The new actor to act is at the front of the updated queue.
-        new_state.to_act = *new_state.turn_order.front().unwrap();
+        if !new_state.prescription_turns.is_some() {
+            new_state.to_act = *new_state.turn_order.front().unwrap();
+            return new_state;
+        }
 
         new_state
     }
