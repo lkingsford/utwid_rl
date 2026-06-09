@@ -288,6 +288,8 @@ impl UtwidAction {
         let mut mult_actor = actor.clone();
         mult_actor.x = target_x as usize;
         mult_actor.y = target_y as usize;
+        mult_actor.mon2y = Some(actor::you_mon2y_data());
+        mult_actor.traits.remove(ActorTraits::HUMAN);
         new_state.add_actor(mult_actor);
 
         new_state

@@ -65,6 +65,14 @@ impl GameActor {
     }
 }
 
+/// Mon2yData used when there's an active clone of you
+pub fn you_mon2y_data() -> Mon2yData {
+    Mon2yData {
+        tree_id: 0,
+        iterations: 500,
+    }
+}
+
 impl GameActor {
     // Feels logical that these should be seperate
     pub(crate) fn you_actor() -> GameActor {
