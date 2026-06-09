@@ -54,22 +54,24 @@ impl Action for UtwidAction {
     type StateType = UtwidState;
 
     fn execute(&self, state: &Self::StateType) -> Self::StateType {
-        let mut new_state = match self {
-            UtwidAction::Move(_) => self.execute_move(state),
-            UtwidAction::Wait => state.clone(),
-            UtwidAction::Explode => self.execute_explode(state),
-            UtwidAction::Prescription => self.execute_prescription(state),
-            UtwidAction::Conclusion(_) => self.execute_conclusion(state),
-            UtwidAction::Stagnation(_) => self.execute_stagnation(state),
-            UtwidAction::Contention(_) => self.execute_contention(state),
-            UtwidAction::Multiplication(_) => self.execute_multiplication(state),
-            _ => unimplemented!(),
-        };
-
-        new_state
+        let mut cost_spent_state = state.clone();
+        // Need to spend cost before making move
+        cost_spent_state
             .actor_mut(state.to_act)
             .unwrap()
             .modify_health(-1 * action_cost(*self) as isize);
+
+        let mut new_state = match self {
+            UtwidAction::Move(_) => self.execute_move(&cost_spent_state),
+            UtwidAction::Wait => cost_spent_state,
+            UtwidAction::Explode => self.execute_explode(&cost_spent_state),
+            UtwidAction::Prescription => self.execute_prescription(&cost_spent_state),
+            UtwidAction::Conclusion(_) => self.execute_conclusion(&cost_spent_state),
+            UtwidAction::Stagnation(_) => self.execute_stagnation(&cost_spent_state),
+            UtwidAction::Contention(_) => self.execute_contention(&cost_spent_state),
+            UtwidAction::Multiplication(_) => self.execute_multiplication(&cost_spent_state),
+            _ => unimplemented!(),
+        };
 
         if state
             .actor(state.to_act)
