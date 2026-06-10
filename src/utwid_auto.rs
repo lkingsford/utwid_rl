@@ -488,7 +488,10 @@ fn run_game(
                                 prompt_direction(stdout, "Contention: choose a direction", true)
                                     .map(|direction| direction.map(UtwidAction::Contention))?
                             } // The glitch one
-                            KeyCode::Char('9') => Some(UtwidAction::Assumption), // Take over a person
+                            KeyCode::Char('9') => {
+                                prompt_direction(stdout, "Assumption: choose a direction", true)
+                                    .map(|direction| direction.map(UtwidAction::Assumption))?
+                            } // Take over a perso
                             KeyCode::Char('c') => {
                                 if key_event.modifiers.intersects(KeyModifiers::CONTROL) {
                                     return Ok(None);

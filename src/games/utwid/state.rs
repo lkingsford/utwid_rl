@@ -383,7 +383,39 @@ impl State for UtwidState {
                 )
                 .into_iter()
                 .map(UtwidAction::Multiplication);
-            permitted_actions.extend(multiplication_moves)
+            permitted_actions.extend(multiplication_moves);
+
+            let assumption_moves = CARDINAL_DIRS
+                .iter()
+                .chain(DIAGONAL_DIRS.iter())
+                .filter_map(|(direction, dx, dy)| {
+                    let (mut target_x, mut target_y) =
+                        (next_actor.x as isize + dx, next_actor.y as isize + dy);
+                    loop {
+                        if !(target_x >= 0
+                            && target_x < self.board.width as isize
+                            && target_y >= 0
+                            && target_y < self.board.height as isize
+                            && self.board.geography
+                                [target_x as usize + target_y as usize * self.board.width]
+                                .traits
+                                .contains(TileTraits::WALKABLE))
+                        {
+                            break None;
+                        };
+                        target_x += dx;
+                        target_y += dy;
+
+                        let found = self.actors_iter().find(|(_, actor)| {
+                            actor.x as isize == target_x && actor.y as isize == target_y
+                        });
+                        if found.is_some() {
+                            break Some(direction);
+                        }
+                    }
+                })
+                .map(|dir| UtwidAction::Assumption(*dir));
+            permitted_actions.extend(assumption_moves);
         }
 
         if permitted_actions.is_empty() {

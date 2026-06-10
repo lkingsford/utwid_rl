@@ -294,4 +294,13 @@ impl UtwidAction {
 
         new_state
     }
+
+    pub(super) fn execute_assumption(&self, state: &UtwidState) -> UtwidState {
+        let direction = match self {
+            UtwidAction::Assumption(direction) => *direction,
+            _ => unreachable!("execute_assumption only handles Assumption actions"),
+        };
+        let mut new_state = state.clone();
+        new_state
+    }
 }

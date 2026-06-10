@@ -30,7 +30,7 @@ pub enum UtwidAction {
     Attention,           // Pull a whole direction closer
     Multiplication(Dir), // Create a duplicate player
     Contention(Dir),     // Glitch the map
-    Assumption,          // Take over a person
+    Assumption(Dir),     // Take over a person
 }
 
 pub fn action_cost(action: UtwidAction) -> usize {
@@ -43,7 +43,7 @@ pub fn action_cost(action: UtwidAction) -> usize {
         UtwidAction::Contemplation(_) => 2,
         UtwidAction::Multiplication(_) => 3,
         UtwidAction::Contention(_) => 3,
-        UtwidAction::Assumption => 3,
+        UtwidAction::Assumption(_) => 3,
         _ => 0,
     }
 }
@@ -70,6 +70,7 @@ impl Action for UtwidAction {
             UtwidAction::Stagnation(_) => self.execute_stagnation(&cost_spent_state),
             UtwidAction::Contention(_) => self.execute_contention(&cost_spent_state),
             UtwidAction::Multiplication(_) => self.execute_multiplication(&cost_spent_state),
+            UtwidAction::Assumption(_) => self.execute_assumption(&cost_spent_state),
             _ => unimplemented!(),
         };
 
