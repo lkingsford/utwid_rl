@@ -21,10 +21,9 @@ impl UtwidAction {
             for iy in neighborhood_range(y0, new_state.board.height) {
                 let tile = new_state.board.get_mut(ix, iy);
                 tile.modify_health(damage);
-                for (_, actor) in new_state
-                    .actors_iter_mut()
-                    .filter(|(_, actor)| actor.x == ix && actor.y == iy)
-                {
+                for (_, actor) in new_state.actors_iter_mut().filter(|(_, actor)| {
+                    !actor.traits.contains(ActorTraits::DEAD) && actor.x == ix && actor.y == iy
+                }) {
                     actor.modify_health(damage);
                 }
             }

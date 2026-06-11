@@ -27,10 +27,9 @@ impl UtwidAction {
         } - new_state.temporary_damage_bonus.unwrap_or_default() as isize;
 
         let mut human_died = false;
-        for (_, actor) in new_state
-            .actors_iter_mut()
-            .filter(|(_, actor)| actor.x == new_x && actor.y == new_y)
-        {
+        for (_, actor) in new_state.actors_iter_mut().filter(|(_, actor)| {
+            !actor.traits.contains(ActorTraits::DEAD) && actor.x == new_x && actor.y == new_y
+        }) {
             actor.modify_health(damage);
             //
             // Specific special case for the 'mutiplication' to make sure you human control a character
@@ -61,7 +60,9 @@ impl UtwidAction {
         if new_state
             .actors_iter()
             .map(|(_, actor)| actor)
-            .find(|actor| actor.x == new_x && actor.y == new_y)
+            .find(|actor| {
+                !actor.traits.contains(ActorTraits::DEAD) && actor.x == new_x && actor.y == new_y
+            })
             .is_none()
             && new_state
                 .board

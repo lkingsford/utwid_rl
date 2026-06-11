@@ -54,18 +54,26 @@ fn adjacent_move_to(state: &mut UtwidState, target_x: usize, target_y: usize) ->
     panic!("Expected a walkable tile adjacent to target");
 }
 
+fn floor_tile() -> Tile {
+    Tile {
+        traits: TileTraits::WALKABLE,
+        health: None,
+        repr: Some(Repr::Floor),
+        repr_set: ReprSet::Room1,
+    }
+}
+
+fn set_tile(state: &mut UtwidState, x: usize, y: usize, tile: Tile) {
+    state.board.geography[x + y * state.board.width] = tile;
+}
+
 #[test]
 fn first_actor_in_direction_finds_adjacent_live_actor() {
     let mut state = UtwidState::new();
     state.actor_mut(0).unwrap().x = 1;
     state.actor_mut(0).unwrap().y = 1;
     let actor_id = state.add_actor(GameActor::them_actor(2, 1));
-    state.board.geography[2 + state.board.width] = Tile {
-        traits: TileTraits::WALKABLE,
-        health: None,
-        repr: Some(Repr::Floor),
-        repr_set: ReprSet::Room1,
-    };
+    set_tile(&mut state, 2, 1, floor_tile());
 
     assert_eq!(
         state.first_actor_in_direction(state.actor(0).unwrap(), Dir::E),
@@ -84,17 +92,91 @@ fn first_actor_in_direction_skips_dead_actor() {
         .unwrap()
         .traits
         .insert(ActorTraits::DEAD);
-    state.board.geography[2 + state.board.width] = Tile {
-        traits: TileTraits::WALKABLE,
-        health: None,
-        repr: Some(Repr::Floor),
-        repr_set: ReprSet::Room1,
-    };
+    set_tile(&mut state, 2, 1, floor_tile());
 
     assert_eq!(
         state.first_actor_in_direction(state.actor(0).unwrap(), Dir::E),
         None
     );
+}
+
+#[test]
+fn move_into_dead_actor_space_removes_dead_actor() {
+    use crate::mcts::game_trait::Action;
+
+    let mut state = UtwidState::new();
+    state.actor_mut(0).unwrap().x = 1;
+    state.actor_mut(0).unwrap().y = 1;
+    let dead_actor_id = state.add_actor(GameActor::them_actor(2, 1));
+    state
+        .actor_mut(dead_actor_id)
+        .unwrap()
+        .traits
+        .insert(ActorTraits::DEAD);
+    set_tile(&mut state, 1, 1, floor_tile());
+    set_tile(&mut state, 2, 1, floor_tile());
+
+    state = UtwidAction::Move(Dir::E).execute(&state);
+
+    assert_eq!(state.actor(0).unwrap().x, 2);
+    assert_eq!(state.actor(0).unwrap().y, 1);
+    assert!(!state.has_actor(dead_actor_id));
+}
+
+#[test]
+fn conclusion_passes_through_dead_actor() {
+    use crate::mcts::game_trait::Action;
+
+    let mut state = UtwidState::new();
+    state.actor_mut(0).unwrap().x = 1;
+    state.actor_mut(0).unwrap().y = 1;
+    let dead_actor_id = state.add_actor(GameActor::them_actor(2, 1));
+    let live_actor_id = state.add_actor(GameActor::them_actor(3, 1));
+    state
+        .actor_mut(dead_actor_id)
+        .unwrap()
+        .traits
+        .insert(ActorTraits::DEAD);
+    set_tile(&mut state, 1, 1, floor_tile());
+    set_tile(&mut state, 2, 1, floor_tile());
+    set_tile(&mut state, 3, 1, floor_tile());
+    set_tile(&mut state, 4, 1, Tile::wall());
+
+    state = UtwidAction::Conclusion(Dir::E).execute(&state);
+
+    assert_eq!(state.actor(0).unwrap().x, 3);
+    assert_eq!(state.actor(0).unwrap().y, 1);
+    assert!(!state.has_actor(dead_actor_id));
+    assert!(!state.has_actor(live_actor_id));
+}
+
+#[test]
+fn multiplication_passes_through_dead_actor() {
+    use crate::mcts::game_trait::Action;
+
+    let mut state = UtwidState::new();
+    state.actor_mut(0).unwrap().x = 1;
+    state.actor_mut(0).unwrap().y = 1;
+    let dead_actor_id = state.add_actor(GameActor::them_actor(2, 1));
+    state
+        .actor_mut(dead_actor_id)
+        .unwrap()
+        .traits
+        .insert(ActorTraits::DEAD);
+    set_tile(&mut state, 1, 1, floor_tile());
+    set_tile(&mut state, 2, 1, floor_tile());
+    set_tile(&mut state, 3, 1, floor_tile());
+    set_tile(&mut state, 4, 1, Tile::wall());
+
+    state = UtwidAction::Multiplication(Dir::E).execute(&state);
+
+    assert!(state.actors_iter().any(|(_, actor)| {
+        actor.actor_type == ACTOR_TYPE_YOU
+            && !actor.traits.contains(ActorTraits::HUMAN)
+            && actor.x == 3
+            && actor.y == 1
+    }));
+    assert!(!state.has_actor(dead_actor_id));
 }
 
 #[test]

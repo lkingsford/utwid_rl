@@ -25,9 +25,9 @@ impl UtwidAction {
             .board
             .board_permitted_moves(new_x, new_y, true, true, false)
             .contains(&direction)
-            && !state
-                .actors_iter()
-                .any(|actor| actor.1.x == new_x && actor.1.y == new_y)
+            && !state.actors_iter().any(|(_, actor)| {
+                !actor.traits.contains(ActorTraits::DEAD) && actor.x == new_x && actor.y == new_y
+            })
         {
             (last_x, last_y) = (new_x, new_y);
             (new_x, new_y) = apply_dir(new_x, new_y, direction);
@@ -275,9 +275,10 @@ impl UtwidAction {
             && state.board.geography[target_x as usize + target_y as usize * state.board.width]
                 .traits
                 .contains(TileTraits::WALKABLE)
-            && state
-                .actors_iter()
-                .all(|(_, actor)| !(actor.x as isize == target_x && actor.y as isize == target_y))
+            && state.actors_iter().all(|(_, actor)| {
+                actor.traits.contains(ActorTraits::DEAD)
+                    || !(actor.x as isize == target_x && actor.y as isize == target_y)
+            })
         {
             target_x += dx;
             target_y += dy;
