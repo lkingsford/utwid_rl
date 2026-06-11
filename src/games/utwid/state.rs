@@ -157,6 +157,48 @@ impl UtwidState {
             .map(|(id, _)| id)
     }
 
+    pub(crate) fn first_actor_in_direction(
+        &self,
+        actor: &GameActor,
+        direction: Dir,
+    ) -> Option<ActorId> {
+        let (_action, dx, dy) = CARDINAL_DIRS
+            .iter()
+            .chain(DIAGONAL_DIRS.iter())
+            .find(|(action, _, _)| action == &direction)
+            .unwrap()
+            .clone();
+        let (mut target_x, mut target_y) = (actor.x as isize + dx, actor.y as isize + dy);
+
+        loop {
+            if target_x < 0
+                || target_x >= self.board.width as isize
+                || target_y < 0
+                || target_y >= self.board.height as isize
+            {
+                break None;
+            }
+
+            let target_x_usize = target_x as usize;
+            let target_y_usize = target_y as usize;
+            if !self
+                .board
+                .get(target_x_usize, target_y_usize)
+                .traits
+                .contains(TileTraits::WALKABLE)
+            {
+                break None;
+            }
+
+            if let Some(actor_id) = self.actor_id_in_space(target_x_usize, target_y_usize) {
+                return Some(actor_id);
+            }
+
+            target_x += dx;
+            target_y += dy;
+        }
+    }
+
     fn actor_debug_rows(&self) -> Vec<String> {
         let mut rows: Vec<String> = self
             .actors_iter()
@@ -388,33 +430,12 @@ impl State for UtwidState {
             let assumption_moves = CARDINAL_DIRS
                 .iter()
                 .chain(DIAGONAL_DIRS.iter())
-                .filter_map(|(direction, dx, dy)| {
-                    let (mut target_x, mut target_y) =
-                        (next_actor.x as isize + dx, next_actor.y as isize + dy);
-                    loop {
-                        if !(target_x >= 0
-                            && target_x < self.board.width as isize
-                            && target_y >= 0
-                            && target_y < self.board.height as isize
-                            && self.board.geography
-                                [target_x as usize + target_y as usize * self.board.width]
-                                .traits
-                                .contains(TileTraits::WALKABLE))
-                        {
-                            break None;
-                        };
-                        target_x += dx;
-                        target_y += dy;
-
-                        let found = self.actors_iter().find(|(_, actor)| {
-                            actor.x as isize == target_x && actor.y as isize == target_y
-                        });
-                        if found.is_some() {
-                            break Some(direction);
-                        }
-                    }
+                .filter_map(|(direction, _, _)| {
+                    self.first_actor_in_direction(next_actor, *direction)
+                        .is_some()
+                        .then_some(*direction)
                 })
-                .map(|dir| UtwidAction::Assumption(*dir));
+                .map(UtwidAction::Assumption);
             permitted_actions.extend(assumption_moves);
         }
 

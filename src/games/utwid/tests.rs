@@ -55,6 +55,49 @@ fn adjacent_move_to(state: &mut UtwidState, target_x: usize, target_y: usize) ->
 }
 
 #[test]
+fn first_actor_in_direction_finds_adjacent_live_actor() {
+    let mut state = UtwidState::new();
+    state.actor_mut(0).unwrap().x = 1;
+    state.actor_mut(0).unwrap().y = 1;
+    let actor_id = state.add_actor(GameActor::them_actor(2, 1));
+    state.board.geography[2 + state.board.width] = Tile {
+        traits: TileTraits::WALKABLE,
+        health: None,
+        repr: Some(Repr::Floor),
+        repr_set: ReprSet::Room1,
+    };
+
+    assert_eq!(
+        state.first_actor_in_direction(state.actor(0).unwrap(), Dir::E),
+        Some(actor_id)
+    );
+}
+
+#[test]
+fn first_actor_in_direction_skips_dead_actor() {
+    let mut state = UtwidState::new();
+    state.actor_mut(0).unwrap().x = 1;
+    state.actor_mut(0).unwrap().y = 1;
+    let actor_id = state.add_actor(GameActor::them_actor(2, 1));
+    state
+        .actor_mut(actor_id)
+        .unwrap()
+        .traits
+        .insert(ActorTraits::DEAD);
+    state.board.geography[2 + state.board.width] = Tile {
+        traits: TileTraits::WALKABLE,
+        health: None,
+        repr: Some(Repr::Floor),
+        repr_set: ReprSet::Room1,
+    };
+
+    assert_eq!(
+        state.first_actor_in_direction(state.actor(0).unwrap(), Dir::E),
+        None
+    );
+}
+
+#[test]
 fn stairs_transition_resets_turn_state_across_multiple_floors() {
     let mut state = UtwidState::new();
     let mut transitioned = false;
@@ -70,7 +113,7 @@ fn stairs_transition_resets_turn_state_across_multiple_floors() {
         else {
             break;
         };
-        state = UtwidAction::Move(Dir::N).execute_stairs(&state);
+        state = UtwidAction::Move(Dir::N).execute_stairs(state.actor(0).unwrap(), &state);
         transitioned = true;
 
         assert_eq!(state.to_act, 0);
@@ -108,7 +151,7 @@ fn stairs_transition_clears_monsters_dead_entries_and_stale_turn_ids() {
         else {
             break;
         };
-        state = UtwidAction::Move(Dir::N).execute_stairs(&state);
+        state = UtwidAction::Move(Dir::N).execute_stairs(state.actor(0).unwrap(), &state);
         transitioned = true;
 
         assert_eq!(state.to_act, 0);

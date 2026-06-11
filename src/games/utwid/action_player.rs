@@ -300,7 +300,15 @@ impl UtwidAction {
             UtwidAction::Assumption(direction) => *direction,
             _ => unreachable!("execute_assumption only handles Assumption actions"),
         };
-        let mut new_state = state.clone();
+
+        let actor = state.actor(state.to_act).unwrap();
+        let assumed_actor_id = state.first_actor_in_direction(actor, direction);
+        let new_state = state.clone();
+
+        if let Some(assumed_actor_id) = assumed_actor_id {
+            log::trace!("execute_assumption found actor_id={}", assumed_actor_id);
+        }
+
         new_state
     }
 }
