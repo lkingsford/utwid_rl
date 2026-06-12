@@ -54,6 +54,7 @@ impl Action for UtwidAction {
     type StateType = UtwidState;
 
     fn execute(&self, state: &Self::StateType) -> Self::StateType {
+        log::trace!("execute");
         let mut cost_spent_state = state.clone();
         // Need to spend cost before making move
         cost_spent_state
@@ -146,7 +147,10 @@ impl Action for UtwidAction {
 
         // If the game is already in a terminal state (e.g., player died),
         // we don't need to determine the next actor or update turn order further.
-        if new_state.game_state == GameState::Won || new_state.game_state == GameState::Lost {
+        if new_state.game_state == GameState::Won
+            || new_state.game_state == GameState::Lost
+            || new_state.game_state == GameState::Stalemate
+        {
             return new_state;
         }
 
@@ -181,8 +185,13 @@ impl Action for UtwidAction {
             return new_state;
         }
 
-        // The new actor to act is at the front of the updated queue.
-        if !new_state.prescription_turns.is_some() {
+        // The new actor to act is at the front of the updated queue,
+        // unless the human just acted and still has prescription turns.
+        if !new_state.prescription_turns.is_some()
+            || !state
+                .actor(actor_who_acted)
+                .is_some_and(|a| a.traits.contains(ActorTraits::HUMAN))
+        {
             new_state.to_act = *new_state.turn_order.front().unwrap();
             return new_state;
         }

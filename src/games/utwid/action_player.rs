@@ -4,12 +4,14 @@ use super::*;
 
 impl UtwidAction {
     pub(super) fn execute_prescription(&self, state: &UtwidState) -> UtwidState {
+        log::trace!("execute_prescription");
         let mut new_state = state.clone();
         new_state.prescription_turns = Some(PRESCRIPTION_TURNS);
         new_state
     }
 
     pub(super) fn execute_conclusion(&self, state: &UtwidState) -> UtwidState {
+        log::trace!("execute_conclusion");
         let direction = match self {
             UtwidAction::Conclusion(direction) => *direction,
             _ => unreachable!("execute_conclusion only handles Conclusion actions"),
@@ -53,6 +55,7 @@ impl UtwidAction {
     }
 
     pub(super) fn execute_stagnation(&self, state: &UtwidState) -> UtwidState {
+        log::trace!("execute_stagnation");
         let direction = match self {
             UtwidAction::Stagnation(direction) => *direction,
             _ => unreachable!("execute_stagnation only handles Stagnation actions"),
@@ -159,6 +162,7 @@ impl UtwidAction {
     }
 
     pub(super) fn execute_contention(&self, state: &UtwidState) -> UtwidState {
+        log::trace!("execute_contention");
         let direction = match self {
             UtwidAction::Contention(direction) => *direction,
             _ => unreachable!("execute_contention only handles Contention actions"),
@@ -250,10 +254,18 @@ impl UtwidAction {
             }
         */
 
+        let has_goal_tile = new_state.board.geography.iter().any(|tile| {
+            tile.traits.contains(TileTraits::STAIRS) || tile.traits.contains(TileTraits::WIN)
+        });
+        if !has_goal_tile {
+            new_state.game_state = GameState::Stalemate;
+        }
+
         new_state
     }
 
     pub(super) fn execute_multiplication(&self, state: &UtwidState) -> UtwidState {
+        log::trace!("execute_multiplication");
         let direction = match self {
             UtwidAction::Multiplication(direction) => *direction,
             _ => unreachable!("execute_multiplication only handles Multiplication actions"),
@@ -297,6 +309,7 @@ impl UtwidAction {
     }
 
     pub(super) fn execute_assumption(&self, state: &UtwidState) -> UtwidState {
+        log::trace!("execute_assumption");
         let direction = match self {
             UtwidAction::Assumption(direction) => *direction,
             _ => unreachable!("execute_assumption only handles Assumption actions"),

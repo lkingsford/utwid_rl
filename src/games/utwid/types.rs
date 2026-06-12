@@ -36,6 +36,7 @@ pub enum GameState {
     Lost,
     Checkpoint,
     Mon2yShortcircuit,
+    Stalemate,
 }
 
 pub(crate) const YOU_ID: usize = 0;

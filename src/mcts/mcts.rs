@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
-use log::trace;
+use log::{debug, trace};
 
 use super::BestTurnPolicy;
 use super::game_trait::{Action, Actor, State};
@@ -29,7 +29,7 @@ pub fn run_mcts_iterations<
         threads.push(std::thread::spawn(move || {
             loop {
                 {
-                    trace!(
+                    debug!(
                         "Starting iteration {}",
                         finished_iterations_clone.load(std::sync::atomic::Ordering::SeqCst)
                     );

@@ -6,6 +6,7 @@ use super::*;
 
 impl UtwidAction {
     pub(super) fn execute_move(&self, state: &UtwidState) -> UtwidState {
+        log::trace!("execute_move");
         let direction = match self {
             UtwidAction::Move(direction) => *direction,
             _ => unreachable!("execute_move only handles Move actions"),
@@ -17,6 +18,7 @@ impl UtwidAction {
     }
 
     pub(super) fn move_to(&self, state: &UtwidState, new_x: usize, new_y: usize) -> UtwidState {
+        log::trace!("move_to");
         let mut new_state = state.clone();
         let actor_id = new_state.to_act;
 
@@ -95,7 +97,7 @@ impl UtwidAction {
         acting_character: &GameActor,
         state: &UtwidState,
     ) -> UtwidState {
-        log::debug!("execute_stairs before {}", state.debug_summary());
+        log::trace!("execute_stairs");
         let mut new_state = state.clone();
         new_state.current_level = state.current_level + 1;
         new_state.game_state = GameState::Checkpoint;
@@ -120,6 +122,7 @@ impl UtwidAction {
     }
 
     pub(super) fn execute_win(&self, state: &UtwidState) -> UtwidState {
+        log::trace!("execute_win");
         let mut new_state = state.clone();
         new_state.game_state = GameState::Won;
         new_state
