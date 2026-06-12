@@ -23,7 +23,7 @@ use mon2y::mcts::tree::Tree;
 use mon2y::mcts::{BestTurnPolicy, calculate_best_turn};
 use mon2y::{games::utwid::ReprSet, mcts::game_trait::Action};
 use mon2y::{
-    games::utwid::{ActorTraits, Dir, GameState, Repr, UtwidAction, UtwidState},
+    games::utwid::{ActorTraits, Allegiance, Dir, GameState, Repr, UtwidAction, UtwidState},
     mcts::mcts::run_mcts_iterations,
 };
 
@@ -65,28 +65,33 @@ fn draw_board(stdout: &mut Stdout, state: UtwidState) -> std::io::Result<()> {
             SetForegroundColor(Color::White)
         )?;
         for ix in 0..state.board.width {
-            let actor = state
+            let actor_with_id = state
                 .actors
                 .iter()
-                .filter_map(|actor| actor.as_ref())
-                .find(|actor| actor.x == ix && actor.y == iy);
+                .enumerate()
+                .filter_map(|(id, actor_opt)| actor_opt.as_ref().map(|actor| (id, actor)))
+                .find(|(_, actor)| actor.x == ix && actor.y == iy);
 
-            let actor_repr = actor.and_then(|actor| actor.repr()).map(repr_to_char);
+            let actor_repr = actor_with_id
+                .and_then(|(_, actor)| actor.repr())
+                .map(repr_to_char);
 
             queue!(
                 stdout,
-                SetBackgroundColor(
-                    if actor
-                        .and_then(|actor| actor.health)
-                        .is_some_and(|health| health <= 1)
-                    {
-                        Color::DarkRed
+                SetBackgroundColor(if let Some((actor_id, actor_ref)) = actor_with_id {
+                    if state.to_act == actor_id && actor_ref.traits.contains(ActorTraits::HUMAN) {
+                        Color::Grey
                     } else {
-                        repr_set_to_color(
-                            state.board.geography[(ix + iy * state.board.width) as usize].repr_set,
-                        )
+                        match actor_ref.allegiance {
+                            Allegiance::You => Color::DarkCyan,
+                            Allegiance::Monty => Color::DarkRed,
+                        }
                     }
-                ),
+                } else {
+                    repr_set_to_color(
+                        state.board.geography[(ix + iy * state.board.width) as usize].repr_set,
+                    )
+                }),
                 Print(if let Some(actor_repr) = actor_repr {
                     actor_repr
                 } else if let Some(tile_repr) = state.board.geography
@@ -529,6 +534,7 @@ fn run_game(
             }
             .unwrap();
             while completed_iterations < mcts_iterations {
+                log::debug!("Completed {} iterations", completed_iterations);
                 let mut ai_marked_state = state.clone();
                 ai_marked_state.short_circuit_at_turns = Some(SHORT_CIRCUIT_AT_TURNS);
                 ai_marked_state.short_circuit_at_turns_increment = Some(short_circuit_increment);
@@ -688,6 +694,7 @@ fn main() -> std::io::Result<()> {
     )? {
         Some(GameState::Won) => print!("Won!"),
         Some(GameState::Lost) => print!("Lost!"),
+        Some(GameState::Stalemate) => print!("Stalemate!"),
         Some(_) => panic!("Invalid end game state"),
         None => {}
     }
