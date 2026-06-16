@@ -118,6 +118,17 @@ impl Action for UtwidAction {
             new_state.game_state = GameState::Ongoing;
         }
 
+        // Decrement assumed_turns on the actor who just acted
+        if let Some(actor) = new_state.actor_mut(state.to_act) {
+            if let Some((ref mut turns, _)) = actor.assumed_turns {
+                if *turns <= 1 {
+                    actor.assumed_turns = None;
+                } else {
+                    *turns -= 1;
+                }
+            }
+        }
+
         // Bring out yer dead!
         let mut dead_actor_ids: Vec<ActorId> = Vec::new();
         for (actor_id, actor) in new_state

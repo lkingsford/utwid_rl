@@ -382,7 +382,7 @@ impl State for UtwidState {
                 let on_point = self.actor_in_space(x, y);
                 if let Some(actor) = on_point {
                     next_actor.traits.contains(ActorTraits::MELEE)
-                        && next_actor.allegiance != actor.allegiance
+                        && next_actor.effective_allegiance() != actor.effective_allegiance()
                 } else {
                     true
                 }
@@ -464,10 +464,9 @@ impl State for UtwidState {
         let next_actor = self
             .actor(self.to_act)
             .unwrap_or_else(|| panic!("Invalid to_act in next_actor: {}", self.debug_summary()));
-        if next_actor.traits.contains(ActorTraits::HUMAN) {
-            Actor::Player(0)
-        } else {
-            Actor::Player(next_actor.mon2y.as_ref().unwrap().tree_id)
+        match next_actor.effective_allegiance() {
+            Allegiance::You => Actor::Player(0),
+            Allegiance::Monty => Actor::Player(next_actor.mon2y.as_ref().unwrap().tree_id),
         }
     }
 

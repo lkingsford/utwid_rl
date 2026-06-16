@@ -16,7 +16,7 @@ bitflags! {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum Allegiance {
     You,
     Monty,
@@ -40,6 +40,7 @@ pub struct GameActor {
     pub health: Option<usize>,
     pub attack_damage: Option<usize>,
     pub allegiance: Allegiance,
+    pub assumed_turns: Option<(usize, Allegiance)>,
 }
 
 impl GameActor {
@@ -62,6 +63,13 @@ impl GameActor {
         if new_health <= 0 {
             self.traits.insert(ActorTraits::DEAD);
         }
+    }
+
+    pub fn effective_allegiance(&self) -> Allegiance {
+        self.assumed_turns
+            .as_ref()
+            .map(|(_, allegiance)| *allegiance)
+            .unwrap_or(self.allegiance)
     }
 }
 
@@ -90,6 +98,7 @@ impl GameActor {
             health: Some(7),
             attack_damage: Some(1),
             allegiance: Allegiance::You,
+            assumed_turns: None,
         }
     }
 
@@ -112,6 +121,7 @@ impl GameActor {
             health: Some(7),
             attack_damage: Some(1),
             allegiance: Allegiance::Monty,
+            assumed_turns: None,
         }
     }
 
@@ -130,6 +140,7 @@ impl GameActor {
             health: Some(2),
             attack_damage: Some(1),
             allegiance: Allegiance::Monty,
+            assumed_turns: None,
         }
     }
 
@@ -148,6 +159,7 @@ impl GameActor {
             health: Some(3),
             attack_damage: Some(2),
             allegiance: Allegiance::Monty,
+            assumed_turns: None,
         }
     }
 
@@ -169,6 +181,7 @@ impl GameActor {
             health: Some(4),
             attack_damage: Some(5),
             allegiance: Allegiance::Monty,
+            assumed_turns: None,
         }
     }
 }

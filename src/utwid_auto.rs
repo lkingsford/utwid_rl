@@ -82,7 +82,7 @@ fn draw_board(stdout: &mut Stdout, state: UtwidState) -> std::io::Result<()> {
                     if state.to_act == actor_id && actor_ref.traits.contains(ActorTraits::HUMAN) {
                         Color::Grey
                     } else {
-                        match actor_ref.allegiance {
+                        match actor_ref.effective_allegiance() {
                             Allegiance::You => Color::DarkCyan,
                             Allegiance::Monty => Color::DarkRed,
                         }

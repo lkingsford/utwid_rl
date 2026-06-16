@@ -23,6 +23,7 @@ pub(crate) const PLAYER_MAX_HEALTH: usize = 7;
 pub(crate) const ROOM_SPLITS_MIN: usize = 2;
 pub(crate) const ROOM_SPLITS_MAX: usize = 8;
 pub(crate) const PRESCRIPTION_TURNS: usize = 5;
+pub(crate) const ASSUMPTION_TURNS: usize = 5;
 pub(crate) const VISUAL_ROOMS: usize = 7;
 pub(crate) const CONTENTION_R_WIDTH: usize = 2;
 pub(crate) const CONTENTION_NET_WIDTH: usize = 5; //CONTENTION_R_WIDTH * 2 + 1

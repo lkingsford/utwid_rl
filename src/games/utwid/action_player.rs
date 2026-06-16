@@ -303,6 +303,7 @@ impl UtwidAction {
         mult_actor.y = target_y as usize;
         mult_actor.mon2y = Some(actor::you_mon2y_data());
         mult_actor.traits.remove(ActorTraits::HUMAN);
+        mult_actor.assumed_turns = None;
         new_state.add_actor(mult_actor);
 
         new_state
@@ -317,10 +318,12 @@ impl UtwidAction {
 
         let actor = state.actor(state.to_act).unwrap();
         let assumed_actor_id = state.first_actor_in_direction(actor, direction);
-        let new_state = state.clone();
+        let mut new_state = state.clone();
 
-        if let Some(assumed_actor_id) = assumed_actor_id {
-            log::trace!("execute_assumption found actor_id={}", assumed_actor_id);
+        if let Some(assumed_id) = assumed_actor_id {
+            if let Some(actor) = new_state.actor_mut(assumed_id) {
+                actor.assumed_turns = Some((ASSUMPTION_TURNS, Allegiance::You));
+            }
         }
 
         new_state
