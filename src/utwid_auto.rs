@@ -23,13 +23,11 @@ use mon2y::mcts::tree::Tree;
 use mon2y::mcts::{BestTurnPolicy, calculate_best_turn};
 use mon2y::{games::utwid::ReprSet, mcts::game_trait::Action};
 use mon2y::{
-    games::utwid::{ActorTraits, Allegiance, Dir, GameState, Repr, UtwidAction, UtwidState},
+    games::utwid::{
+        ActorTraits, Allegiance, Dir, GameActor, GameState, Repr, UtwidAction, UtwidState,
+    },
     mcts::mcts::run_mcts_iterations,
 };
-
-const DRAW_BOARD_X: u16 = 3;
-const DRAW_BOARD_Y: u16 = 3;
-const ACTOR_HP_ROWS: u16 = 10;
 
 fn repr_to_char(repr: Repr) -> char {
     match repr {
@@ -187,6 +185,30 @@ fn draw_status_mcts(
     Ok(())
 }
 
+fn draw_log(stdout: &mut Stdout, action_log: &[LogEntry]) -> std::io::Result<()> {
+    let width = size().unwrap_or((80, 0)).0 as usize;
+    let empty_row_segment = " ".repeat(width);
+    for row in DRAW_LOG_Y..DRAW_LOG_Y + LOG_ROWS {
+        queue!(stdout, MoveTo(0, row), Print(empty_row_segment.clone()),)?;
+    }
+    let start = action_log.len().saturating_sub(LOG_ROWS as usize);
+    for (i, entry) in action_log[start..].iter().enumerate() {
+        queue!(
+            stdout,
+            MoveTo(0, DRAW_LOG_Y + i as u16),
+            Print(format!(
+                "{:?} {} ({},{}) hp={}",
+                entry.action,
+                entry.actor.actor_type_name(),
+                entry.actor.x,
+                entry.actor.y,
+                entry.actor.health.unwrap_or(0),
+            )),
+        )?;
+    }
+    Ok(())
+}
+
 fn poll_for_exit() -> std::io::Result<bool> {
     while event::poll(Duration::from_millis(0))? {
         if let event::Event::Key(key_event) = event::read()?
@@ -269,6 +291,13 @@ const THREADS: usize = 6;
 const EXPLORATION_CONSTANT: f64 = 1.4142135623730951; // sqrt(2.0)
 const SHORT_CIRCUIT_AT_TURNS: usize = 200;
 const SHORT_CIRCUIT_INCREMENT: usize = 100;
+
+const DRAW_BOARD_X: u16 = 3;
+const DRAW_BOARD_Y: u16 = 3;
+const ACTOR_HP_ROWS: u16 = 10;
+
+const DRAW_LOG_Y: u16 = 15;
+const LOG_ROWS: u16 = 10;
 
 struct RawModeGuard;
 
@@ -420,6 +449,11 @@ fn sample_actions(stdout: &mut Stdout, state: &UtwidState, iterations: usize) {
     stdout.flush();
 }
 
+struct LogEntry {
+    actor: GameActor,
+    action: UtwidAction,
+}
+
 fn run_game(
     stdout: &mut Stdout,
     config: GameRunConfig,
@@ -428,6 +462,8 @@ fn run_game(
     let mut state = UtwidState::new();
     state.short_circuit_at_turns = Some(SHORT_CIRCUIT_AT_TURNS);
     state.short_circuit_at_turns_increment = Some(SHORT_CIRCUIT_AT_TURNS);
+
+    let mut action_log: Vec<LogEntry> = vec![];
 
     queue!(stdout, Clear(ClearType::All))?;
     if !config.plain_mode {
@@ -441,6 +477,7 @@ fn run_game(
             draw_board(stdout, state.clone())?;
             draw_monsters(stdout, &state)?;
             draw_status(stdout, &state)?;
+            draw_log(stdout, &action_log)?;
             if let Some(stats) = exploration_stats {
                 draw_exploration_status(stdout, stats)?;
             }
@@ -577,7 +614,17 @@ fn run_game(
             }
             best_turn.unwrap()
         };
+        let acting_actor = state
+            .actors
+            .get(state.to_act)
+            .and_then(|actor| actor.as_ref())
+            .unwrap()
+            .clone();
         state = next_act.execute(&state);
+        action_log.push(LogEntry {
+            actor: acting_actor,
+            action: next_act.clone(),
+        });
         if matches!(state.game_state, GameState::Checkpoint) {
             state.game_state = GameState::Ongoing;
         }
