@@ -6,7 +6,7 @@ use crossterm::{
     event::{self, KeyCode, KeyModifiers},
     queue,
     style::{Color, Print, SetBackgroundColor, SetForegroundColor},
-    terminal::{self, Clear, ClearType},
+    terminal::{self, Clear, ClearType, size},
 };
 use env_logger::fmt::Formatter;
 use log::Record;
@@ -29,6 +29,7 @@ use mon2y::{
 
 const DRAW_BOARD_X: u16 = 3;
 const DRAW_BOARD_Y: u16 = 3;
+const ACTOR_HP_ROWS: u16 = 10;
 
 fn repr_to_char(repr: Repr) -> char {
     match repr {
@@ -112,6 +113,17 @@ fn draw_board(stdout: &mut Stdout, state: UtwidState) -> std::io::Result<()> {
 }
 
 fn draw_monsters(stdout: &mut Stdout, state: &UtwidState) -> std::io::Result<()> {
+    // Clear the monster listing
+    let width = size().unwrap_or((80, 0)).0;
+    let empty_row_segment = " ".repeat((width - DRAW_MONSTER_X) as usize);
+    for row in DRAW_MONSTER_X..ACTOR_HP_ROWS + DRAW_MONSTER_Y {
+        queue!(
+            stdout,
+            MoveTo(DRAW_MONSTER_X, row),
+            Print(empty_row_segment.clone()),
+        )?;
+    }
+
     for (i, actor_id) in state.turn_order.iter().enumerate() {
         if let Some(actor) = state.actors.get(*actor_id) {
             let actor = match actor.as_ref() {
