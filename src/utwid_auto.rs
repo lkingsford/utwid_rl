@@ -24,7 +24,7 @@ use mon2y::mcts::{BestTurnPolicy, calculate_best_turn};
 use mon2y::{games::utwid::ReprSet, mcts::game_trait::Action};
 use mon2y::{
     games::utwid::{
-        ActorTraits, Allegiance, Dir, GameActor, GameState, Repr, UtwidAction, UtwidState,
+        ActorTraits, Allegiance, Dir, GameState, Repr, UtwidAction, UtwidEvent, UtwidState,
     },
     mcts::mcts::run_mcts_iterations,
 };
@@ -196,14 +196,10 @@ fn draw_log(stdout: &mut Stdout, action_log: &[LogEntry]) -> std::io::Result<()>
         queue!(
             stdout,
             MoveTo(0, DRAW_LOG_Y + i as u16),
-            Print(format!(
-                "{:?} {} ({},{}) hp={}",
-                entry.action,
-                entry.actor.actor_type_name(),
-                entry.actor.x,
-                entry.actor.y,
-                entry.actor.health.unwrap_or(0),
-            )),
+            Print(match entry {
+                LogEntry::Action(action) => format!("{:?}", action),
+                LogEntry::Event(event) => format!("{:?}", event),
+            }),
         )?;
     }
     Ok(())
@@ -449,9 +445,9 @@ fn sample_actions(stdout: &mut Stdout, state: &UtwidState, iterations: usize) {
     stdout.flush();
 }
 
-struct LogEntry {
-    actor: GameActor,
-    action: UtwidAction,
+enum LogEntry {
+    Action(UtwidAction),
+    Event(UtwidEvent),
 }
 
 fn run_game(
@@ -614,17 +610,12 @@ fn run_game(
             }
             best_turn.unwrap()
         };
-        let acting_actor = state
-            .actors
-            .get(state.to_act)
-            .and_then(|actor| actor.as_ref())
-            .unwrap()
-            .clone();
-        state = next_act.execute(&state);
-        action_log.push(LogEntry {
-            actor: acting_actor,
-            action: next_act.clone(),
-        });
+        let (new_state, events) = next_act.execute(&state);
+        state = new_state;
+        action_log.push(LogEntry::Action(next_act.clone()));
+        for event in events {
+            action_log.push(LogEntry::Event(event));
+        }
         if matches!(state.game_state, GameState::Checkpoint) {
             state.game_state = GameState::Ongoing;
         }

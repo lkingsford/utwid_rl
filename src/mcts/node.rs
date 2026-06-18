@@ -232,7 +232,7 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
                 panic!("Expanding an expanded node");
             }
             Node::Placeholder { weight, .. } => {
-                let state = action.execute(parent_state);
+                let (state, _events) = action.execute(parent_state);
                 Self::new_expanded(state, *weight, per)
             }
         }

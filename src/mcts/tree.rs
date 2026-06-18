@@ -234,11 +234,13 @@ where
 
                     let action: ActionType =
                         permitted_actions[rng.random_range(0..permitted_actions.len())].clone();
-                    cur_state = action.execute(&cur_state);
+                    let (new_state, _events) = action.execute(&cur_state);
+                    cur_state = new_state;
                 }
                 Actor::GameAction(actions) => {
                     let action = weighted_random(actions);
-                    cur_state = action.execute(&cur_state);
+                    let (new_state, _events) = action.execute(&cur_state);
+                    cur_state = new_state;
                 }
             }
         }
@@ -333,7 +335,7 @@ mod tests {
             terminal_hyperreward: Default::default(),
         };
 
-        let explored_state = InjectableGameAction::WinInXTurns(2).execute(&root_state);
+        let (explored_state, _events) = InjectableGameAction::WinInXTurns(2).execute(&root_state);
         let mut root = create_expanded_node(root_state, None, None);
 
         let mut explored_node = create_expanded_node(explored_state, None, None);
@@ -375,9 +377,10 @@ mod tests {
             terminal_hyperreward: Default::default(),
         };
 
-        let mut explored_state_1 = InjectableGameAction::WinInXTurns(2).execute(&root_state);
+        let (mut explored_state_1, _events) =
+            InjectableGameAction::WinInXTurns(2).execute(&root_state);
         explored_state_1.injected_permitted_actions = vec![InjectableGameAction::WinInXTurns(1)];
-        let explored_state_2 = InjectableGameAction::WinInXTurns(3).execute(&root_state);
+        let (explored_state_2, _events) = InjectableGameAction::WinInXTurns(3).execute(&root_state);
         let mut root = create_expanded_node(root_state, None, None);
 
         let mut explored_node_1 = create_expanded_node(explored_state_1, None, None);
@@ -426,11 +429,12 @@ mod tests {
             injected_hyperreward: Default::default(),
             terminal_hyperreward: Default::default(),
         };
-        let mut explored_state_1 = InjectableGameAction::WinInXTurns(2).execute(&root_state);
+        let (mut explored_state_1, _events) =
+            InjectableGameAction::WinInXTurns(2).execute(&root_state);
         explored_state_1.injected_permitted_actions =
             vec![InjectableGameAction::NextTurnInjectActionCount(5)];
 
-        let explored_state_2 = InjectableGameAction::WinInXTurns(3).execute(&root_state);
+        let (explored_state_2, _events) = InjectableGameAction::WinInXTurns(3).execute(&root_state);
         let mut root = create_expanded_node(root_state, None, None);
 
         let mut explored_node_1 = create_expanded_node(explored_state_1, None, None);
@@ -485,11 +489,12 @@ mod tests {
             injected_hyperreward: Default::default(),
             terminal_hyperreward: Default::default(),
         };
-        let mut explored_state_1 = InjectableGameAction::WinInXTurns(2).execute(&root_state);
+        let (mut explored_state_1, _events) =
+            InjectableGameAction::WinInXTurns(2).execute(&root_state);
         explored_state_1.injected_permitted_actions =
             vec![InjectableGameAction::NextTurnInjectActionCount(5)];
 
-        let explored_state_2 = InjectableGameAction::WinInXTurns(3).execute(&root_state);
+        let (explored_state_2, _events) = InjectableGameAction::WinInXTurns(3).execute(&root_state);
         let mut root = create_expanded_node(root_state, None, None);
 
         let mut explored_node_1 = create_expanded_node(explored_state_1, None, None);
@@ -547,7 +552,7 @@ mod tests {
             terminal_hyperreward: Default::default(),
         };
 
-        let explored_state = InjectableGameAction::WinInXTurns(2).execute(&root_state);
+        let (explored_state, _events) = InjectableGameAction::WinInXTurns(2).execute(&root_state);
         let root = create_expanded_node(root_state, None, None);
         let tree = Tree::new(root);
         let reward = tree.play_out(explored_state, 0);
@@ -571,18 +576,20 @@ mod tests {
             terminal_hyperreward: Default::default(),
         };
 
-        let explored_state = InjectableGameAction::WinInXTurns(2).execute(&root_state);
+        let (explored_state, _events) = InjectableGameAction::WinInXTurns(2).execute(&root_state);
         let mut root = create_expanded_node(root_state, None, None);
 
         let mut explored_node = create_expanded_node(explored_state, None, None);
 
         let mut child_node = create_expanded_node(
-            InjectableGameAction::WinInXTurns(1).execute(&explored_node.state()),
+            InjectableGameAction::WinInXTurns(1)
+                .execute(&explored_node.state())
+                .0,
             None,
             None,
         );
 
-        let grandchild_state = InjectableGameAction::Win.execute(&child_node.state());
+        let (grandchild_state, _events) = InjectableGameAction::Win.execute(&child_node.state());
         let grandchild_node = create_expanded_node(grandchild_state, None, None);
 
         child_node.insert_child(InjectableGameAction::Win, grandchild_node);
@@ -660,18 +667,20 @@ mod tests {
             terminal_hyperreward: Default::default(),
         };
 
-        let explored_state = InjectableGameAction::WinInXTurns(2).execute(&root_state);
+        let (explored_state, _events) = InjectableGameAction::WinInXTurns(2).execute(&root_state);
         let mut root = create_expanded_node(root_state, None, None);
 
         let mut explored_node = create_expanded_node(explored_state, None, None);
 
         let mut child_node = create_expanded_node(
-            InjectableGameAction::WinInXTurns(1).execute(&explored_node.state()),
+            InjectableGameAction::WinInXTurns(1)
+                .execute(&explored_node.state())
+                .0,
             None,
             None,
         );
 
-        let grandchild_state = InjectableGameAction::Win.execute(&child_node.state());
+        let (grandchild_state, _events) = InjectableGameAction::Win.execute(&child_node.state());
         let grandchild_node = create_expanded_node(grandchild_state, None, None);
 
         child_node.insert_child(InjectableGameAction::Win, grandchild_node);

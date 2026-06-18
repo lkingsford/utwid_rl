@@ -10,7 +10,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use action::{Dir, UtwidAction, action_cost};
+pub use action::{Dir, UtwidAction, UtwidEvent, action_cost};
 pub use actor::{ActorTraits, Allegiance, GameActor, Mon2yData};
 pub use board::{Board, Tile, TileTraits};
 pub use state::UtwidState;

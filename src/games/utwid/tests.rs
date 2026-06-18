@@ -116,7 +116,7 @@ fn move_into_dead_actor_space_removes_dead_actor() {
     set_tile(&mut state, 1, 1, floor_tile());
     set_tile(&mut state, 2, 1, floor_tile());
 
-    state = UtwidAction::Move(Dir::E).execute(&state);
+    let (state, _events) = UtwidAction::Move(Dir::E).execute(&state);
 
     assert_eq!(state.actor(0).unwrap().x, 2);
     assert_eq!(state.actor(0).unwrap().y, 1);
@@ -142,7 +142,7 @@ fn conclusion_passes_through_dead_actor() {
     set_tile(&mut state, 3, 1, floor_tile());
     set_tile(&mut state, 4, 1, Tile::wall());
 
-    state = UtwidAction::Conclusion(Dir::E).execute(&state);
+    let (state, _events) = UtwidAction::Conclusion(Dir::E).execute(&state);
 
     assert_eq!(state.actor(0).unwrap().x, 3);
     assert_eq!(state.actor(0).unwrap().y, 1);
@@ -168,7 +168,7 @@ fn multiplication_passes_through_dead_actor() {
     set_tile(&mut state, 3, 1, floor_tile());
     set_tile(&mut state, 4, 1, Tile::wall());
 
-    state = UtwidAction::Multiplication(Dir::E).execute(&state);
+    let (state, _events) = UtwidAction::Multiplication(Dir::E).execute(&state);
 
     assert!(state.actors_iter().any(|(_, actor)| {
         actor.actor_type == ACTOR_TYPE_YOU
@@ -260,7 +260,7 @@ fn execute_path_keeps_to_act_valid_between_floors_and_after_win() {
 
     let (stairs_x, stairs_y) = stair_location(&state);
     let action = adjacent_move_to(&mut state, stairs_x, stairs_y);
-    state = action.execute(&state);
+    let (mut state, _events) = action.execute(&state);
 
     assert!(matches!(state.game_state, GameState::Checkpoint));
     assert!(state.has_actor(state.to_act));
@@ -285,7 +285,7 @@ fn entering_stairs_turn_keeps_to_act_valid_and_terminal_node_safe() {
 
     let (stairs_x, stairs_y) = stair_location(&state);
     let action = adjacent_move_to(&mut state, stairs_x, stairs_y);
-    let post_stairs = action.execute(&state);
+    let (post_stairs, _events) = action.execute(&state);
 
     assert!(matches!(post_stairs.game_state, GameState::Checkpoint));
     assert_eq!(post_stairs.to_act, 0);
@@ -309,7 +309,7 @@ fn checkpoint_reward_uses_player_health_ratio_and_stays_terminal() {
     let action = adjacent_move_to(&mut state, stairs_x, stairs_y);
     state.actor_mut(0).unwrap().health = Some(4);
 
-    let post_stairs = action.execute(&state);
+    let (post_stairs, _events) = action.execute(&state);
     let rewards = post_stairs.reward();
 
     assert!(post_stairs.terminal());

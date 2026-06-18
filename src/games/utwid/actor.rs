@@ -22,13 +22,13 @@ pub enum Allegiance {
     Monty,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Mon2yData {
     pub tree_id: u8,
     pub iterations: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GameActor {
     pub x: usize,
     pub y: usize,

@@ -66,59 +66,63 @@ pub enum InjectableGameAction {
 }
 impl Action for InjectableGameAction {
     type StateType = InjectableGameState;
+    type EventType = ();
 
-    fn execute(&self, state: &Self::StateType) -> Self::StateType {
+    fn execute(&self, state: &Self::StateType) -> (Self::StateType, Vec<Self::EventType>) {
         let next_actor = if let Actor::Player(player_id) = state.next_actor() {
             Actor::Player((player_id + 1) % state.player_count)
         } else {
             Actor::Player(0)
         };
-        match self {
-            InjectableGameAction::NextTurnInjectActionCount(c) => InjectableGameState {
-                injected_permitted_actions: (0..*c)
-                    .map(|i| InjectableGameAction::WinInXTurns(i))
-                    .collect(),
-                perceived_permitted_actions: HashMap::new(),
-                next_actor,
-                ..state.clone()
-            },
-            InjectableGameAction::WinInXTurns(turns) => InjectableGameState {
-                injected_permitted_actions: {
-                    if *turns > 0 {
-                        vec![InjectableGameAction::WinInXTurns(turns - 1)]
-                    } else {
-                        vec![InjectableGameAction::Win]
-                    }
+        (
+            match self {
+                InjectableGameAction::NextTurnInjectActionCount(c) => InjectableGameState {
+                    injected_permitted_actions: (0..*c)
+                        .map(|i| InjectableGameAction::WinInXTurns(i))
+                        .collect(),
+                    perceived_permitted_actions: HashMap::new(),
+                    next_actor,
+                    ..state.clone()
                 },
-                perceived_permitted_actions: HashMap::new(),
-                next_actor,
-                ..state.clone()
+                InjectableGameAction::WinInXTurns(turns) => InjectableGameState {
+                    injected_permitted_actions: {
+                        if *turns > 0 {
+                            vec![InjectableGameAction::WinInXTurns(turns - 1)]
+                        } else {
+                            vec![InjectableGameAction::Win]
+                        }
+                    },
+                    perceived_permitted_actions: HashMap::new(),
+                    next_actor,
+                    ..state.clone()
+                },
+                InjectableGameAction::Win => InjectableGameState {
+                    injected_terminal: true,
+                    injected_reward: vec![1.0],
+                    perceived_permitted_actions: HashMap::new(),
+                    next_actor,
+                    ..state.clone()
+                },
+                InjectableGameAction::Lose => InjectableGameState {
+                    injected_terminal: true,
+                    injected_reward: vec![-1.0],
+                    perceived_permitted_actions: HashMap::new(),
+                    next_actor,
+                    ..state.clone()
+                },
+                InjectableGameAction::Nothing => InjectableGameState {
+                    perceived_permitted_actions: HashMap::new(),
+                    next_actor,
+                    ..state.clone()
+                },
+                InjectableGameAction::NextTurnGameAction(actions) => InjectableGameState {
+                    injected_permitted_actions: actions.clone(),
+                    perceived_permitted_actions: state.perceived_permitted_actions.clone(),
+                    next_actor,
+                    ..state.clone()
+                },
             },
-            InjectableGameAction::Win => InjectableGameState {
-                injected_terminal: true,
-                injected_reward: vec![1.0],
-                perceived_permitted_actions: HashMap::new(),
-                next_actor,
-                ..state.clone()
-            },
-            InjectableGameAction::Lose => InjectableGameState {
-                injected_terminal: true,
-                injected_reward: vec![-1.0],
-                perceived_permitted_actions: HashMap::new(),
-                next_actor,
-                ..state.clone()
-            },
-            InjectableGameAction::Nothing => InjectableGameState {
-                perceived_permitted_actions: HashMap::new(),
-                next_actor,
-                ..state.clone()
-            },
-            InjectableGameAction::NextTurnGameAction(actions) => InjectableGameState {
-                injected_permitted_actions: actions.clone(),
-                perceived_permitted_actions: state.perceived_permitted_actions.clone(),
-                next_actor,
-                ..state.clone()
-            },
-        }
+            vec![],
+        )
     }
 }

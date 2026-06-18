@@ -1,5 +1,6 @@
 use crate::mcts::game_trait::Action;
 
+use super::actor::GameActor;
 use super::types::*;
 use super::*;
 
@@ -48,12 +49,23 @@ pub fn action_cost(action: UtwidAction) -> usize {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum UtwidEvent {
+    Killed(GameActor),
+    Assumed(GameActor),
+    AllegianceChanged(GameActor, Allegiance),
+    Contention(usize, usize),
+    DamageTaken(GameActor, isize),
+    Multiplication(usize, usize),
+}
+
 const AI_TURN_WEIGHT: f64 = 1.0 / 1000.0;
 
 impl Action for UtwidAction {
     type StateType = UtwidState;
+    type EventType = UtwidEvent;
 
-    fn execute(&self, state: &Self::StateType) -> Self::StateType {
+    fn execute(&self, state: &Self::StateType) -> (Self::StateType, Vec<Self::EventType>) {
         log::trace!("execute");
         let mut cost_spent_state = state.clone();
         // Need to spend cost before making move
@@ -62,18 +74,44 @@ impl Action for UtwidAction {
             .unwrap()
             .modify_health(-1 * action_cost(*self) as isize);
 
+        let mut action_events: Vec<UtwidEvent> = vec![];
         let mut new_state = match self {
-            UtwidAction::Move(_) => self.execute_move(&cost_spent_state),
+            UtwidAction::Move(_) => {
+                let (s, e) = self.execute_move(&cost_spent_state);
+                action_events = e;
+                s
+            }
             UtwidAction::Wait => cost_spent_state,
-            UtwidAction::Explode => self.execute_explode(&cost_spent_state),
+            UtwidAction::Explode => {
+                let (s, e) = self.execute_explode(&cost_spent_state);
+                action_events = e;
+                s
+            }
             UtwidAction::Prescription => self.execute_prescription(&cost_spent_state),
-            UtwidAction::Conclusion(_) => self.execute_conclusion(&cost_spent_state),
+            UtwidAction::Conclusion(_) => {
+                let (s, e) = self.execute_conclusion(&cost_spent_state);
+                action_events = e;
+                s
+            }
             UtwidAction::Stagnation(_) => self.execute_stagnation(&cost_spent_state),
-            UtwidAction::Contention(_) => self.execute_contention(&cost_spent_state),
-            UtwidAction::Multiplication(_) => self.execute_multiplication(&cost_spent_state),
-            UtwidAction::Assumption(_) => self.execute_assumption(&cost_spent_state),
+            UtwidAction::Contention(_) => {
+                let (s, e) = self.execute_contention(&cost_spent_state);
+                action_events = e;
+                s
+            }
+            UtwidAction::Multiplication(_) => {
+                let (s, e) = self.execute_multiplication(&cost_spent_state);
+                action_events = e;
+                s
+            }
+            UtwidAction::Assumption(_) => {
+                let (s, e) = self.execute_assumption(&cost_spent_state);
+                action_events = e;
+                s
+            }
             _ => unimplemented!(),
         };
+        let mut events: Vec<UtwidEvent> = action_events;
 
         if state
             .actor(state.to_act)
@@ -120,9 +158,11 @@ impl Action for UtwidAction {
 
         // Decrement assumed_turns on the actor who just acted
         if let Some(actor) = new_state.actor_mut(state.to_act) {
-            if let Some((ref mut turns, _)) = actor.assumed_turns {
+            if let Some((ref mut turns, temp_allegiance)) = actor.assumed_turns {
                 if *turns <= 1 {
+                    let actor_clone = actor.clone();
                     actor.assumed_turns = None;
+                    events.push(UtwidEvent::AllegianceChanged(actor_clone, temp_allegiance));
                 } else {
                     *turns -= 1;
                 }
@@ -131,11 +171,13 @@ impl Action for UtwidAction {
 
         // Bring out yer dead!
         let mut dead_actor_ids: Vec<ActorId> = Vec::new();
+        let mut events: Vec<UtwidEvent> = Vec::new();
         for (actor_id, actor) in new_state
             .actors_iter()
             .filter(|(_, actor)| actor.traits.contains(ActorTraits::DEAD))
         {
             dead_actor_ids.push(actor_id);
+            events.push(UtwidEvent::Killed(actor.clone()));
         }
 
         // At least one 'you' needs to be there as not to lose
@@ -162,13 +204,13 @@ impl Action for UtwidAction {
             || new_state.game_state == GameState::Lost
             || new_state.game_state == GameState::Stalemate
         {
-            return new_state;
+            return (new_state, events);
         }
 
         // If the turn order is empty after removing dead actors, game is over.
         if new_state.turn_order.is_empty() {
             new_state.game_state = GameState::Lost; // Or Won, depending on game rules
-            return new_state;
+            return (new_state, events);
         }
 
         // --- Correct Turn Rotation ---
@@ -193,7 +235,7 @@ impl Action for UtwidAction {
         // If the turn order is now empty, the game is over.
         if new_state.turn_order.is_empty() {
             new_state.game_state = GameState::Lost;
-            return new_state;
+            return (new_state, events);
         }
 
         // The new actor to act is at the front of the updated queue,
@@ -204,9 +246,9 @@ impl Action for UtwidAction {
                 .is_some_and(|a| a.traits.contains(ActorTraits::HUMAN))
         {
             new_state.to_act = *new_state.turn_order.front().unwrap();
-            return new_state;
+            return (new_state, events);
         }
 
-        new_state
+        (new_state, events)
     }
 }

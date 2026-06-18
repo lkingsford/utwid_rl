@@ -10,7 +10,7 @@ impl UtwidAction {
         new_state
     }
 
-    pub(super) fn execute_conclusion(&self, state: &UtwidState) -> UtwidState {
+    pub(super) fn execute_conclusion(&self, state: &UtwidState) -> (UtwidState, Vec<UtwidEvent>) {
         log::trace!("execute_conclusion");
         let direction = match self {
             UtwidAction::Conclusion(direction) => *direction,
@@ -35,22 +35,22 @@ impl UtwidAction {
             (new_x, new_y) = apply_dir(new_x, new_y, direction);
             damage_bonus += 1;
         }
-        // This is ugly
         (new_x, new_y) = (last_x, last_y);
 
-        let mut new_state = self.move_to(state, new_x, new_y);
+        let (mut new_state, mut events) = self.move_to(state, new_x, new_y);
         new_state.temporary_damage_bonus = Some(damage_bonus);
-        //
-        // Attack at end too
+
         if new_state
             .board
             .board_permitted_moves(new_x, new_y, true, true, true)
             .contains(&direction)
         {
             (new_x, new_y) = apply_dir(new_x, new_y, direction);
-            self.move_to(&new_state, new_x, new_y)
+            let (final_state, more_events) = self.move_to(&new_state, new_x, new_y);
+            events.extend(more_events);
+            (final_state, events)
         } else {
-            new_state
+            (new_state, events)
         }
     }
 
@@ -161,7 +161,7 @@ impl UtwidAction {
         new_state
     }
 
-    pub(super) fn execute_contention(&self, state: &UtwidState) -> UtwidState {
+    pub(super) fn execute_contention(&self, state: &UtwidState) -> (UtwidState, Vec<UtwidEvent>) {
         log::trace!("execute_contention");
         let direction = match self {
             UtwidAction::Contention(direction) => *direction,
@@ -190,6 +190,11 @@ impl UtwidAction {
             _d += 1;
         }
 
+        let dest_x = (target_x - CONTENTION_R_WIDTH as isize)
+            .clamp(0, (BOARD_WIDTH - CONTENTION_NET_WIDTH) as isize) as usize;
+        let dest_y = (target_y - CONTENTION_R_WIDTH as isize)
+            .clamp(0, (BOARD_HEIGHT - CONTENTION_NET_WIDTH) as isize) as usize;
+
         // source is the area around the player
         // dest is the area being swapped with it
         let source_x = ((actor.x as isize) - CONTENTION_R_WIDTH as isize)
@@ -198,10 +203,6 @@ impl UtwidAction {
         let source_y = ((actor.y as isize) - CONTENTION_R_WIDTH as isize)
             .clamp(0, (BOARD_HEIGHT - CONTENTION_NET_WIDTH) as isize)
             as usize;
-        let dest_x = (target_x - CONTENTION_R_WIDTH as isize)
-            .clamp(0, (BOARD_WIDTH - CONTENTION_NET_WIDTH) as isize) as usize;
-        let dest_y = (target_y - CONTENTION_R_WIDTH as isize)
-            .clamp(0, (BOARD_HEIGHT - CONTENTION_NET_WIDTH) as isize) as usize;
 
         let source_geography: Vec<_> = (source_y..source_y + CONTENTION_NET_WIDTH)
             .flat_map(|y| {
@@ -233,27 +234,6 @@ impl UtwidAction {
                 tile.clone();
         }
 
-        /*
-            new_state.board.geography = (0..(new_state.board.width * new_state.board.height))
-                .map(|idx| {
-                    state.board.geography
-                        [(idx + idx_rotation) % (state.board.width * state.board.height)]
-                        .clone()
-                })
-                .collect();
-
-            for actor_to_move in new_state
-                .actors_iter_mut()
-                .filter(|actor_to_move| actor_to_move.0 != state.to_act)
-            {
-                let old_idx = actor.x + actor.y * state.board.width;
-                let new_idx = (old_idx + idx_rotation) % (state.board.width * state.board.height);
-                let actor = actor_to_move.1;
-                actor.x = new_idx % state.board.width;
-                actor.y = new_idx / state.board.width;
-            }
-        */
-
         let has_goal_tile = new_state.board.geography.iter().any(|tile| {
             tile.traits.contains(TileTraits::STAIRS) || tile.traits.contains(TileTraits::WIN)
         });
@@ -261,10 +241,13 @@ impl UtwidAction {
             new_state.game_state = GameState::Stalemate;
         }
 
-        new_state
+        (new_state, vec![UtwidEvent::Contention(dest_x, dest_y)])
     }
 
-    pub(super) fn execute_multiplication(&self, state: &UtwidState) -> UtwidState {
+    pub(super) fn execute_multiplication(
+        &self,
+        state: &UtwidState,
+    ) -> (UtwidState, Vec<UtwidEvent>) {
         log::trace!("execute_multiplication");
         let direction = match self {
             UtwidAction::Multiplication(direction) => *direction,
@@ -306,10 +289,16 @@ impl UtwidAction {
         mult_actor.assumed_turns = None;
         new_state.add_actor(mult_actor);
 
-        new_state
+        (
+            new_state,
+            vec![UtwidEvent::Multiplication(
+                target_x as usize,
+                target_y as usize,
+            )],
+        )
     }
 
-    pub(super) fn execute_assumption(&self, state: &UtwidState) -> UtwidState {
+    pub(super) fn execute_assumption(&self, state: &UtwidState) -> (UtwidState, Vec<UtwidEvent>) {
         log::trace!("execute_assumption");
         let direction = match self {
             UtwidAction::Assumption(direction) => *direction,
@@ -321,11 +310,16 @@ impl UtwidAction {
         let mut new_state = state.clone();
 
         if let Some(assumed_id) = assumed_actor_id {
-            if let Some(actor) = new_state.actor_mut(assumed_id) {
-                actor.assumed_turns = Some((ASSUMPTION_TURNS, Allegiance::You));
+            if let Some(assumed_actor) = new_state.actor(assumed_id).cloned() {
+                if let Some(actor) = new_state.actor_mut(assumed_id) {
+                    actor.assumed_turns = Some((ASSUMPTION_TURNS, Allegiance::You));
+                }
+                (new_state, vec![UtwidEvent::Assumed(assumed_actor)])
+            } else {
+                (new_state, vec![])
             }
+        } else {
+            (new_state, vec![])
         }
-
-        new_state
     }
 }

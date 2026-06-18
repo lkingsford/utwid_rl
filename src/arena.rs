@@ -79,14 +79,14 @@ fn run_episode<G: Game>(game: G, players: Vec<PlayerSettings>) -> Vec<f64> {
                     _ => todo!(),
                 };
                 log::debug!("Player {} plays {:?}", player, action);
-                state = action.execute(&state);
+                let (state, _events) = action.execute(&state);
             }
             Actor::GameAction(actions) => {
                 //TODO: Use a weighted random (because the second variable is supposed to be the weight)
                 let action = actions[rand::thread_rng().gen_range(0..actions.len())]
                     .0
                     .clone();
-                state = action.execute(&state);
+                let (state, _events) = action.execute(&state);
             }
         }
     }

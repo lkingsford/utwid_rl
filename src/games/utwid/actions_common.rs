@@ -5,7 +5,7 @@ use super::types::*;
 use super::*;
 
 impl UtwidAction {
-    pub(super) fn execute_move(&self, state: &UtwidState) -> UtwidState {
+    pub(super) fn execute_move(&self, state: &UtwidState) -> (UtwidState, Vec<UtwidEvent>) {
         log::trace!("execute_move");
         let direction = match self {
             UtwidAction::Move(direction) => *direction,
@@ -17,12 +17,17 @@ impl UtwidAction {
         self.move_to(state, new_x, new_y)
     }
 
-    pub(super) fn move_to(&self, state: &UtwidState, new_x: usize, new_y: usize) -> UtwidState {
+    pub(super) fn move_to(
+        &self,
+        state: &UtwidState,
+        new_x: usize,
+        new_y: usize,
+    ) -> (UtwidState, Vec<UtwidEvent>) {
         log::trace!("move_to");
         let mut new_state = state.clone();
+        let mut events: Vec<UtwidEvent> = vec![];
         let actor_id = new_state.to_act;
 
-        // --- Attack ---
         let damage = {
             let actor = new_state.actor(actor_id).unwrap();
             actor.attack_damage.unwrap_or(0) as isize * -1
@@ -32,10 +37,8 @@ impl UtwidAction {
         for (_, actor) in new_state.actors_iter_mut().filter(|(_, actor)| {
             !actor.traits.contains(ActorTraits::DEAD) && actor.x == new_x && actor.y == new_y
         }) {
+            events.push(UtwidEvent::DamageTaken(actor.clone(), damage));
             actor.modify_health(damage);
-            //
-            // Specific special case for the 'mutiplication' to make sure you human control a character
-            // again if you die and there's a clone around
             if actor.traits.contains(ActorTraits::DEAD) && actor.traits.contains(ActorTraits::HUMAN)
             {
                 human_died = true;
@@ -56,8 +59,6 @@ impl UtwidAction {
         if tile.health.is_some() {
             tile.modify_health(damage);
         }
-
-        // --- And the rest ---
 
         if new_state
             .actors_iter()
@@ -81,14 +82,14 @@ impl UtwidAction {
         if actor_ref.actor_type == ACTOR_TYPE_YOU {
             let tile = new_state.board.get(actor_ref.x, actor_ref.y);
             if tile.traits.contains(TileTraits::STAIRS) {
-                self.execute_stairs(actor_ref, &new_state)
+                (self.execute_stairs(actor_ref, &new_state), events)
             } else if tile.traits.contains(TileTraits::WIN) {
-                self.execute_win(&new_state)
+                (self.execute_win(&new_state), events)
             } else {
-                new_state
+                (new_state, events)
             }
         } else {
-            new_state
+            (new_state, events)
         }
     }
 
@@ -107,7 +108,7 @@ impl UtwidAction {
         you.x = 1;
         you.y = 3;
         you.traits.remove(ActorTraits::DEAD);
-        you.traits.insert(ActorTraits::HUMAN); // Possible a multiplication clone went down the stairs
+        you.traits.insert(ActorTraits::HUMAN);
         new_state.actors = vec![Some(you)];
         new_state.turn_order = VecDeque::from([0]);
         new_state.to_act = 0;
