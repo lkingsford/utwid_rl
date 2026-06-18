@@ -57,6 +57,9 @@ pub enum UtwidEvent {
     Contention(usize, usize),
     DamageTaken(GameActor, isize),
     Multiplication(usize, usize),
+    Won,
+    Lost,
+    Stalemate,
 }
 
 const AI_TURN_WEIGHT: f64 = 1.0 / 1000.0;
@@ -185,6 +188,7 @@ impl Action for UtwidAction {
             actor.actor_type == ACTOR_TYPE_YOU && !actor.traits.contains(ActorTraits::DEAD)
         }) {
             new_state.game_state = GameState::Lost;
+            events.push(UtwidEvent::Lost);
         }
 
         // Remove dead actors from the actors map
@@ -210,6 +214,7 @@ impl Action for UtwidAction {
         // If the turn order is empty after removing dead actors, game is over.
         if new_state.turn_order.is_empty() {
             new_state.game_state = GameState::Lost; // Or Won, depending on game rules
+            events.push(UtwidEvent::Lost);
             return (new_state, events);
         }
 
@@ -235,6 +240,7 @@ impl Action for UtwidAction {
         // If the turn order is now empty, the game is over.
         if new_state.turn_order.is_empty() {
             new_state.game_state = GameState::Lost;
+            events.push(UtwidEvent::Lost);
             return (new_state, events);
         }
 

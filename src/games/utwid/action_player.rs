@@ -234,14 +234,17 @@ impl UtwidAction {
                 tile.clone();
         }
 
+        let mut contention_events = vec![UtwidEvent::Contention(dest_x, dest_y)];
+
         let has_goal_tile = new_state.board.geography.iter().any(|tile| {
             tile.traits.contains(TileTraits::STAIRS) || tile.traits.contains(TileTraits::WIN)
         });
         if !has_goal_tile {
             new_state.game_state = GameState::Stalemate;
+            contention_events.push(UtwidEvent::Stalemate);
         }
 
-        (new_state, vec![UtwidEvent::Contention(dest_x, dest_y)])
+        (new_state, contention_events)
     }
 
     pub(super) fn execute_multiplication(

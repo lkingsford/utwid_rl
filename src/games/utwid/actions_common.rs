@@ -84,7 +84,9 @@ impl UtwidAction {
             if tile.traits.contains(TileTraits::STAIRS) {
                 (self.execute_stairs(actor_ref, &new_state), events)
             } else if tile.traits.contains(TileTraits::WIN) {
-                (self.execute_win(&new_state), events)
+                let (win_state, mut win_events) = self.execute_win(&new_state);
+                events.append(&mut win_events);
+                (win_state, events)
             } else {
                 (new_state, events)
             }
@@ -122,10 +124,10 @@ impl UtwidAction {
         new_state
     }
 
-    pub(super) fn execute_win(&self, state: &UtwidState) -> UtwidState {
+    pub(super) fn execute_win(&self, state: &UtwidState) -> (UtwidState, Vec<UtwidEvent>) {
         log::trace!("execute_win");
         let mut new_state = state.clone();
         new_state.game_state = GameState::Won;
-        new_state
+        (new_state, vec![UtwidEvent::Won])
     }
 }

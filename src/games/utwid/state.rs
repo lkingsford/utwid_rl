@@ -506,8 +506,8 @@ impl State for UtwidState {
                 rewards[MON2Y_ID] = -1.0;
             }
             GameState::Stalemate => {
-                rewards[YOU_ID] = -0.5;
-                rewards[MON2Y_ID] = -0.5;
+                rewards[YOU_ID] = -1.0;
+                rewards[MON2Y_ID] = -1.0;
             }
             _ => { /* rewards are already 0.0 */ }
         };
