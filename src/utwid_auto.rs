@@ -1,5 +1,7 @@
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use chrono::Local;
+use clap::Parser;
 use crossterm::{
     ExecutableCommand,
     cursor::MoveTo,
@@ -352,6 +354,8 @@ struct Args {
     difficulty_mod_set: Vec<f32>,
     #[arg(long, default_value_t = false)]
     random: bool,
+    #[arg(short = 'c', long, default_value_t = 0.3)]
+    exploration_constant: f64,
     #[arg(
         long,
         value_delimiter = ',',
@@ -728,7 +732,7 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
                 entry.wins += 1;
             }
             entry.total_games += 1;
-            append_exploration_log(config.difficulty_mod, config.iterations, config.exploration_constant, win)?;
+            append_exploration_log(config.iterations, config.difficulty_mod, config.exploration_constant, win)?;
 
             if !args.plain_mode {
                 draw_exploration_status(stdout, &stats)?;
