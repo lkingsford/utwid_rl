@@ -28,7 +28,7 @@ pub struct UtwidState {
     pub ai_turns: usize,
     pub spawn_rng: SmallRng,
     pub actor_id_counter: ActorId,
-    pub reward_progress: Option<Vec<f64>>;
+    pub reward_progress: Option<Vec<f64>>,
 }
 
 bitflags! {
@@ -60,8 +60,8 @@ impl UtwidState {
             actor_id_counter: 1,
             witnessed_you_actions: WitnessedYouActions::empty(),
             prescription_turns: None,
-            temporary_damage_bonus: None, 
-            reward_progress = None,
+            temporary_damage_bonus: None,
+            reward_progress: None,
         }
     }
 
@@ -352,6 +352,17 @@ impl UtwidState {
             })
             .collect()
     }
+
+    pub(crate) fn accumulate_reward(&mut self) {
+        if self.reward_progress.is_none() {
+            self.reward_progress = Some(vec![0.0; self.reward_actor_count()]);
+        }
+        let ai_turn_weight = (0.5 as f64).powf(self.ai_turns as f64 / AI_TURN_WEIGHT) / 2.0;
+        let player_reward = (self.player_health_ratio().powf(2.0)) * ai_turn_weight;
+        let rewards = self.reward_progress.as_mut().unwrap();
+        rewards[YOU_ID] += player_reward;
+        rewards[MON2Y_ID] -= player_reward;
+    }
 }
 
 impl State for UtwidState {
@@ -495,16 +506,14 @@ impl State for UtwidState {
     }
 
     fn reward(&self) -> Vec<Reward> {
-        if self.reward_progress.is_none() {
-            // Not very rusty, is it?
-            self.reward_progress = Some(vec![0.0; self.reward_actor_count()]);
-        }
-        let ai_turn_weight = (0.5 as f64).powf(self.ai_turns as f64 / AI_TURN_WEIGHT) / 2.0;
-        // 2.0 is the highest theoretical value - so - this should always be weighted the same as
-        //   the actual win/loss
-        let mut rewards = self.reward_progress.unwrap();
+        let mut rewards = self.reward_progress.clone().unwrap_or_else(|| vec![0.0; self.reward_actor_count()]);
 
         match self.game_state {
+            GameState::Checkpoint => {
+                let player_health_ratio = self.player_health_ratio();
+                rewards[YOU_ID] = player_health_ratio;
+                rewards[MON2Y_ID] = -player_health_ratio;
+            }
             GameState::Mon2yShortcircuit => {
                 for (_, actor) in self.actors_iter() {
                     if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize)
@@ -513,7 +522,7 @@ impl State for UtwidState {
                     }
                 }
                 rewards[YOU_ID] +=
-                    (0.5 + self.current_level as f64 / 20.0) * ai_turn_weight;
+                    (0.5 + self.current_level as f64 / 20.0) * (0.5 as f64).powf(self.ai_turns as f64 / AI_TURN_WEIGHT) / 2.0;
             }
             GameState::Lost => {
                 rewards[YOU_ID] = -1.0;
@@ -527,13 +536,9 @@ impl State for UtwidState {
                 rewards[YOU_ID] = -0.25;
                 rewards[MON2Y_ID] = -0.25;
             }
-            _ => { 
-                let player_reward: f64 = (self.player_health_ratio().powf(2.0)) * ai_turn_weight;
-                rewards[YOU_ID] = player_reward;
-                rewards[MON2Y_ID] = -player_reward;
-            }
+            _ => {}
         };
-        self.reward_progress.unwrap().clone()
+        rewards
     }
 
     fn round_hyperreward(&self) -> Self::GameHyperrewardType {

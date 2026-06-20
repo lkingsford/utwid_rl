@@ -157,6 +157,8 @@ impl Action for UtwidAction {
             new_state.game_state = GameState::Ongoing;
         }
 
+        new_state.accumulate_reward();
+
         // Decrement assumed_turns on the actor who just acted
         if let Some(actor) = new_state.actor_mut(state.to_act) {
             if let Some((ref mut turns, temp_allegiance)) = actor.assumed_turns {
