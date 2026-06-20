@@ -62,8 +62,6 @@ pub enum UtwidEvent {
     Stalemate,
 }
 
-const AI_TURN_WEIGHT: f64 = 1.0 / 1000.0;
-
 impl Action for UtwidAction {
     type StateType = UtwidState;
     type EventType = UtwidEvent;
@@ -133,19 +131,19 @@ impl Action for UtwidAction {
 
                 if (new_state.turn_number % 9) == 0 {
                     let spawn = new_state.suggest_spawn();
-                    //new_state.add_actor(GameActor::are_actor(spawn.0, spawn.1));
+                    new_state.add_actor(GameActor::are_actor(spawn.0, spawn.1));
                 }
                 if (new_state.turn_number % 13) == 0 {
                     let spawn = new_state.suggest_spawn();
-                    //new_state.add_actor(GameActor::them_actor(spawn.0, spawn.1));
+                    new_state.add_actor(GameActor::them_actor(spawn.0, spawn.1));
                 }
                 if (new_state.turn_number % 5) == 0 {
                     let spawn = new_state.suggest_spawn();
-                    //new_state.add_actor(GameActor::one_actor(spawn.0, spawn.1));
+                    new_state.add_actor(GameActor::one_actor(spawn.0, spawn.1));
                 }
             }
 
-            new_state.ai_turn_weight += AI_TURN_WEIGHT;
+            new_state.ai_turns += 1;
             if let Some(short_circuit_turns_remaining) = new_state.short_circuit_at_turns {
                 new_state.short_circuit_at_turns = Some(short_circuit_turns_remaining - 1);
                 if short_circuit_turns_remaining == 1 {

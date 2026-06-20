@@ -25,9 +25,10 @@ pub struct UtwidState {
     pub prescription_turns: Option<usize>,
     pub temporary_damage_bonus: Option<usize>,
 
-    pub ai_turn_weight: f64,
+    pub ai_turns: usize,
     pub spawn_rng: SmallRng,
     pub actor_id_counter: ActorId,
+    pub reward_progress: Option<Vec<f64>>;
 }
 
 bitflags! {
@@ -35,6 +36,8 @@ bitflags! {
     pub struct WitnessedYouActions: u8 {
     }
 }
+
+const AI_TURN_WEIGHT: f64 = 0.2;
 
 impl UtwidState {
     pub fn new() -> UtwidState {
@@ -52,12 +55,13 @@ impl UtwidState {
             turn_order: VecDeque::from(vec![0]),
             short_circuit_at_turns: None,
             short_circuit_at_turns_increment: None,
-            ai_turn_weight: 0.0,
+            ai_turns: 0,
             spawn_rng,
             actor_id_counter: 1,
             witnessed_you_actions: WitnessedYouActions::empty(),
             prescription_turns: None,
-            temporary_damage_bonus: None,
+            temporary_damage_bonus: None, 
+            reward_progress = None,
         }
     }
 
@@ -373,6 +377,7 @@ impl State for UtwidState {
         );
 
         let is_you = next_actor.actor_type == ACTOR_TYPE_YOU;
+        let cost_suicide_protected = next_actor.effective_allegiance() == next_actor.allegiance;
 
         let mut permitted_actions: Vec<_> = board_permitted_moves
             .iter()
@@ -439,6 +444,17 @@ impl State for UtwidState {
             permitted_actions.extend(assumption_moves);
         }
 
+        let permitted_actions = if cost_suicide_protected {
+            let hp = next_actor.health.unwrap();
+            permitted_actions   
+                .iter()
+                .filter(|&action| action_cost(action.clone()) < hp)
+                .cloned()
+                .collect()
+        } else {
+            permitted_actions
+        };
+
         if permitted_actions.is_empty() {
             let permitted_actions = vec![UtwidAction::Wait];
             log::trace!(
@@ -479,14 +495,16 @@ impl State for UtwidState {
     }
 
     fn reward(&self) -> Vec<Reward> {
-        let mut rewards = vec![0.0; self.reward_actor_count()];
+        if self.reward_progress.is_none() {
+            // Not very rusty, is it?
+            self.reward_progress = Some(vec![0.0; self.reward_actor_count()]);
+        }
+        let ai_turn_weight = (0.5 as f64).powf(self.ai_turns as f64 / AI_TURN_WEIGHT) / 2.0;
+        // 2.0 is the highest theoretical value - so - this should always be weighted the same as
+        //   the actual win/loss
+        let mut rewards = self.reward_progress.unwrap();
 
         match self.game_state {
-            GameState::Checkpoint => {
-                let player_health_ratio = self.player_health_ratio();
-                rewards[YOU_ID] = player_health_ratio;
-                rewards[MON2Y_ID] = -player_health_ratio;
-            }
             GameState::Mon2yShortcircuit => {
                 for (_, actor) in self.actors_iter() {
                     if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize)
@@ -494,8 +512,8 @@ impl State for UtwidState {
                         rewards[tree_id] = -0.5;
                     }
                 }
-                rewards[YOU_ID] =
-                    (0.5 + self.current_level as f64 / 20.0) * (1.0 - self.ai_turn_weight);
+                rewards[YOU_ID] +=
+                    (0.5 + self.current_level as f64 / 20.0) * ai_turn_weight;
             }
             GameState::Lost => {
                 rewards[YOU_ID] = -1.0;
@@ -509,15 +527,13 @@ impl State for UtwidState {
                 rewards[YOU_ID] = -0.25;
                 rewards[MON2Y_ID] = -0.25;
             }
-            _ => { /* rewards are already 0.0 */ }
+            _ => { 
+                let player_reward: f64 = (self.player_health_ratio().powf(2.0)) * ai_turn_weight;
+                rewards[YOU_ID] = player_reward;
+                rewards[MON2Y_ID] = -player_reward;
+            }
         };
-        log::trace!(
-            "Game State: {:?}, AI Weight: {}, Reward {:?}",
-            self.game_state,
-            self.ai_turn_weight,
-            rewards
-        );
-        rewards
+        self.reward_progress.unwrap().clone()
     }
 
     fn round_hyperreward(&self) -> Self::GameHyperrewardType {

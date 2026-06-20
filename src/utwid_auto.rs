@@ -595,7 +595,7 @@ fn run_game(
                 let mut ai_marked_state = state.clone();
                 ai_marked_state.short_circuit_at_turns = Some(SHORT_CIRCUIT_AT_TURNS);
                 ai_marked_state.short_circuit_at_turns_increment = Some(short_circuit_increment);
-                ai_marked_state.ai_turn_weight = 0.0;
+                ai_marked_state.ai_turns = 0;
                 let (best_turn_from_calculate, tree_from_calculate) = calculate_best_turn(
                     mcts_iterations,
                     None,
@@ -649,7 +649,7 @@ fn run_game(
         if matches!(state.game_state, GameState::Mon2yShortcircuit) {
             state.game_state = GameState::Ongoing;
         };
-        state.ai_turn_weight = 0.0;
+        state.ai_turns = 0;
     }
 
     // Last time game end redraw
