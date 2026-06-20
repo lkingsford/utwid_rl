@@ -518,25 +518,25 @@ impl State for UtwidState {
         match self.game_state {
             GameState::Checkpoint => {
                 let player_health_ratio = self.player_health_ratio();
-                rewards[YOU_ID] = player_health_ratio;
-                rewards[MON2Y_ID] = -player_health_ratio;
+                rewards[YOU_ID] += player_health_ratio;
+                rewards[MON2Y_ID] += -player_health_ratio;
             }
             GameState::Mon2yShortcircuit => {
                 let reward = 0.7 * (self.current_level as f64 / board::LEVEL_COUNT as f64);
-                rewards[YOU_ID] = reward;
-                rewards[MON2Y_ID] = -reward;
+                rewards[YOU_ID] += reward;
+                rewards[MON2Y_ID] += -reward;
             }
             GameState::Lost => {
-                rewards[YOU_ID] = -1.0;
-                rewards[MON2Y_ID] = 1.0;
+                rewards[YOU_ID] += -1.0;
+                rewards[MON2Y_ID] += 1.0;
             }
             GameState::Won => {
-                rewards[YOU_ID] = 1.0;
-                rewards[MON2Y_ID] = -1.0;
+                rewards[YOU_ID] += 1.0;
+                rewards[MON2Y_ID] += -1.0;
             }
             GameState::Stalemate => {
-                rewards[YOU_ID] = -0.25;
-                rewards[MON2Y_ID] = -0.25;
+                rewards[YOU_ID] += -0.25;
+                rewards[MON2Y_ID] += -0.25;
             }
             _ => {}
         };
