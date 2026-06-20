@@ -4,6 +4,8 @@ use rand::{prelude::*, rngs::SmallRng};
 use super::types::*;
 use super::*;
 
+pub const LEVEL_COUNT: usize = 9;
+
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct TileTraits: u8 {
@@ -279,7 +281,7 @@ impl Board {
         }
 
         let stair_repr_set = geography[stair_idx].repr_set;
-        geography[stair_idx] = if _level < 9 {
+        geography[stair_idx] = if _level < LEVEL_COUNT {
             Tile::stair()
         } else {
             Tile::win()

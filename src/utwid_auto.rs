@@ -292,7 +292,7 @@ const HUMAN_ITERATIONS: usize = 3000;
 const ITERATIONS_STEPS: usize = 10;
 const THREADS: usize = 6;
 const EXPLORATION_CONSTANT: f64 = 1.4142135623730951; // sqrt(2.0)
-const SHORT_CIRCUIT_AT_TURNS: usize = 200;
+const SHORT_CIRCUIT_AT_TURNS: usize = 100;
 const SHORT_CIRCUIT_INCREMENT: usize = 100;
 
 const DRAW_BOARD_X: u16 = 3;

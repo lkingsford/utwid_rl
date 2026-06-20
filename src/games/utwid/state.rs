@@ -38,6 +38,8 @@ bitflags! {
 }
 
 const AI_TURN_WEIGHT: f64 = 0.2;
+const AI_TURN_LEVEL_WEIGHT: f64 = 0.4;
+const AI_TURN_HEALTH_WEIGHT: f64 = 0.6;
 
 impl UtwidState {
     pub fn new() -> UtwidState {
@@ -358,7 +360,9 @@ impl UtwidState {
             self.reward_progress = Some(vec![0.0; self.reward_actor_count()]);
         }
         let ai_turn_weight = (0.5 as f64).powf(self.ai_turns as f64 / AI_TURN_WEIGHT) / 2.0;
-        let player_reward = (self.player_health_ratio().powf(2.0)) * ai_turn_weight;
+        let player_reward = ((self.player_health_ratio().powf(2.0)) * AI_TURN_HEALTH_WEIGHT
+            + (self.current_level as f64 / board::LEVEL_COUNT as f64) * AI_TURN_LEVEL_WEIGHT)
+            * ai_turn_weight;
         let rewards = self.reward_progress.as_mut().unwrap();
         rewards[YOU_ID] += player_reward;
         rewards[MON2Y_ID] -= player_reward;
@@ -457,7 +461,7 @@ impl State for UtwidState {
 
         let permitted_actions = if cost_suicide_protected {
             let hp = next_actor.health.unwrap();
-            permitted_actions   
+            permitted_actions
                 .iter()
                 .filter(|&action| action_cost(action.clone()) < hp)
                 .cloned()
@@ -506,7 +510,10 @@ impl State for UtwidState {
     }
 
     fn reward(&self) -> Vec<Reward> {
-        let mut rewards = self.reward_progress.clone().unwrap_or_else(|| vec![0.0; self.reward_actor_count()]);
+        let mut rewards = self
+            .reward_progress
+            .clone()
+            .unwrap_or_else(|| vec![0.0; self.reward_actor_count()]);
 
         match self.game_state {
             GameState::Checkpoint => {
@@ -515,14 +522,9 @@ impl State for UtwidState {
                 rewards[MON2Y_ID] = -player_health_ratio;
             }
             GameState::Mon2yShortcircuit => {
-                for (_, actor) in self.actors_iter() {
-                    if let Some(tree_id) = actor.mon2y.as_ref().map(|mon2y| mon2y.tree_id as usize)
-                    {
-                        rewards[tree_id] = -0.5;
-                    }
-                }
-                rewards[YOU_ID] +=
-                    (0.5 + self.current_level as f64 / 20.0) * (0.5 as f64).powf(self.ai_turns as f64 / AI_TURN_WEIGHT) / 2.0;
+                let reward = 0.7 * (self.current_level as f64 / board::LEVEL_COUNT as f64);
+                rewards[YOU_ID] = reward;
+                rewards[MON2Y_ID] = -reward;
             }
             GameState::Lost => {
                 rewards[YOU_ID] = -1.0;

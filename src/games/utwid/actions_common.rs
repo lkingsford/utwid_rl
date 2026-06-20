@@ -103,7 +103,7 @@ impl UtwidAction {
         log::trace!("execute_stairs");
         let mut new_state = state.clone();
         new_state.current_level = state.current_level + 1;
-        new_state.game_state = GameState::Checkpoint;
+        // new_state.game_state = GameState::Checkpoint;
         let mut board_rng = state.board.rng.clone();
         new_state.board = Board::new(new_state.current_level, &mut board_rng);
         let mut you = acting_character.clone();
