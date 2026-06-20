@@ -1,5 +1,5 @@
-use chrono::Local;
-use clap::Parser;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use crossterm::{
     ExecutableCommand,
     cursor::MoveTo,
@@ -290,7 +290,7 @@ const EXPLORATION_STATUS_LINE_Y: u16 = 18;
 
 const HUMAN_ITERATIONS: usize = 3000;
 const ITERATIONS_STEPS: usize = 10;
-const THREADS: usize = 6;
+const THREADS: usize = 8;
 const EXPLORATION_CONSTANT: f64 = 0.3;
 const SHORT_CIRCUIT_AT_TURNS: usize = 100;
 const SHORT_CIRCUIT_INCREMENT: usize = 100;
@@ -340,7 +340,7 @@ struct Args {
         long,
         value_delimiter = ',',
         num_args = 1..,
-        default_values_t = [250usize, 500, 1000, 2000]
+        default_values_t = [250usize, 500, 1000, 2000, 10000, 20000, 50000]
     )]
     iteration_set: Vec<usize>,
     #[arg(
@@ -350,6 +350,15 @@ struct Args {
         default_values_t = [0.1f32, 0.2, 0.5, 1.0, 2.0]
     )]
     difficulty_mod_set: Vec<f32>,
+    #[arg(long, default_value_t = false)]
+    random: bool,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 1..,
+        default_values_t = [0.05, 0.1, 0.3, 0.6, 1.0, 1.4142135623730951, 2.0]
+    )]
+    exploration_constant_set: Vec<f64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -359,6 +368,7 @@ struct GameRunConfig {
     very_human: bool,
     difficulty_mod: f32,
     iterations: usize,
+    exploration_constant: f64,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -367,8 +377,8 @@ struct ExplorationResult {
     total_games: usize,
 }
 
-fn format_exploration_key(difficulty_mod: f32, iterations: usize) -> String {
-    format!("{difficulty_mod}x{iterations}i")
+fn format_exploration_key(difficulty_mod: f32, iterations: usize, exploration_constant: f64) -> String {
+    format!("{difficulty_mod}x{iterations}i_c{exploration_constant}")
 }
 
 fn draw_exploration_status(
@@ -397,6 +407,7 @@ fn draw_exploration_status(
 fn append_exploration_log(
     iterations: usize,
     difficulty_mod: f32,
+    exploration_constant: f64,
     win: bool,
 ) -> std::io::Result<()> {
     let mut log_file = OpenOptions::new()
@@ -405,10 +416,11 @@ fn append_exploration_log(
         .open("exploration_log.log")?;
     writeln!(
         log_file,
-        "{}, iterations={}, difficulty_mod={}, win={}",
+        "{}, iterations={}, difficulty_mod={}, exploration_constant={}, win={}",
         Local::now().to_rfc3339(),
         iterations,
         difficulty_mod,
+        exploration_constant,
         win
     )?;
     Ok(())
@@ -602,7 +614,7 @@ fn run_game(
                     THREADS,
                     ai_marked_state,
                     BestTurnPolicy::Ucb0,
-                    EXPLORATION_CONSTANT,
+                    config.exploration_constant,
                     false,
                     tree,
                 );
@@ -666,13 +678,29 @@ fn run_game(
 
 fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
     let mut stats: BTreeMap<String, ExplorationResult> = BTreeMap::new();
+    let mut configs: Vec<GameRunConfig> = Vec::new();
     for difficulty_mod in &args.difficulty_mod_set {
         for iterations in &args.iteration_set {
-            stats.insert(
-                format_exploration_key(*difficulty_mod, *iterations),
-                ExplorationResult::default(),
-            );
+            for exploration_constant in &args.exploration_constant_set {
+                let config = GameRunConfig {
+                    plain_mode: args.plain_mode,
+                    human: false,
+                    very_human: false,
+                    difficulty_mod: *difficulty_mod,
+                    iterations: *iterations,
+                    exploration_constant: *exploration_constant,
+                };
+                stats.insert(
+                    format_exploration_key(*difficulty_mod, *iterations, *exploration_constant),
+                    ExplorationResult::default(),
+                );
+                configs.push(config);
+            }
         }
+    }
+
+    if args.random {
+        configs.shuffle(&mut thread_rng());
     }
 
     if !args.plain_mode {
@@ -681,39 +709,35 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
     }
 
     loop {
-        for difficulty_mod in &args.difficulty_mod_set {
-            for iterations in &args.iteration_set {
-                let label = format_exploration_key(*difficulty_mod, *iterations);
-                let game_result = run_game(
-                    stdout,
-                    GameRunConfig {
-                        plain_mode: args.plain_mode,
-                        human: false,
-                        very_human: false,
-                        difficulty_mod: *difficulty_mod,
-                        iterations: *iterations,
-                    },
-                    Some(&stats),
-                )?;
+        for config in &configs {
+            let label = format_exploration_key(
+                config.difficulty_mod,
+                config.iterations,
+                config.exploration_constant,
+            );
+            let game_result = run_game(stdout, *config, Some(&stats))?;
 
-                let Some(game_state) = game_result else {
-                    return Ok(());
-                };
-                let win = matches!(game_state, GameState::Won);
-                let entry = stats
-                    .get_mut(&label)
-                    .expect("exploration entry should exist");
-                if win {
-                    entry.wins += 1;
-                }
-                entry.total_games += 1;
-                append_exploration_log(*iterations, *difficulty_mod, win)?;
-
-                if !args.plain_mode {
-                    draw_exploration_status(stdout, &stats)?;
-                    stdout.flush()?;
-                }
+            let Some(game_state) = game_result else {
+                return Ok(());
+            };
+            let win = matches!(game_state, GameState::Won);
+            let entry = stats
+                .get_mut(&label)
+                .expect("exploration entry should exist");
+            if win {
+                entry.wins += 1;
             }
+            entry.total_games += 1;
+            append_exploration_log(config.difficulty_mod, config.iterations, config.exploration_constant, win)?;
+
+            if !args.plain_mode {
+                draw_exploration_status(stdout, &stats)?;
+                stdout.flush()?;
+            }
+        }
+
+        if args.random {
+            configs.shuffle(&mut thread_rng());
         }
 
         if !args.plain_mode && poll_for_exit()? {
@@ -733,6 +757,12 @@ fn validate_args(args: &Args) {
         assert!(
             *difficulty_mod > 0.0 && difficulty_mod.is_finite(),
             "--difficulty-mod-set values must be positive finite floats"
+        );
+    }
+    for exploration_constant in &args.exploration_constant_set {
+        assert!(
+            *exploration_constant > 0.0 && exploration_constant.is_finite(),
+            "--exploration-constant-set values must be positive finite floats"
         );
     }
 }
@@ -775,6 +805,7 @@ fn main() -> std::io::Result<()> {
             very_human: args.very_human,
             difficulty_mod: args.difficulty_mod,
             iterations: args.iterations,
+            exploration_constant: args.exploration_constant,
         },
         None,
     )? {
