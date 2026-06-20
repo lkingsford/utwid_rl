@@ -142,14 +142,29 @@ where
                 _ => panic!("Root should be parent"),
             };
             picks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-            log::debug!("Action, UCB0: {:?}", picks);
-            (picks[0].0.clone(), Some(tree))
+            log::info!("Action, UCB0: {:?}", picks);
+            let picked_action = picks[0].0.clone();
+            let picked_value = picks[0].1;
+            let total_playouts = node.visit_count();
+            let picked_visits = {
+                let child_arc = node.get_child(&picked_action);
+                let child = child_arc.read().unwrap();
+                child.visit_count()
+            };
+            log::debug!(
+                "UCB0 picked {:?} value={} playouts={} picked_visits={}",
+                picked_action,
+                picked_value,
+                total_playouts,
+                picked_visits,
+            );
+            (picked_action, Some(tree))
         }
 
         BestTurnPolicy::MostVisits => {
             let root = root_ref.read().unwrap();
             if let Node::Expanded { children, .. } = &*root {
-                log::debug!(
+                log::info!(
                     "Action, Visits, Value: {:?}",
                     children
                         .iter()

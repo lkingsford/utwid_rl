@@ -24,7 +24,8 @@ use mon2y::mcts::{BestTurnPolicy, calculate_best_turn};
 use mon2y::{games::utwid::ReprSet, mcts::game_trait::Action};
 use mon2y::{
     games::utwid::{
-        ActorTraits, Allegiance, Dir, GameState, Repr, UtwidAction, UtwidEvent, UtwidState,
+        ActorTraits, Allegiance, Dir, GameActor, GameState, Repr, UtwidAction, UtwidEvent,
+        UtwidState,
     },
     mcts::mcts::run_mcts_iterations,
 };
@@ -197,7 +198,13 @@ fn draw_log(stdout: &mut Stdout, action_log: &[LogEntry]) -> std::io::Result<()>
             stdout,
             MoveTo(0, DRAW_LOG_Y + i as u16),
             Print(match entry {
-                LogEntry::Action(action) => format!("{:?}", action),
+                LogEntry::Action(entry) => format!(
+                    "{} ({},{}) {:?}",
+                    entry.actor.repr().map(repr_to_char).unwrap_or('?'),
+                    entry.actor.x,
+                    entry.actor.y,
+                    entry.action,
+                ),
                 LogEntry::Event(event) => format!("{:?}", event),
             }),
         )?;
@@ -445,8 +452,13 @@ fn sample_actions(stdout: &mut Stdout, state: &UtwidState, iterations: usize) {
     stdout.flush();
 }
 
+struct ActionEntry {
+    action: UtwidAction,
+    actor: GameActor,
+}
+
 enum LogEntry {
-    Action(UtwidAction),
+    Action(ActionEntry),
     Event(UtwidEvent),
 }
 
@@ -596,6 +608,11 @@ fn run_game(
                 );
                 tree = tree_from_calculate;
                 best_turn = Some(best_turn_from_calculate);
+                log::debug!(
+                    "calculate_best_turn iteration {} result: {:?}",
+                    completed_iterations,
+                    best_turn_from_calculate,
+                );
                 completed_iterations += iterations_step;
                 if !config.plain_mode {
                     draw_status_mcts(stdout, completed_iterations, mcts_iterations)?;
@@ -610,9 +627,19 @@ fn run_game(
             }
             best_turn.unwrap()
         };
+        log::debug!("Running action: {:?}", next_act);
+        let acting_actor = state
+            .actors
+            .get(state.to_act)
+            .and_then(|actor| actor.as_ref())
+            .unwrap()
+            .clone();
         let (new_state, events) = next_act.execute(&state);
         state = new_state;
-        action_log.push(LogEntry::Action(next_act.clone()));
+        action_log.push(LogEntry::Action(ActionEntry {
+            action: next_act.clone(),
+            actor: acting_actor,
+        }));
         for event in events {
             action_log.push(LogEntry::Event(event));
         }
@@ -623,6 +650,15 @@ fn run_game(
             state.game_state = GameState::Ongoing;
         };
         state.ai_turn_weight = 0.0;
+    }
+
+    // Last time game end redraw
+    if !config.plain_mode {
+        draw_board(stdout, state.clone())?;
+        draw_monsters(stdout, &state)?;
+        draw_status(stdout, &state)?;
+        draw_log(stdout, &action_log)?;
+        stdout.flush()?;
     }
 
     Ok(Some(state.game_state))

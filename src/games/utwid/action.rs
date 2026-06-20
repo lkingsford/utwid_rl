@@ -133,15 +133,15 @@ impl Action for UtwidAction {
 
                 if (new_state.turn_number % 9) == 0 {
                     let spawn = new_state.suggest_spawn();
-                    new_state.add_actor(GameActor::are_actor(spawn.0, spawn.1));
+                    //new_state.add_actor(GameActor::are_actor(spawn.0, spawn.1));
                 }
                 if (new_state.turn_number % 13) == 0 {
                     let spawn = new_state.suggest_spawn();
-                    new_state.add_actor(GameActor::them_actor(spawn.0, spawn.1));
+                    //new_state.add_actor(GameActor::them_actor(spawn.0, spawn.1));
                 }
                 if (new_state.turn_number % 5) == 0 {
                     let spawn = new_state.suggest_spawn();
-                    new_state.add_actor(GameActor::one_actor(spawn.0, spawn.1));
+                    //new_state.add_actor(GameActor::one_actor(spawn.0, spawn.1));
                 }
             }
 
@@ -174,7 +174,6 @@ impl Action for UtwidAction {
 
         // Bring out yer dead!
         let mut dead_actor_ids: Vec<ActorId> = Vec::new();
-        let mut events: Vec<UtwidEvent> = Vec::new();
         for (actor_id, actor) in new_state
             .actors_iter()
             .filter(|(_, actor)| actor.traits.contains(ActorTraits::DEAD))
