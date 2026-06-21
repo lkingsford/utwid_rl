@@ -22,8 +22,11 @@ pub fn run_mcts_iterations<
 
     let finished_iterations: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
 
+    let original_snapshot = tree.root.read().unwrap().deep_clone(None);
+
     for _ in 0..thread_count {
-        let tree_clone: Arc<Tree<StateType, ActionType>> = Arc::clone(&tree);
+        let mut thread_tree = tree.deep_clone(None);
+        thread_tree.root.write().unwrap().reset_visits();
         let finished_iterations_clone: Arc<AtomicUsize> = Arc::clone(&finished_iterations);
         let time_started = std::time::Instant::now();
         threads.push(std::thread::spawn(move || {
@@ -33,7 +36,7 @@ pub fn run_mcts_iterations<
                         "Starting iteration {}",
                         finished_iterations_clone.load(std::sync::atomic::Ordering::SeqCst)
                     );
-                    let result = tree_clone.iterate();
+                    let result = thread_tree.iterate();
                     let current_iterations =
                         finished_iterations_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     trace!("Finished iteration {}", current_iterations);
@@ -45,14 +48,34 @@ pub fn run_mcts_iterations<
                     }
                 }
             }
+            thread_tree
         }));
     }
 
-    for thread in threads {
-        if let Err(e) = thread.join() {
-            log::error!("A worker thread panicked: {:?}", e);
+    let mut threads_iter = threads.into_iter();
+    let mut merged_node = match threads_iter.next() {
+        Some(thread) => {
+            let thread_tree = thread.join().unwrap();
+            let lock = Arc::into_inner(thread_tree.root).unwrap();
+            lock.into_inner().unwrap()
+        }
+        None => return,
+    };
+    for thread in threads_iter {
+        match thread.join() {
+            Ok(thread_tree) => {
+                let lock = Arc::into_inner(thread_tree.root).unwrap();
+                let thread_root = lock.into_inner().unwrap();
+                merged_node = merged_node.node_merge(&thread_root);
+            }
+            Err(e) => {
+                log::error!("A worker thread panicked: {:?}", e);
+            }
         }
     }
+
+    merged_node = merged_node.node_merge(&original_snapshot);
+    *tree.root.write().unwrap() = merged_node;
 
     log::debug!(
         "Completed {} iterations",

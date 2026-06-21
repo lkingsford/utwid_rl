@@ -268,6 +268,31 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         create_expanded_node(state, weight, per)
     }
 
+    pub fn reset_visits(&mut self) {
+        match self {
+            Node::Expanded {
+                visit_count,
+                value_sums,
+                cached_ucb,
+                cached_fully_explored,
+                children,
+                ..
+            } => {
+                *visit_count = 0;
+                for vs in value_sums.iter_mut() {
+                    vs.visit_count = 0;
+                    vs.value_sum = 0.0;
+                }
+                *cached_ucb = RwLock::new(None);
+                *cached_fully_explored = RwLock::new(None);
+                for child in children.values_mut() {
+                    child.write().unwrap().reset_visits();
+                }
+            }
+            Node::Placeholder { .. } => {}
+        }
+    }
+
     pub fn mean_child_est_reward_for_player(&self, player_id: u8) -> f64 {
         match self {
             Node::Expanded { children, .. } => {
@@ -357,8 +382,8 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         // Subtlety: merging trees with different root states will produce garbage.
         // Callers should ensure both nodes originate from the same state (Arc::ptr_eq).
         match (self, other) {
-            (Node::Placeholder { weight }, Node::Expanded { .. }) => other.deep_clone(None),
-            (Node::Expanded { .. }, Node::Placeholder { weight }) => self.deep_clone(None),
+            (Node::Placeholder { weight: _ }, Node::Expanded { .. }) => other.deep_clone(None),
+            (Node::Expanded { .. }, Node::Placeholder { weight: _ }) => self.deep_clone(None),
             (Node::Placeholder { weight }, Node::Placeholder { weight: weight_b }) => {
                 Node::Placeholder {
                     weight: weight.or(*weight_b),
