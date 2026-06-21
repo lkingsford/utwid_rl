@@ -325,13 +325,20 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
             } => {
                 let cloned_children = if let Some(limit) = depth_limit {
                     if limit <= 1 {
-                        HashMap::new()
+                        children
+                            .iter()
+                            .map(|(action, _)| {
+                                (
+                                    action.clone(),
+                                    Arc::new(RwLock::new(Node::Placeholder { weight: None })),
+                                )
+                            })
+                            .collect()
                     } else {
                         children
                             .iter()
                             .map(|(action, child)| {
-                                let cloned =
-                                    child.read().unwrap().deep_clone(Some(limit - 1));
+                                let cloned = child.read().unwrap().deep_clone(Some(limit - 1));
                                 (action.clone(), Arc::new(RwLock::new(cloned)))
                             })
                             .collect()
