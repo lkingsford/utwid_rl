@@ -83,6 +83,15 @@ where
         }
     }
 
+    pub fn deep_clone(&self, depth_limit: Option<usize>) -> Self {
+        let root = self.root.read().unwrap().deep_clone(depth_limit);
+        Tree {
+            root: Tree::node_ref(root),
+            constant: self.constant,
+            per: self.per,
+        }
+    }
+
     ///
     /// Returns a path to the current selection
     ///
@@ -194,10 +203,10 @@ where
                 let current_leaf_arc = parent_guard.get_child(leaf_action);
 
                 if Arc::ptr_eq(&leaf_node_arc, &current_leaf_arc) {
-                    let parent_state = parent_guard.state().clone();
+                    let parent_state = parent_guard.state();
                     let expanded_node = current_leaf_arc.read().unwrap().expansion(
                         leaf_action.clone(),
-                        &parent_state,
+                        parent_state,
                         self.per,
                     );
                     parent_guard.insert_child(leaf_action.clone(), expanded_node);

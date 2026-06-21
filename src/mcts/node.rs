@@ -29,10 +29,9 @@ pub struct VisitCountValue {
 #[derive(Debug)]
 pub enum Node<StateType: State, ActionType: Action<StateType = StateType>> {
     Expanded {
-        state: StateType,
+        state: Arc<StateType>,
         children: HashMap<ActionType, Arc<RwLock<Node<StateType, ActionType>>>>,
         visit_count: u32,
-        /// Sum of rewards for each player from this state onward.
         value_sums: Vec<VisitCountValue>,
         cached_ucb: RwLock<Option<CachedUcb>>,
         cached_fully_explored: RwLock<Option<bool>>,
@@ -240,7 +239,7 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
 
     pub fn state(&self) -> &StateType {
         match self {
-            Node::Expanded { state, .. } => state,
+            Node::Expanded { state, .. } => &**state,
             Node::Placeholder { .. } => panic!("Placeholder node has no state"),
         }
     }
@@ -285,6 +284,54 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
                 if count == 0 { 0.0 } else { sum / count as f64 }
             }
             Node::Placeholder { .. } => 0.0,
+        }
+    }
+
+    pub fn deep_clone(&self, depth_limit: Option<usize>) -> Self {
+        match self {
+            Node::Expanded {
+                state,
+                children,
+                visit_count,
+                value_sums,
+                game_action,
+                weight,
+                ..
+            } => {
+                let cloned_children = if let Some(limit) = depth_limit {
+                    if limit <= 1 {
+                        HashMap::new()
+                    } else {
+                        children
+                            .iter()
+                            .map(|(action, child)| {
+                                let cloned =
+                                    child.read().unwrap().deep_clone(Some(limit - 1));
+                                (action.clone(), Arc::new(RwLock::new(cloned)))
+                            })
+                            .collect()
+                    }
+                } else {
+                    children
+                        .iter()
+                        .map(|(action, child)| {
+                            let cloned = child.read().unwrap().deep_clone(None);
+                            (action.clone(), Arc::new(RwLock::new(cloned)))
+                        })
+                        .collect()
+                };
+                Node::Expanded {
+                    state: state.clone(),
+                    children: cloned_children,
+                    visit_count: *visit_count,
+                    value_sums: value_sums.clone(),
+                    cached_ucb: RwLock::new(None),
+                    cached_fully_explored: RwLock::new(None),
+                    game_action: *game_action,
+                    weight: *weight,
+                }
+            }
+            Node::Placeholder { weight } => Node::Placeholder { weight: *weight },
         }
     }
 
@@ -470,10 +517,7 @@ pub fn create_expanded_node<StateType>(
 where
     StateType: State,
 {
-    // Used here so can be used outside of an instance of Node
-    // (I think the Node::new_expanded should be able to work? But my rust brain
-    // is still learning and couldn't figure out syntax that the type checker
-    // was happy with)
+    let state = Arc::new(state);
     let reward_len = state.reward().len();
     let mut children: HashMap<
         StateType::ActionType,
