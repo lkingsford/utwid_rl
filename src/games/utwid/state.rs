@@ -38,8 +38,14 @@ bitflags! {
 }
 
 const AI_TURN_WEIGHT: f64 = 0.2;
-const AI_TURN_LEVEL_WEIGHT: f64 = 0.4;
-const AI_TURN_HEALTH_WEIGHT: f64 = 0.6;
+const AI_TURN_LEVEL_BASE: f64 = 0.75;
+const AI_TURN_LEVEL_MULTIPLIER: f64 = 10.0;
+const AI_TURN_HEALTH_WEIGHT: f64 = 2.5;
+const AI_TURN_HEALTH_BIAS: f64 = -0.3;
+const AI_WIN_REWARD: f64 = 20.0;
+const AI_LOSE_REWARD: f64 = -20.0;
+const STALEMATE_REWARD: f64 = -5.0;
+const LEVEL_REWARD: f64 = 20.0;
 
 impl UtwidState {
     pub fn new() -> UtwidState {
@@ -355,14 +361,27 @@ impl UtwidState {
             .collect()
     }
 
+    fn ai_turn_weight(&self) -> f64 {
+        (AI_TURN_LEVEL_BASE as f64).powf(self.ai_turns as f64 * AI_TURN_WEIGHT) / 2.0
+    }
+
+    pub(crate) fn accumulate_stair_reward(&mut self) {
+        if self.reward_progress.is_none() {
+            self.reward_progress = Some(vec![0.0; self.reward_actor_count()]);
+        }
+        let player_reward = LEVEL_REWARD * self.ai_turn_weight();
+        let rewards = self.reward_progress.as_mut().unwrap();
+        rewards[YOU_ID] += player_reward;
+        rewards[MON2Y_ID] -= player_reward;
+    }
+
     pub(crate) fn accumulate_reward(&mut self) {
         if self.reward_progress.is_none() {
             self.reward_progress = Some(vec![0.0; self.reward_actor_count()]);
         }
-        let ai_turn_weight = (0.5 as f64).powf(self.ai_turns as f64 / AI_TURN_WEIGHT) / 2.0;
-        let player_reward = ((self.player_health_ratio().powf(2.0)) * AI_TURN_HEALTH_WEIGHT
-            + (self.current_level as f64 / board::LEVEL_COUNT as f64) * AI_TURN_LEVEL_WEIGHT)
-            * ai_turn_weight;
+        let player_reward = ((self.player_health_ratio() + AI_TURN_HEALTH_BIAS)
+            * AI_TURN_HEALTH_WEIGHT)
+            * self.ai_turn_weight();
         let rewards = self.reward_progress.as_mut().unwrap();
         rewards[YOU_ID] += player_reward;
         rewards[MON2Y_ID] -= player_reward;
@@ -527,16 +546,16 @@ impl State for UtwidState {
                 rewards[MON2Y_ID] += -reward;
             }
             GameState::Lost => {
-                rewards[YOU_ID] += -1.0;
-                rewards[MON2Y_ID] += 1.0;
+                rewards[YOU_ID] += AI_LOSE_REWARD * self.ai_turn_weight();
+                rewards[MON2Y_ID] += AI_WIN_REWARD * self.ai_turn_weight();
             }
             GameState::Won => {
-                rewards[YOU_ID] += 1.0;
-                rewards[MON2Y_ID] += -1.0;
+                rewards[YOU_ID] += AI_WIN_REWARD * self.ai_turn_weight();
+                rewards[MON2Y_ID] += AI_LOSE_REWARD * self.ai_turn_weight();
             }
             GameState::Stalemate => {
-                rewards[YOU_ID] += -0.25;
-                rewards[MON2Y_ID] += -0.25;
+                rewards[YOU_ID] += STALEMATE_REWARD * self.ai_turn_weight();
+                rewards[MON2Y_ID] += STALEMATE_REWARD * self.ai_turn_weight();
             }
             _ => {}
         };
