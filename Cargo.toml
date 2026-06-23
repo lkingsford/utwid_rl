@@ -31,6 +31,8 @@ name = "mon2y"
 path = "src/lib.rs"
 # crate-type = ["cdylib", "rlib", "staticlib"]
 
+[profile.release]
+debug = true
 
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld"

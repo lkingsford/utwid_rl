@@ -12,11 +12,12 @@ use crossterm::{
 };
 use env_logger::fmt::Formatter;
 use log::Record;
+use serde::{Deserialize, Serialize};
 use std::thread;
 use std::{
     collections::BTreeMap,
     fs::OpenOptions,
-    io::{BufWriter, Stdout, Write, stdout},
+    io::{Stdout, Write, stdout},
     sync::Arc,
     time::Duration,
 };
@@ -332,8 +333,10 @@ struct Args {
     very_human: bool,
     #[arg(long, default_value_t = false)]
     plain_mode: bool,
-    #[arg(short = 'x', long, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     exploration: bool,
+    #[arg(long, default_value_t = String::from("explore.json"))]
+    explore_out: String,
     #[arg(short, long, default_value_t = 1.0)]
     difficulty_mod: f32,
     #[arg(short, long, default_value_t = HUMAN_ITERATIONS)]
@@ -455,6 +458,114 @@ struct GameRunConfig {
 struct ExplorationResult {
     wins: usize,
     total_games: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ExploreEntry {
+    difficulty_mod: f32,
+    iterations: usize,
+    exploration_constant: f64,
+    turn_weight: f64,
+    level_base: f64,
+    health_weight: f64,
+    health_bias: f64,
+    win_reward: f64,
+    lose_reward: f64,
+    stalemate_reward: f64,
+    level_reward: f64,
+    wins: usize,
+    losses: usize,
+    percentage: f64,
+    last_run_time: String,
+}
+
+fn write_explore_json(
+    path: &str,
+    configs: &[GameRunConfig],
+    stats: &BTreeMap<String, ExplorationResult>,
+) -> std::io::Result<()> {
+    let mut existing: Vec<ExploreEntry> = std::fs::OpenOptions::new()
+        .read(true)
+        .open(path)
+        .ok()
+        .and_then(|f| serde_json::from_reader(f).ok())
+        .unwrap_or_default();
+
+    let existing_map: BTreeMap<String, usize> = existing
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let key = format_exploration_key(
+                e.difficulty_mod,
+                e.iterations,
+                e.exploration_constant,
+                &RewardConfig {
+                    turn_weight: e.turn_weight,
+                    level_base: e.level_base,
+                    health_weight: e.health_weight,
+                    health_bias: e.health_bias,
+                    win_reward: e.win_reward,
+                    lose_reward: e.lose_reward,
+                    stalemate_reward: e.stalemate_reward,
+                    level_reward: e.level_reward,
+                },
+            );
+            (key, i)
+        })
+        .collect();
+
+    let now = Local::now().to_rfc3339();
+    for config in configs {
+        let key = format_exploration_key(
+            config.difficulty_mod,
+            config.iterations,
+            config.exploration_constant,
+            &config.reward_config,
+        );
+        let stat = stats.get(&key).copied().unwrap_or_default();
+        let wins = stat.wins;
+        let total = stat.total_games;
+        let losses = total.saturating_sub(wins);
+        let percentage = if total == 0 {
+            0.0
+        } else {
+            wins as f64 * 100.0 / total as f64
+        };
+
+        if let Some(&idx) = existing_map.get(&key) {
+            let entry = &mut existing[idx];
+            entry.wins = wins;
+            entry.losses = losses;
+            entry.percentage = percentage;
+            entry.last_run_time = now.clone();
+        } else {
+            existing.push(ExploreEntry {
+                difficulty_mod: config.difficulty_mod,
+                iterations: config.iterations,
+                exploration_constant: config.exploration_constant,
+                turn_weight: config.reward_config.turn_weight,
+                level_base: config.reward_config.level_base,
+                health_weight: config.reward_config.health_weight,
+                health_bias: config.reward_config.health_bias,
+                win_reward: config.reward_config.win_reward,
+                lose_reward: config.reward_config.lose_reward,
+                stalemate_reward: config.reward_config.stalemate_reward,
+                level_reward: config.reward_config.level_reward,
+                wins,
+                losses,
+                percentage,
+                last_run_time: now.clone(),
+            });
+        }
+    }
+
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)?;
+    serde_json::to_writer_pretty(file, &existing)?;
+    Ok(())
 }
 
 fn format_reward_config_key(config: &RewardConfig) -> String {
@@ -864,6 +975,7 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
             }
             entry.total_games += 1;
             append_exploration_log(config.iterations, config.difficulty_mod, config.exploration_constant, &config.reward_config, win)?;
+            write_explore_json(&args.explore_out, &configs, &stats)?;
 
             if !args.plain_mode {
                 draw_exploration_status(stdout, &stats)?;
