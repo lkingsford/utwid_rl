@@ -38,12 +38,13 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Get package info from Cargo.toml
+      - name: Get binary names and version from Cargo.toml
         id: get_info
         run: |
-          PACKAGE_NAME=$(grep '^name' Cargo.toml | head -n 1 | sed 's/name = "\(.*\)"/\1/')
+          BIN_NAMES=$(grep -A1 '^\[\[bin\]\]' Cargo.toml | grep '^name' | sed 's/name = "\(.*\)"/\1/' | tr '\n' ' ')
+          echo "bin_names=$BIN_NAMES" >> $GITHUB_OUTPUT
+          echo "bin_name=$(echo $BIN_NAMES | awk '{print $1}')" >> $GITHUB_OUTPUT
           VERSION=$(grep '^version' Cargo.toml | head -n 1 | sed 's/version = "\(.*\)"/\1/')
-          echo "package_name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
         shell: bash
 
@@ -65,7 +66,7 @@ jobs:
       - name: Package binary
         id: package
         run: |
-          BIN_NAME=${{ steps.get_info.outputs.package_name }}
+          BIN_NAME=${{ steps.get_info.outputs.bin_name }}
           VERSION=${{ steps.get_info.outputs.version }}
           TARGET=${{ matrix.target }}
           DEV_SUFFIX=".dev${{ github.run_number }}"
