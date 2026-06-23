@@ -3,7 +3,8 @@ use std::fmt::Debug;
 
 pub trait Action: Debug + Clone + Eq + std::hash::Hash {
     type StateType: State<ActionType = Self>;
-    fn execute(&self, state: &Self::StateType) -> Self::StateType;
+    type EventType: std::fmt::Debug + Clone;
+    fn execute(&self, state: &Self::StateType) -> (Self::StateType, Vec<Self::EventType>);
 }
 
 ///
@@ -25,7 +26,7 @@ pub trait State: Clone {
     type ActionType: Action<StateType = Self>;
     type GameHyperrewardType: std::fmt::Debug + Clone + Send + Sync;
 
-    fn permitted_actions(&self) -> Vec<Self::ActionType>;
+    fn permitted_actions(&self, per: Option<u8>) -> Vec<Self::ActionType>;
     fn possible_non_player_actions(&self) -> Vec<(Self::ActionType, u32)> {
         vec![]
     }

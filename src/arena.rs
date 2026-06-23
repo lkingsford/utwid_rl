@@ -3,7 +3,7 @@ use env_logger::fmt::Formatter;
 use log::Record;
 use mon2y::game::Game;
 use mon2y::games::Games;
-use mon2y::games::{C4, CS, EBR, NT, Utwid};
+use mon2y::games::Utwid;
 use mon2y::mcts::game_trait::{Action, Actor, State};
 use mon2y::mcts::{calculate_best_turn, BestTurnPolicy};
 use rand::Rng;
@@ -51,7 +51,7 @@ fn run_episode<G: Game>(game: G, players: Vec<PlayerSettings>) -> Vec<f64> {
             Actor::Player(player) => {
                 let action: G::ActionType = match players.get(player as usize) {
                     Some(PlayerSettings::Random) => {
-                        let permitted_actions = state.permitted_actions();
+                        let permitted_actions = state.permitted_actions(None);
                         permitted_actions[rand::thread_rng().gen_range(0..permitted_actions.len())]
                             .clone()
                     }
@@ -74,18 +74,19 @@ fn run_episode<G: Game>(game: G, players: Vec<PlayerSettings>) -> Vec<f64> {
                             Some(constant) => constant,
                         },
                         false,
+                        None,
                     ),
                     _ => todo!(),
                 };
                 log::debug!("Player {} plays {:?}", player, action);
-                state = action.execute(&state);
+                let (state, _events) = action.execute(&state);
             }
             Actor::GameAction(actions) => {
                 //TODO: Use a weighted random (because the second variable is supposed to be the weight)
                 let action = actions[rand::thread_rng().gen_range(0..actions.len())]
                     .0
                     .clone();
-                state = action.execute(&state);
+                let (state, _events) = action.execute(&state);
             }
         }
     }
@@ -101,25 +102,6 @@ fn run_config(config_file: String) {
     for episode in 0..arena_settings.episodes {
         log::info!("Starting episode {}", episode);
         let result = match arena_settings.game {
-            Games::C4 => run_episode(C4, arena_settings.players.clone()),
-            Games::NT => run_episode(
-                NT {
-                    player_count: arena_settings.players.len() as u8,
-                },
-                arena_settings.players.clone(),
-            ),
-            Games::CS => run_episode(
-                CS {
-                    player_count: arena_settings.players.len() as u8,
-                },
-                arena_settings.players.clone(),
-            ),
-            Games::EBR => run_episode(
-                EBR {
-                    player_count: arena_settings.players.len() as u8,
-                },
-                arena_settings.players.clone(),
-            ),
             Games::Utwid => run_episode(Utwid, arena_settings.players.clone()),
         };
         let max_result = result

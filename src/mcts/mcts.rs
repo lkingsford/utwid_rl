@@ -1,12 +1,12 @@
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
-use log::trace;
+use log::{debug, trace};
 
-use super::game_trait::{Action, Actor, State};
-use super::node::{create_expanded_node, Node};
-use super::tree::{Selection, Tree};
 use super::BestTurnPolicy;
+use super::game_trait::{Action, Actor, State};
+use super::node::{Node, create_expanded_node};
+use super::tree::{Selection, Tree};
 
 /// Run multiple iterations of the MCTS algorithm on a state.
 pub fn run_mcts_iterations<
@@ -17,40 +17,66 @@ pub fn run_mcts_iterations<
     iterations: usize,
     time_limit: Option<std::time::Duration>,
     thread_count: usize,
+    deep_copy_depth: Option<usize>,
 ) {
     let mut threads = vec![];
 
     let finished_iterations: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
 
+    let original_snapshot = tree.root.read().unwrap().deep_clone(deep_copy_depth);
+
     for _ in 0..thread_count {
-        let tree_clone: Arc<Tree<StateType, ActionType>> = Arc::clone(&tree);
+        let mut thread_tree = tree.deep_clone(deep_copy_depth);
+        thread_tree.root.write().unwrap().reset_visits();
         let finished_iterations_clone: Arc<AtomicUsize> = Arc::clone(&finished_iterations);
         let time_started = std::time::Instant::now();
-        threads.push(std::thread::spawn(move || loop {
-            {
-                trace!(
-                    "Starting iteration {}",
-                    finished_iterations_clone.load(std::sync::atomic::Ordering::SeqCst)
-                );
-                let result = tree_clone.iterate();
-                let current_iterations =
-                    finished_iterations_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                trace!("Finished iteration {}", current_iterations);
-                if current_iterations >= iterations
-                    || matches!(result, Selection::FullyExplored)
-                    || time_started.elapsed() > time_limit.unwrap_or(std::time::Duration::MAX)
+        threads.push(std::thread::spawn(move || {
+            loop {
                 {
-                    break;
+                    debug!(
+                        "Starting iteration {}",
+                        finished_iterations_clone.load(std::sync::atomic::Ordering::SeqCst)
+                    );
+                    let result = thread_tree.iterate();
+                    let current_iterations =
+                        finished_iterations_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    trace!("Finished iteration {}", current_iterations);
+                    if current_iterations >= iterations
+                        || matches!(result, Selection::FullyExplored)
+                        || time_started.elapsed() > time_limit.unwrap_or(std::time::Duration::MAX)
+                    {
+                        break;
+                    }
                 }
             }
+            thread_tree
         }));
     }
 
-    for thread in threads {
-        if let Err(e) = thread.join() {
-            log::error!("A worker thread panicked: {:?}", e);
+    let mut threads_iter = threads.into_iter();
+    let mut merged_node = match threads_iter.next() {
+        Some(thread) => {
+            let thread_tree = thread.join().unwrap();
+            let lock = Arc::into_inner(thread_tree.root).unwrap();
+            lock.into_inner().unwrap()
+        }
+        None => return,
+    };
+    for thread in threads_iter {
+        match thread.join() {
+            Ok(thread_tree) => {
+                let lock = Arc::into_inner(thread_tree.root).unwrap();
+                let thread_root = lock.into_inner().unwrap();
+                merged_node = merged_node.node_merge(&thread_root);
+            }
+            Err(e) => {
+                log::error!("A worker thread panicked: {:?}", e);
+            }
         }
     }
+
+    merged_node = merged_node.node_merge(&original_snapshot);
+    *tree.root.write().unwrap() = merged_node;
 
     log::debug!(
         "Completed {} iterations",
@@ -71,6 +97,7 @@ pub fn calculate_best_turn<
     exploration_constant: f64,
     log_children: bool,
     existing_tree: Option<Arc<Tree<StateType, ActionType>>>,
+    deep_copy_depth: Option<usize>,
 ) -> (
     <StateType as State>::ActionType,
     Option<Arc<Tree<StateType, ActionType>>>,
@@ -80,7 +107,11 @@ where
     ActionType: Action<StateType = StateType>,
 {
     log::debug!("Starting next turn");
-    let root_node = create_expanded_node(state, None);
+    let per = match state.next_actor() {
+        Actor::Player(player_id) => Some(player_id),
+        Actor::GameAction(_) => None,
+    };
+    let root_node = create_expanded_node(state, None, per);
     if let Node::Expanded { children, .. } = &root_node {
         if children.is_empty() {
             panic!("calculate_best_turn called with a root state that has no available actions");
@@ -93,10 +124,14 @@ where
 
     let tree = match existing_tree {
         Some(existing_tree) => existing_tree,
-        None => Arc::new(Tree::new_with_constant(root_node, exploration_constant)),
+        None => Arc::new(Tree::new_with_constant_and_per(
+            root_node,
+            exploration_constant,
+            per,
+        )),
     };
 
-    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count);
+    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count, deep_copy_depth);
 
     if log::log_enabled!(log::Level::Trace) || log_children {
         tree.root.clone().read().unwrap().log_children(0);
@@ -132,14 +167,29 @@ where
                 _ => panic!("Root should be parent"),
             };
             picks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-            log::debug!("Action, UCB0: {:?}", picks);
-            (picks[0].0.clone(), Some(tree))
+            log::info!("Action, UCB0: {:?}", picks);
+            let picked_action = picks[0].0.clone();
+            let picked_value = picks[0].1;
+            let total_playouts = node.visit_count();
+            let picked_visits = {
+                let child_arc = node.get_child(&picked_action);
+                let child = child_arc.read().unwrap();
+                child.visit_count()
+            };
+            log::debug!(
+                "UCB0 picked {:?} value={} playouts={} picked_visits={}",
+                picked_action,
+                picked_value,
+                total_playouts,
+                picked_visits,
+            );
+            (picked_action, Some(tree))
         }
 
         BestTurnPolicy::MostVisits => {
             let root = root_ref.read().unwrap();
             if let Node::Expanded { children, .. } = &*root {
-                log::debug!(
+                log::info!(
                     "Action, Visits, Value: {:?}",
                     children
                         .iter()
@@ -148,7 +198,10 @@ where
                             (
                                 action.clone(),
                                 node.visit_count(),
-                                node.value_sums_ref().to_vec(),
+                                node.value_sums_ref()
+                                    .iter()
+                                    .map(|value| value.value_sum)
+                                    .collect::<Vec<_>>(),
                             )
                         })
                         .collect::<Vec<_>>()
@@ -202,5 +255,108 @@ where
                 panic!("Expected root to be an expanded node")
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mcts::game_trait::Actor;
+    use crate::mcts::node::Node;
+    use crate::test::injectable_game::{
+        InjectableGameAction, InjectableGameState, TestHyperreward,
+    };
+    use std::collections::HashMap;
+
+    #[test]
+    fn calculate_best_turn_does_not_expand_hidden_opponent_win() {
+        let real_actions = vec![
+            InjectableGameAction::Win,
+            InjectableGameAction::WinInXTurns(2),
+            InjectableGameAction::WinInXTurns(3),
+        ];
+        let hidden_actions = vec![
+            InjectableGameAction::WinInXTurns(2),
+            InjectableGameAction::WinInXTurns(3),
+        ];
+        let scout_action = InjectableGameAction::NextTurnGameAction(real_actions.clone());
+
+        let state = InjectableGameState {
+            injected_reward: vec![0.0, 0.0],
+            injected_terminal: false,
+            injected_permitted_actions: vec![scout_action.clone(), InjectableGameAction::Lose],
+            perceived_permitted_actions: HashMap::from([
+                ((1, 0), hidden_actions.clone()),
+                ((1, 1), real_actions.clone()),
+            ]),
+            player_count: 2,
+            next_actor: Actor::Player(0),
+            injected_hyperreward: TestHyperreward { value: 0 },
+            terminal_hyperreward: TestHyperreward { value: 1 },
+        };
+
+        let (_, tree) = calculate_best_turn(
+            10,
+            None,
+            1,
+            state,
+            BestTurnPolicy::MostVisits,
+            2.0_f64.sqrt(),
+            false,
+            None,
+            None,
+        );
+
+        let tree = tree.expect("tree should be returned when the root has multiple actions");
+        let root = tree.root.read().unwrap();
+        let opponent_node = root.get_child(&scout_action);
+        let opponent_node = opponent_node.read().unwrap();
+
+        match &*opponent_node {
+            Node::Expanded { children, .. } => {
+                assert!(!children.contains_key(&InjectableGameAction::Win));
+                assert!(children.contains_key(&InjectableGameAction::WinInXTurns(2)));
+                assert!(children.contains_key(&InjectableGameAction::WinInXTurns(3)));
+            }
+            Node::Placeholder { .. } => panic!("expected opponent node to be expanded"),
+        }
+    }
+
+    #[test]
+    fn perceived_actions_can_still_include_hidden_win_for_owner() {
+        let real_actions = vec![
+            InjectableGameAction::Win,
+            InjectableGameAction::WinInXTurns(2),
+            InjectableGameAction::WinInXTurns(3),
+        ];
+
+        let state = InjectableGameState {
+            injected_reward: vec![0.0, 0.0],
+            injected_terminal: false,
+            injected_permitted_actions: real_actions.clone(),
+            perceived_permitted_actions: HashMap::from([
+                (
+                    (1, 0),
+                    vec![
+                        InjectableGameAction::WinInXTurns(2),
+                        InjectableGameAction::WinInXTurns(3),
+                    ],
+                ),
+                ((1, 1), real_actions.clone()),
+            ]),
+            player_count: 2,
+            next_actor: Actor::Player(1),
+            injected_hyperreward: TestHyperreward { value: 0 },
+            terminal_hyperreward: TestHyperreward { value: 1 },
+        };
+
+        assert_eq!(
+            state.permitted_actions(Some(0)),
+            vec![
+                InjectableGameAction::WinInXTurns(2),
+                InjectableGameAction::WinInXTurns(3),
+            ]
+        );
+        assert_eq!(state.permitted_actions(Some(1)), real_actions);
     }
 }

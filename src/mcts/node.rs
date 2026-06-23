@@ -20,14 +20,19 @@ pub struct CachedUcb {
     parent_visit_count: u32,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VisitCountValue {
+    pub visit_count: u32,
+    pub value_sum: f64,
+}
+
 #[derive(Debug)]
 pub enum Node<StateType: State, ActionType: Action<StateType = StateType>> {
     Expanded {
-        state: StateType,
+        state: Arc<StateType>,
         children: HashMap<ActionType, Arc<RwLock<Node<StateType, ActionType>>>>,
         visit_count: u32,
-        /// Sum of rewards for each player from this state onward.
-        value_sums: Vec<f64>,
+        value_sums: Vec<VisitCountValue>,
         cached_ucb: RwLock<Option<CachedUcb>>,
         cached_fully_explored: RwLock<Option<bool>>,
         game_action: bool,
@@ -85,14 +90,14 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         }
     }
 
-    pub fn value_sums(&self) -> Vec<f64> {
+    pub fn value_sums(&self) -> Vec<VisitCountValue> {
         match self {
             Node::Expanded { value_sums, .. } => value_sums.clone(),
             Node::Placeholder { .. } => vec![],
         }
     }
 
-    pub fn value_sums_ref(&self) -> &[f64] {
+    pub fn value_sums_ref(&self) -> &[VisitCountValue] {
         match self {
             Node::Expanded { value_sums, .. } => value_sums,
             Node::Placeholder { .. } => &[],
@@ -101,24 +106,25 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
 
     pub fn value_sum_for_player(&self, player_id: u8) -> f64 {
         match self {
-            Node::Expanded { value_sums, .. } => {
-                *value_sums.get(player_id as usize).unwrap_or(&0.0)
-            }
+            Node::Expanded { value_sums, .. } => value_sums
+                .get(player_id as usize)
+                .map(|value| value.value_sum)
+                .unwrap_or(0.0),
             Node::Placeholder { .. } => 0.0,
         }
     }
 
     pub fn est_reward_for_player(&self, player_id: u8) -> f64 {
         match self {
-            Node::Expanded {
-                value_sums,
-                visit_count,
-                ..
-            } => {
-                if *visit_count == 0 {
-                    0.0
+            Node::Expanded { value_sums, .. } => {
+                if let Some(value_sum) = value_sums.get(player_id as usize) {
+                    if value_sum.visit_count == 0 {
+                        0.0
+                    } else {
+                        value_sum.value_sum / value_sum.visit_count as f64
+                    }
                 } else {
-                    *value_sums.get(player_id as usize).unwrap_or(&0.0) / *visit_count as f64
+                    0.0
                 }
             }
             Node::Placeholder { .. } => 0.0,
@@ -142,10 +148,11 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
             } => {
                 *visit_count += 1;
                 if value_sums.len() < reward.len() {
-                    value_sums.resize(reward.len(), 0.0);
+                    value_sums.resize(reward.len(), VisitCountValue::default());
                 }
                 for (i, reward_component) in reward.iter().enumerate() {
-                    value_sums[i] += reward_component;
+                    value_sums[i].visit_count += 1;
+                    value_sums[i].value_sum += reward_component;
                 }
                 if let Ok(mut cached_fully_explored) = cached_fully_explored.write() {
                     *cached_fully_explored = None;
@@ -217,21 +224,22 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         &self,
         action: ActionType,
         parent_state: &<ActionType as Action>::StateType,
+        per: Option<u8>,
     ) -> Node<StateType, <StateType as State>::ActionType> {
         match self {
             Node::Expanded { .. } => {
                 panic!("Expanding an expanded node");
             }
             Node::Placeholder { weight, .. } => {
-                let state = action.execute(parent_state);
-                Self::new_expanded(state, *weight)
+                let (state, _events) = action.execute(parent_state);
+                Self::new_expanded(state, *weight, per)
             }
         }
     }
 
     pub fn state(&self) -> &StateType {
         match self {
-            Node::Expanded { state, .. } => state,
+            Node::Expanded { state, .. } => &**state,
             Node::Placeholder { .. } => panic!("Placeholder node has no state"),
         }
     }
@@ -255,8 +263,34 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
     pub fn new_expanded(
         state: StateType,
         weight: Option<u32>,
+        per: Option<u8>,
     ) -> Node<StateType, <StateType as State>::ActionType> {
-        create_expanded_node(state, weight)
+        create_expanded_node(state, weight, per)
+    }
+
+    pub fn reset_visits(&mut self) {
+        match self {
+            Node::Expanded {
+                visit_count,
+                value_sums,
+                cached_ucb,
+                cached_fully_explored,
+                children,
+                ..
+            } => {
+                *visit_count = 0;
+                for vs in value_sums.iter_mut() {
+                    vs.visit_count = 0;
+                    vs.value_sum = 0.0;
+                }
+                *cached_ucb = RwLock::new(None);
+                *cached_fully_explored = RwLock::new(None);
+                for child in children.values_mut() {
+                    child.write().unwrap().reset_visits();
+                }
+            }
+            Node::Placeholder { .. } => {}
+        }
     }
 
     pub fn mean_child_est_reward_for_player(&self, player_id: u8) -> f64 {
@@ -272,13 +306,64 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
                     }
                 }
 
-                if count == 0 {
-                    0.0
-                } else {
-                    sum / count as f64
-                }
+                if count == 0 { 0.0 } else { sum / count as f64 }
             }
             Node::Placeholder { .. } => 0.0,
+        }
+    }
+
+    pub fn deep_clone(&self, depth_limit: Option<usize>) -> Self {
+        match self {
+            Node::Expanded {
+                state,
+                children,
+                visit_count,
+                value_sums,
+                game_action,
+                weight,
+                ..
+            } => {
+                let cloned_children = if let Some(limit) = depth_limit {
+                    if limit <= 1 {
+                        children
+                            .iter()
+                            .map(|(action, _)| {
+                                (
+                                    action.clone(),
+                                    Arc::new(RwLock::new(Node::Placeholder { weight: None })),
+                                )
+                            })
+                            .collect()
+                    } else {
+                        children
+                            .iter()
+                            .map(|(action, child)| {
+                                let cloned = child.read().unwrap().deep_clone(Some(limit - 1));
+                                (action.clone(), Arc::new(RwLock::new(cloned)))
+                            })
+                            .collect()
+                    }
+                } else {
+                    children
+                        .iter()
+                        .map(|(action, child)| {
+                            let cloned = child.read().unwrap().deep_clone(None);
+                            (action.clone(), Arc::new(RwLock::new(cloned)))
+                        })
+                        .collect()
+                };
+                Node::Expanded {
+                    state: state.clone(),
+                    children: cloned_children,
+                    visit_count: *visit_count,
+                    value_sums: value_sums.clone(),
+                    cached_ucb: RwLock::new(None),
+                    cached_fully_explored: RwLock::new(None),
+                    game_action: *game_action,
+                    weight: *weight,
+                }
+            }
+            Node::Placeholder { weight } => Node::Placeholder { weight: *weight },
         }
     }
 
@@ -300,6 +385,81 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         node.unwrap()
     }
 
+    pub fn node_merge(&self, other: &Self) -> Self {
+        // Subtlety: merging trees with different root states will produce garbage.
+        // Callers should ensure both nodes originate from the same state (Arc::ptr_eq).
+        match (self, other) {
+            (Node::Placeholder { weight: _ }, Node::Expanded { .. }) => other.deep_clone(None),
+            (Node::Expanded { .. }, Node::Placeholder { weight: _ }) => self.deep_clone(None),
+            (Node::Placeholder { weight }, Node::Placeholder { weight: weight_b }) => {
+                Node::Placeholder {
+                    weight: weight.or(*weight_b),
+                }
+            }
+            (
+                Node::Expanded {
+                    state,
+                    children,
+                    visit_count,
+                    value_sums,
+                    game_action,
+                    weight,
+                    ..
+                },
+                Node::Expanded {
+                    children: children_b,
+                    visit_count: visit_count_b,
+                    value_sums: value_sums_b,
+                    game_action: game_action_b,
+                    weight: weight_b,
+                    ..
+                },
+            ) => {
+                let merged_visits = *visit_count + *visit_count_b;
+                let merged_values: Vec<VisitCountValue> = value_sums
+                    .iter()
+                    .zip(value_sums_b.iter())
+                    .map(|(a, b)| VisitCountValue {
+                        visit_count: a.visit_count + b.visit_count,
+                        value_sum: a.value_sum + b.value_sum,
+                    })
+                    .collect();
+
+                let mut merged_children: HashMap<
+                    ActionType,
+                    Arc<RwLock<Node<StateType, ActionType>>>,
+                > = HashMap::new();
+                for (action, child) in children.iter() {
+                    merged_children.insert(action.clone(), child.clone());
+                }
+                for (action, child_b) in children_b.iter() {
+                    if let Some(existing) = merged_children.get(action) {
+                        let merged = {
+                            let a = existing.read().unwrap();
+                            let b = child_b.read().unwrap();
+                            a.node_merge(&b)
+                        };
+                        merged_children.insert(action.clone(), Arc::new(RwLock::new(merged)));
+                    } else {
+                        let cloned = child_b.read().unwrap().deep_clone(None);
+                        merged_children.insert(action.clone(), Arc::new(RwLock::new(cloned)));
+                    }
+                }
+
+                Node::Expanded {
+                    state: state.clone(),
+                    children: merged_children,
+                    visit_count: merged_visits,
+                    value_sums: merged_values,
+                    cached_ucb: RwLock::new(None),
+                    cached_fully_explored: RwLock::new(None),
+                    game_action: *game_action,
+                    weight: weight.or(*weight_b),
+                }
+            }
+        }
+    }
+
     pub fn log_children(&self, level: usize) {
         if level == 0 {
             log::info!("--- TREE ---");
@@ -316,7 +476,11 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
                             log::info!(
                                 "{} {:?} {}",
                                 "         | ".repeat(level),
-                                child_node.value_sums(),
+                                child_node
+                                    .value_sums()
+                                    .into_iter()
+                                    .map(|value| value.value_sum)
+                                    .collect::<Vec<_>>(),
                                 child_node.visit_count()
                             );
                             log::info!(
@@ -392,9 +556,11 @@ where
         let cached_player_value_sum = player_id
             .map(|player_id| child_node.value_sum_for_player(player_id))
             .unwrap_or(1.0);
-        if let Some(ucb) =
-            child_node.cached_ucb(cached_player_value_sum, child_visit_count, parent_visit_count)
-        {
+        if let Some(ucb) = child_node.cached_ucb(
+            cached_player_value_sum,
+            child_visit_count,
+            parent_visit_count,
+        ) {
             let q = if child_visit_count == 0 {
                 0.0
             } else {
@@ -411,10 +577,7 @@ where
         }
 
         let (visit_count, player_value_sum) = if game_action {
-            (
-                child_visit_count as f64 / child_node.weight() as f64,
-                1.0,
-            )
+            (child_visit_count as f64 / child_node.weight() as f64, 1.0)
         } else {
             (child_visit_count as f64, cached_player_value_sum)
         };
@@ -434,16 +597,14 @@ where
         let ucb = q + constant * u + r;
         trace!(
             "UCB action: {:?}, value_sum: {}, visit_count: {}, parent_visits: {}, q: {}, u: {}, c: {} ucb: {}",
-            action,
-            player_value_sum,
-            visit_count,
-            parent_visits,
-            q,
-            u,
-            constant,
-            ucb
+            action, player_value_sum, visit_count, parent_visits, q, u, constant, ucb
         );
-        child_node.cache_ucb(ucb, cached_player_value_sum, child_visit_count, parent_visit_count);
+        child_node.cache_ucb(
+            ucb,
+            cached_player_value_sum,
+            child_visit_count,
+            parent_visit_count,
+        );
         ucbs.push(BestPickEntry {
             action_to_take: action.clone(),
             ucb,
@@ -458,14 +619,12 @@ where
 pub fn create_expanded_node<StateType>(
     state: StateType,
     weight: Option<u32>,
+    per: Option<u8>,
 ) -> Node<StateType, StateType::ActionType>
 where
     StateType: State,
 {
-    // Used here so can be used outside of an instance of Node
-    // (I think the Node::new_expanded should be able to work? But my rust brain
-    // is still learning and couldn't figure out syntax that the type checker
-    // was happy with)
+    let state = Arc::new(state);
     let reward_len = state.reward().len();
     let mut children: HashMap<
         StateType::ActionType,
@@ -476,7 +635,7 @@ where
     } else {
         match state.next_actor() {
             Actor::Player(_) => {
-                for action in state.permitted_actions() {
+                for action in state.permitted_actions(per) {
                     children.insert(
                         action,
                         Arc::new(RwLock::new(Node::Placeholder { weight: None })),
@@ -502,7 +661,7 @@ where
         state,
         children,
         visit_count: 0,
-        value_sums: vec![0.0; reward_len],
+        value_sums: vec![VisitCountValue::default(); reward_len],
         cached_ucb: RwLock::new(None),
         cached_fully_explored: RwLock::new(None),
         game_action,
@@ -523,14 +682,16 @@ mod tests {
             injected_reward: vec![0.0],
             injected_terminal: false,
             injected_permitted_actions: vec![InjectableGameAction::Win],
+            perceived_permitted_actions: Default::default(),
             player_count: 1,
             next_actor: Actor::Player(0),
             injected_hyperreward: TestHyperreward { value: 0 },
             terminal_hyperreward: TestHyperreward { value: 1 },
         };
-        let node = create_expanded_node(state, None);
+        let node = create_expanded_node(state, None, None);
         assert_eq!(node.visit_count(), 0);
-        assert_eq!(node.value_sums(), vec![0.0]);
+        assert_eq!(node.value_sums().len(), 1);
+        assert_eq!(node.value_sums()[0].value_sum, 0.0);
     }
 
     #[test]
@@ -539,12 +700,13 @@ mod tests {
             injected_reward: vec![1.0],
             injected_terminal: true,
             injected_permitted_actions: vec![InjectableGameAction::Win],
+            perceived_permitted_actions: Default::default(),
             player_count: 1,
             next_actor: Actor::Player(0),
             injected_hyperreward: TestHyperreward { value: 0 },
             terminal_hyperreward: TestHyperreward { value: 1 },
         };
-        let node = create_expanded_node(state, None);
+        let node = create_expanded_node(state, None, None);
         match node {
             Node::Expanded { children, .. } => assert!(children.is_empty()),
             Node::Placeholder { .. } => std::panic!("Expected expanded node"),
@@ -564,6 +726,7 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::GameAction(vec![
                     (InjectableGameAction::WinInXTurns(1), 1),
@@ -571,6 +734,7 @@ mod tests {
                 ]),
                 injected_hyperreward: TestHyperreward { value: 0 },
             },
+            None,
             None,
         );
 
@@ -580,11 +744,13 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::Player(0),
                 injected_hyperreward: TestHyperreward { value: 0 },
             },
             Some(1),
+            None,
         );
 
         let mut win_in_x_turns_2 = create_expanded_node(
@@ -593,11 +759,13 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::Player(0),
                 injected_hyperreward: TestHyperreward { value: 0 },
             },
             Some(2),
+            None,
         );
 
         root_node.visit(&[0.0f64]);
@@ -678,11 +846,13 @@ mod tests {
                     InjectableGameAction::WinInXTurns(1),
                     InjectableGameAction::WinInXTurns(2),
                 ],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 injected_hyperreward: TestHyperreward { value: 0 },
                 next_actor: Actor::Player(0),
                 terminal_hyperreward: TestHyperreward { value: 1 },
             },
+            None,
             None,
         );
 
@@ -691,11 +861,13 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![InjectableGameAction::Win],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::Player(0),
                 injected_hyperreward: TestHyperreward { value: 0 },
                 terminal_hyperreward: TestHyperreward { value: 1 },
             },
+            None,
             None,
         );
         child1.visit(&[10.0]);
@@ -706,11 +878,13 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![InjectableGameAction::Win],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::Player(0),
                 injected_hyperreward: TestHyperreward { value: 0 },
                 terminal_hyperreward: TestHyperreward { value: 1 },
             },
+            None,
             None,
         );
 
@@ -742,12 +916,13 @@ mod tests {
             injected_reward: vec![0.0],
             injected_terminal: false,
             injected_permitted_actions: vec![],
+            perceived_permitted_actions: Default::default(),
             player_count: 1,
             next_actor: Actor::Player(0),
             injected_hyperreward: TestHyperreward { value: 0 },
             terminal_hyperreward: TestHyperreward { value: 1 },
         };
-        let mut node = create_expanded_node(state, None);
+        let mut node = create_expanded_node(state, None, None);
         assert_eq!(node.est_reward_for_player(0), 0.0);
         node.visit(&[10.0]);
         assert_eq!(node.est_reward_for_player(0), 10.0);
@@ -765,11 +940,13 @@ mod tests {
                     InjectableGameAction::WinInXTurns(1),
                     InjectableGameAction::WinInXTurns(2),
                 ],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 injected_hyperreward: TestHyperreward { value: 0 },
                 next_actor: Actor::Player(0),
                 terminal_hyperreward: TestHyperreward { value: 1 },
             },
+            None,
             None,
         );
 
@@ -778,11 +955,13 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::Player(0),
                 injected_hyperreward: TestHyperreward { value: 0 },
                 terminal_hyperreward: TestHyperreward { value: 1 },
             },
+            None,
             None,
         );
         child1.visit(&[10.0]); // est_reward = 10.0
@@ -792,11 +971,13 @@ mod tests {
                 injected_reward: vec![0.0f64],
                 injected_terminal: false,
                 injected_permitted_actions: vec![],
+                perceived_permitted_actions: Default::default(),
                 player_count: 1,
                 next_actor: Actor::Player(0),
                 injected_hyperreward: TestHyperreward { value: 0 },
                 terminal_hyperreward: TestHyperreward { value: 1 },
             },
+            None,
             None,
         );
         child2.visit(&[20.0]);
