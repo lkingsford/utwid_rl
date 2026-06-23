@@ -381,6 +381,62 @@ struct Args {
     reward_stalemate: f64,
     #[arg(long, default_value_t = 20.0)]
     reward_level: f64,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 1..,
+        default_values_t = [0.2f64]
+    )]
+    reward_turn_weight_set: Vec<f64>,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 1..,
+        default_values_t = [0.75f64]
+    )]
+    reward_level_base_set: Vec<f64>,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 1..,
+        default_values_t = [2.5f64]
+    )]
+    reward_health_weight_set: Vec<f64>,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 1..,
+        default_values_t = [-0.3f64]
+    )]
+    reward_health_bias_set: Vec<f64>,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 1..,
+        default_values_t = [20.0f64]
+    )]
+    reward_win_set: Vec<f64>,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 1..,
+        default_values_t = [-20.0f64]
+    )]
+    reward_lose_set: Vec<f64>,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 1..,
+        default_values_t = [-5.0f64]
+    )]
+    reward_stalemate_set: Vec<f64>,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 1..,
+        default_values_t = [20.0f64]
+    )]
+    reward_level_set: Vec<f64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -401,8 +457,22 @@ struct ExplorationResult {
     total_games: usize,
 }
 
-fn format_exploration_key(difficulty_mod: f32, iterations: usize, exploration_constant: f64) -> String {
-    format!("{difficulty_mod}x{iterations}i_c{exploration_constant}")
+fn format_reward_config_key(config: &RewardConfig) -> String {
+    format!(
+        "tw{}_lb{}_hw{}_hb{}_wr{}_lr{}_sr{}_lvr{}",
+        config.turn_weight,
+        config.level_base,
+        config.health_weight,
+        config.health_bias,
+        config.win_reward,
+        config.lose_reward,
+        config.stalemate_reward,
+        config.level_reward,
+    )
+}
+
+fn format_exploration_key(difficulty_mod: f32, iterations: usize, exploration_constant: f64, reward_config: &RewardConfig) -> String {
+    format!("{difficulty_mod}x{iterations}i_c{exploration_constant}_{}", format_reward_config_key(reward_config))
 }
 
 fn draw_exploration_status(
@@ -432,6 +502,7 @@ fn append_exploration_log(
     iterations: usize,
     difficulty_mod: f32,
     exploration_constant: f64,
+    reward_config: &RewardConfig,
     win: bool,
 ) -> std::io::Result<()> {
     let mut log_file = OpenOptions::new()
@@ -440,11 +511,12 @@ fn append_exploration_log(
         .open("exploration_log.log")?;
     writeln!(
         log_file,
-        "{}, iterations={}, difficulty_mod={}, exploration_constant={}, win={}",
+        "{}, iterations={}, difficulty_mod={}, exploration_constant={}, reward_config={}, win={}",
         Local::now().to_rfc3339(),
         iterations,
         difficulty_mod,
         exploration_constant,
+        format_reward_config_key(reward_config),
         win
     )?;
     Ok(())
@@ -702,36 +774,61 @@ fn run_game(
     Ok(Some(state.game_state))
 }
 
+fn build_reward_configs(args: &Args) -> Vec<RewardConfig> {
+    let mut configs = Vec::new();
+    for turn_weight in &args.reward_turn_weight_set {
+        for level_base in &args.reward_level_base_set {
+            for health_weight in &args.reward_health_weight_set {
+                for health_bias in &args.reward_health_bias_set {
+                    for win_reward in &args.reward_win_set {
+                        for lose_reward in &args.reward_lose_set {
+                            for stalemate_reward in &args.reward_stalemate_set {
+                                for level_reward in &args.reward_level_set {
+                                    configs.push(RewardConfig {
+                                        turn_weight: *turn_weight,
+                                        level_base: *level_base,
+                                        health_weight: *health_weight,
+                                        health_bias: *health_bias,
+                                        win_reward: *win_reward,
+                                        lose_reward: *lose_reward,
+                                        stalemate_reward: *stalemate_reward,
+                                        level_reward: *level_reward,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    configs
+}
+
 fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
     let mut stats: BTreeMap<String, ExplorationResult> = BTreeMap::new();
     let mut configs: Vec<GameRunConfig> = Vec::new();
+    let reward_configs = build_reward_configs(args);
     for difficulty_mod in &args.difficulty_mod_set {
         for iterations in &args.iteration_set {
             for exploration_constant in &args.exploration_constant_set {
-                let config = GameRunConfig {
-                    plain_mode: args.plain_mode,
-                    human: false,
-                    very_human: false,
-                    difficulty_mod: *difficulty_mod,
-                    iterations: *iterations,
-                    exploration_constant: *exploration_constant,
-                    deep_copy_depth: args.deep_copy_depth,
-                    reward_config: RewardConfig {
-                        turn_weight: args.reward_turn_weight,
-                        level_base: args.reward_level_base,
-                        health_weight: args.reward_health_weight,
-                        health_bias: args.reward_health_bias,
-                        win_reward: args.reward_win,
-                        lose_reward: args.reward_lose,
-                        stalemate_reward: args.reward_stalemate,
-                        level_reward: args.reward_level,
-                    },
-                };
-                stats.insert(
-                    format_exploration_key(*difficulty_mod, *iterations, *exploration_constant),
-                    ExplorationResult::default(),
-                );
-                configs.push(config);
+                for reward_config in &reward_configs {
+                    let config = GameRunConfig {
+                        plain_mode: args.plain_mode,
+                        human: false,
+                        very_human: false,
+                        difficulty_mod: *difficulty_mod,
+                        iterations: *iterations,
+                        exploration_constant: *exploration_constant,
+                        deep_copy_depth: args.deep_copy_depth,
+                        reward_config: *reward_config,
+                    };
+                    stats.insert(
+                        format_exploration_key(*difficulty_mod, *iterations, *exploration_constant, reward_config),
+                        ExplorationResult::default(),
+                    );
+                    configs.push(config);
+                }
             }
         }
     }
@@ -751,6 +848,7 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
                 config.difficulty_mod,
                 config.iterations,
                 config.exploration_constant,
+                &config.reward_config,
             );
             let game_result = run_game(stdout, *config, Some(&stats))?;
 
@@ -765,7 +863,7 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
                 entry.wins += 1;
             }
             entry.total_games += 1;
-            append_exploration_log(config.iterations, config.difficulty_mod, config.exploration_constant, win)?;
+            append_exploration_log(config.iterations, config.difficulty_mod, config.exploration_constant, &config.reward_config, win)?;
 
             if !args.plain_mode {
                 draw_exploration_status(stdout, &stats)?;
@@ -801,6 +899,30 @@ fn validate_args(args: &Args) {
             *exploration_constant > 0.0 && exploration_constant.is_finite(),
             "--exploration-constant-set values must be positive finite floats"
         );
+    }
+    for val in &args.reward_turn_weight_set {
+        assert!(val.is_finite(), "--reward-turn-weight-set values must be finite");
+    }
+    for val in &args.reward_level_base_set {
+        assert!(val.is_finite(), "--reward-level-base-set values must be finite");
+    }
+    for val in &args.reward_health_weight_set {
+        assert!(val.is_finite(), "--reward-health-weight-set values must be finite");
+    }
+    for val in &args.reward_health_bias_set {
+        assert!(val.is_finite(), "--reward-health-bias-set values must be finite");
+    }
+    for val in &args.reward_win_set {
+        assert!(val.is_finite(), "--reward-win-set values must be finite");
+    }
+    for val in &args.reward_lose_set {
+        assert!(val.is_finite(), "--reward-lose-set values must be finite");
+    }
+    for val in &args.reward_stalemate_set {
+        assert!(val.is_finite(), "--reward-stalemate-set values must be finite");
+    }
+    for val in &args.reward_level_set {
+        assert!(val.is_finite(), "--reward-level-set values must be finite");
     }
 }
 
