@@ -26,11 +26,12 @@ pub fn run_mcts_iterations<
     let original_snapshot = tree.root.read().unwrap().deep_clone(deep_copy_depth);
 
     for _ in 0..thread_count {
-        let mut thread_tree = tree.deep_clone(deep_copy_depth);
-        thread_tree.root.write().unwrap().reset_visits();
+        let tree_clone = Arc::clone(&tree);
         let finished_iterations_clone: Arc<AtomicUsize> = Arc::clone(&finished_iterations);
         let time_started = std::time::Instant::now();
         threads.push(std::thread::spawn(move || {
+            let mut thread_tree = tree_clone.deep_clone(deep_copy_depth);
+            thread_tree.root.write().unwrap().reset_visits();
             loop {
                 {
                     debug!(
