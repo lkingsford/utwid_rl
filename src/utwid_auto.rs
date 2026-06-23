@@ -26,8 +26,8 @@ use mon2y::mcts::{BestTurnPolicy, calculate_best_turn};
 use mon2y::{games::utwid::ReprSet, mcts::game_trait::Action};
 use mon2y::{
     games::utwid::{
-        ActorTraits, Allegiance, Dir, GameActor, GameState, Repr, UtwidAction, UtwidEvent,
-        UtwidState,
+        ActorTraits, Allegiance, Dir, GameActor, GameState, Repr, RewardConfig, UtwidAction,
+        UtwidEvent, UtwidState,
     },
     mcts::mcts::run_mcts_iterations,
 };
@@ -363,6 +363,24 @@ struct Args {
         default_values_t = [0.05, 0.1, 0.3, 0.6, 1.0, 1.4142135623730951, 2.0]
     )]
     exploration_constant_set: Vec<f64>,
+    #[arg(long)]
+    deep_copy_depth: Option<usize>,
+    #[arg(long, default_value_t = 0.2)]
+    reward_turn_weight: f64,
+    #[arg(long, default_value_t = 0.75)]
+    reward_level_base: f64,
+    #[arg(long, default_value_t = 2.5)]
+    reward_health_weight: f64,
+    #[arg(long, default_value_t = -0.3)]
+    reward_health_bias: f64,
+    #[arg(long, default_value_t = 20.0)]
+    reward_win: f64,
+    #[arg(long, default_value_t = -20.0)]
+    reward_lose: f64,
+    #[arg(long, default_value_t = -5.0)]
+    reward_stalemate: f64,
+    #[arg(long, default_value_t = 20.0)]
+    reward_level: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -373,6 +391,8 @@ struct GameRunConfig {
     difficulty_mod: f32,
     iterations: usize,
     exploration_constant: f64,
+    deep_copy_depth: Option<usize>,
+    reward_config: RewardConfig,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -434,7 +454,7 @@ fn sample_actions(stdout: &mut Stdout, state: &UtwidState, iterations: usize) {
     let tree = std::sync::Arc::new(mon2y::mcts::tree::Tree::new(
         mon2y::mcts::node::create_expanded_node(state.clone(), None, None),
     ));
-    run_mcts_iterations(tree.clone(), iterations, None, 8);
+    run_mcts_iterations(tree.clone(), iterations, None, 8, None);
     let root_ref = tree.root.clone();
     let root = root_ref.read().unwrap();
     if let mon2y::mcts::node::Node::Expanded { children, .. } = &*root {
@@ -484,6 +504,7 @@ fn run_game(
     exploration_stats: Option<&BTreeMap<String, ExplorationResult>>,
 ) -> std::io::Result<Option<GameState>> {
     let mut state = UtwidState::new();
+    state.reward_config = config.reward_config;
     state.short_circuit_at_turns = Some(SHORT_CIRCUIT_AT_TURNS);
     state.short_circuit_at_turns_increment = Some(SHORT_CIRCUIT_AT_TURNS);
 
@@ -621,6 +642,7 @@ fn run_game(
                     config.exploration_constant,
                     false,
                     tree,
+                    config.deep_copy_depth,
                 );
                 tree = tree_from_calculate;
                 best_turn = Some(best_turn_from_calculate);
@@ -693,6 +715,17 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
                     difficulty_mod: *difficulty_mod,
                     iterations: *iterations,
                     exploration_constant: *exploration_constant,
+                    deep_copy_depth: args.deep_copy_depth,
+                    reward_config: RewardConfig {
+                        turn_weight: args.reward_turn_weight,
+                        level_base: args.reward_level_base,
+                        health_weight: args.reward_health_weight,
+                        health_bias: args.reward_health_bias,
+                        win_reward: args.reward_win,
+                        lose_reward: args.reward_lose,
+                        stalemate_reward: args.reward_stalemate,
+                        level_reward: args.reward_level,
+                    },
                 };
                 stats.insert(
                     format_exploration_key(*difficulty_mod, *iterations, *exploration_constant),
@@ -810,6 +843,17 @@ fn main() -> std::io::Result<()> {
             difficulty_mod: args.difficulty_mod,
             iterations: args.iterations,
             exploration_constant: args.exploration_constant,
+            deep_copy_depth: args.deep_copy_depth,
+            reward_config: RewardConfig {
+                turn_weight: args.reward_turn_weight,
+                level_base: args.reward_level_base,
+                health_weight: args.reward_health_weight,
+                health_bias: args.reward_health_bias,
+                win_reward: args.reward_win,
+                lose_reward: args.reward_lose,
+                stalemate_reward: args.reward_stalemate,
+                level_reward: args.reward_level,
+            },
         },
         None,
     )? {

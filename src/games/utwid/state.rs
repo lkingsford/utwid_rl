@@ -29,6 +29,7 @@ pub struct UtwidState {
     pub spawn_rng: SmallRng,
     pub actor_id_counter: ActorId,
     pub reward_progress: Option<Vec<f64>>,
+    pub reward_config: RewardConfig,
 }
 
 bitflags! {
@@ -37,15 +38,32 @@ bitflags! {
     }
 }
 
-const AI_TURN_WEIGHT: f64 = 0.2;
-const AI_TURN_LEVEL_BASE: f64 = 0.75;
-const AI_TURN_LEVEL_MULTIPLIER: f64 = 10.0;
-const AI_TURN_HEALTH_WEIGHT: f64 = 2.5;
-const AI_TURN_HEALTH_BIAS: f64 = -0.3;
-const AI_WIN_REWARD: f64 = 20.0;
-const AI_LOSE_REWARD: f64 = -20.0;
-const STALEMATE_REWARD: f64 = -5.0;
-const LEVEL_REWARD: f64 = 20.0;
+#[derive(Clone, Copy, Debug)]
+pub struct RewardConfig {
+    pub turn_weight: f64,
+    pub level_base: f64,
+    pub health_weight: f64,
+    pub health_bias: f64,
+    pub win_reward: f64,
+    pub lose_reward: f64,
+    pub stalemate_reward: f64,
+    pub level_reward: f64,
+}
+
+impl Default for RewardConfig {
+    fn default() -> Self {
+        RewardConfig {
+            turn_weight: 0.2,
+            level_base: 0.75,
+            health_weight: 2.5,
+            health_bias: -0.3,
+            win_reward: 20.0,
+            lose_reward: -20.0,
+            stalemate_reward: -5.0,
+            level_reward: 20.0,
+        }
+    }
+}
 
 impl UtwidState {
     pub fn new() -> UtwidState {
@@ -70,6 +88,7 @@ impl UtwidState {
             prescription_turns: None,
             temporary_damage_bonus: None,
             reward_progress: None,
+            reward_config: RewardConfig::default(),
         }
     }
 
@@ -362,14 +381,14 @@ impl UtwidState {
     }
 
     fn ai_turn_weight(&self) -> f64 {
-        (AI_TURN_LEVEL_BASE as f64).powf(self.ai_turns as f64 * AI_TURN_WEIGHT) / 2.0
+        (self.reward_config.level_base as f64).powf(self.ai_turns as f64 * self.reward_config.turn_weight) / 2.0
     }
 
     pub(crate) fn accumulate_stair_reward(&mut self) {
         if self.reward_progress.is_none() {
             self.reward_progress = Some(vec![0.0; self.reward_actor_count()]);
         }
-        let player_reward = LEVEL_REWARD * self.ai_turn_weight();
+        let player_reward = self.reward_config.level_reward * self.ai_turn_weight();
         let rewards = self.reward_progress.as_mut().unwrap();
         rewards[YOU_ID] += player_reward;
         rewards[MON2Y_ID] -= player_reward;
@@ -379,8 +398,8 @@ impl UtwidState {
         if self.reward_progress.is_none() {
             self.reward_progress = Some(vec![0.0; self.reward_actor_count()]);
         }
-        let player_reward = ((self.player_health_ratio() + AI_TURN_HEALTH_BIAS)
-            * AI_TURN_HEALTH_WEIGHT)
+        let player_reward = ((self.player_health_ratio() + self.reward_config.health_bias)
+            * self.reward_config.health_weight)
             * self.ai_turn_weight();
         let rewards = self.reward_progress.as_mut().unwrap();
         rewards[YOU_ID] += player_reward;
@@ -546,16 +565,16 @@ impl State for UtwidState {
                 rewards[MON2Y_ID] += -reward;
             }
             GameState::Lost => {
-                rewards[YOU_ID] += AI_LOSE_REWARD * self.ai_turn_weight();
-                rewards[MON2Y_ID] += AI_WIN_REWARD * self.ai_turn_weight();
+                rewards[YOU_ID] += self.reward_config.lose_reward * self.ai_turn_weight();
+                rewards[MON2Y_ID] += self.reward_config.win_reward * self.ai_turn_weight();
             }
             GameState::Won => {
-                rewards[YOU_ID] += AI_WIN_REWARD * self.ai_turn_weight();
-                rewards[MON2Y_ID] += AI_LOSE_REWARD * self.ai_turn_weight();
+                rewards[YOU_ID] += self.reward_config.win_reward * self.ai_turn_weight();
+                rewards[MON2Y_ID] += self.reward_config.lose_reward * self.ai_turn_weight();
             }
             GameState::Stalemate => {
-                rewards[YOU_ID] += STALEMATE_REWARD * self.ai_turn_weight();
-                rewards[MON2Y_ID] += STALEMATE_REWARD * self.ai_turn_weight();
+                rewards[YOU_ID] += self.reward_config.stalemate_reward * self.ai_turn_weight();
+                rewards[MON2Y_ID] += self.reward_config.stalemate_reward * self.ai_turn_weight();
             }
             _ => {}
         };

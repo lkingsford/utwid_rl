@@ -322,9 +322,9 @@ fn checkpoint_reward_uses_player_health_ratio_and_stays_terminal() {
 fn lost_and_won_rewards_match_actor_outcomes() {
     let mut lost_state = UtwidState::new();
     lost_state.game_state = GameState::Lost;
-    assert_eq!(lost_state.reward(), vec![-1.0, 1.0]);
+    assert_eq!(lost_state.reward(), vec![-10.0, 10.0]);
 
     let mut won_state = UtwidState::new();
     won_state.game_state = GameState::Won;
-    assert_eq!(won_state.reward(), vec![1.0, -1.0]);
+    assert_eq!(won_state.reward(), vec![10.0, -10.0]);
 }

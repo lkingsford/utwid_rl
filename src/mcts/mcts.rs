@@ -17,15 +17,16 @@ pub fn run_mcts_iterations<
     iterations: usize,
     time_limit: Option<std::time::Duration>,
     thread_count: usize,
+    deep_copy_depth: Option<usize>,
 ) {
     let mut threads = vec![];
 
     let finished_iterations: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
 
-    let original_snapshot = tree.root.read().unwrap().deep_clone(None);
+    let original_snapshot = tree.root.read().unwrap().deep_clone(deep_copy_depth);
 
     for _ in 0..thread_count {
-        let mut thread_tree = tree.deep_clone(None);
+        let mut thread_tree = tree.deep_clone(deep_copy_depth);
         thread_tree.root.write().unwrap().reset_visits();
         let finished_iterations_clone: Arc<AtomicUsize> = Arc::clone(&finished_iterations);
         let time_started = std::time::Instant::now();
@@ -96,6 +97,7 @@ pub fn calculate_best_turn<
     exploration_constant: f64,
     log_children: bool,
     existing_tree: Option<Arc<Tree<StateType, ActionType>>>,
+    deep_copy_depth: Option<usize>,
 ) -> (
     <StateType as State>::ActionType,
     Option<Arc<Tree<StateType, ActionType>>>,
@@ -129,7 +131,7 @@ where
         )),
     };
 
-    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count);
+    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count, deep_copy_depth);
 
     if log::log_enabled!(log::Level::Trace) || log_children {
         tree.root.clone().read().unwrap().log_children(0);
@@ -301,6 +303,7 @@ mod tests {
             BestTurnPolicy::MostVisits,
             2.0_f64.sqrt(),
             false,
+            None,
             None,
         );
 
