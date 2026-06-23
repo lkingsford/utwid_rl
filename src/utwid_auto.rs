@@ -339,6 +339,8 @@ struct Args {
     explore_out: String,
     #[arg(short, long, default_value_t = 1.0)]
     difficulty_mod: f32,
+    #[arg(short, long, default_value_t = THREADS)]
+    threads: usize,
     #[arg(short, long, default_value_t = HUMAN_ITERATIONS)]
     iterations: usize,
     #[arg(
@@ -449,6 +451,7 @@ struct GameRunConfig {
     very_human: bool,
     difficulty_mod: f32,
     iterations: usize,
+    threads: usize,
     exploration_constant: f64,
     deep_copy_depth: Option<usize>,
     reward_config: RewardConfig,
@@ -819,7 +822,7 @@ fn run_game(
                 let (best_turn_from_calculate, tree_from_calculate) = calculate_best_turn(
                     mcts_iterations,
                     None,
-                    THREADS,
+                    config.threads,
                     ai_marked_state,
                     BestTurnPolicy::Ucb0,
                     config.exploration_constant,
@@ -930,6 +933,7 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
                         very_human: false,
                         difficulty_mod: *difficulty_mod,
                         iterations: *iterations,
+                        threads: args.threads,
                         exploration_constant: *exploration_constant,
                         deep_copy_depth: args.deep_copy_depth,
                         reward_config: *reward_config,
@@ -1076,6 +1080,7 @@ fn main() -> std::io::Result<()> {
             very_human: args.very_human,
             difficulty_mod: args.difficulty_mod,
             iterations: args.iterations,
+            threads: args.threads,
             exploration_constant: args.exploration_constant,
             deep_copy_depth: args.deep_copy_depth,
             reward_config: RewardConfig {
