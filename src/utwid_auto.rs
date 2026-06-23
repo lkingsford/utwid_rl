@@ -17,10 +17,12 @@ use std::thread;
 use std::{
     collections::BTreeMap,
     fs::OpenOptions,
-    io::{Stdout, Write, stdout},
+    io::{Read, Seek, Stdout, Write, stdout},
     sync::Arc,
     time::Duration,
 };
+
+use fs2::FileExt;
 
 use mon2y::mcts::tree::Tree;
 use mon2y::mcts::{BestTurnPolicy, calculate_best_turn};
@@ -489,12 +491,22 @@ fn write_explore_json(
     configs: &[GameRunConfig],
     stats: &BTreeMap<String, ExplorationResult>,
 ) -> std::io::Result<()> {
-    let mut existing: Vec<ExploreEntry> = std::fs::OpenOptions::new()
+    let mut file = OpenOptions::new()
         .read(true)
-        .open(path)
-        .ok()
-        .and_then(|f| serde_json::from_reader(f).ok())
-        .unwrap_or_default();
+        .write(true)
+        .create(true)
+        .open(path)?;
+    file.lock_exclusive()?;
+
+    let mut existing: Vec<ExploreEntry> = {
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        if contents.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str(&contents).unwrap_or_default()
+        }
+    };
 
     let existing_map: BTreeMap<String, usize> = existing
         .iter()
@@ -528,14 +540,13 @@ fn write_explore_json(
             &config.reward_config,
         );
         let stat = stats.get(&key).cloned().unwrap_or_default();
-        let wins = stat.wins;
         let total = stat.total_games;
+        if total == 0 {
+            continue;
+        }
+        let wins = stat.wins;
         let losses = total.saturating_sub(wins);
-        let percentage = if total == 0 {
-            0.0
-        } else {
-            wins as f64 * 100.0 / total as f64
-        };
+        let percentage = wins as f64 * 100.0 / total as f64;
 
         if let Some(&idx) = existing_map.get(&key) {
             let entry = &mut existing[idx];
@@ -566,12 +577,11 @@ fn write_explore_json(
         }
     }
 
-    let file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)?;
-    serde_json::to_writer_pretty(file, &existing)?;
+    file.set_len(0)?;
+    file.seek(std::io::SeekFrom::Start(0))?;
+    serde_json::to_writer_pretty(&file, &existing)?;
+
+    file.unlock()?;
     Ok(())
 }
 
@@ -702,8 +712,8 @@ fn run_game(
 
     let mut max_level = 0;
 
-    queue!(stdout, Clear(ClearType::All))?;
     if !config.plain_mode {
+        queue!(stdout, Clear(ClearType::All))?;
         if let Some(stats) = exploration_stats {
             draw_exploration_status(stdout, stats)?;
         }
