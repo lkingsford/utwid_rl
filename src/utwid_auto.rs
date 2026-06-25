@@ -17,12 +17,10 @@ use std::thread;
 use std::{
     collections::BTreeMap,
     fs::OpenOptions,
-    io::{Read, Seek, Stdout, Write, stdout},
+    io::{Stdout, Write, stdout},
     sync::Arc,
     time::Duration,
 };
-
-use fs2::FileExt;
 
 use mon2y::mcts::tree::Tree;
 use mon2y::mcts::{BestTurnPolicy, calculate_best_turn};
@@ -491,21 +489,11 @@ fn write_explore_json(
     configs: &[GameRunConfig],
     stats: &BTreeMap<String, ExplorationResult>,
 ) -> std::io::Result<()> {
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .open(path)?;
-    file.lock_exclusive()?;
-
-    let mut existing: Vec<ExploreEntry> = {
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        if contents.is_empty() {
-            Vec::new()
-        } else {
+    let mut existing: Vec<ExploreEntry> = match std::fs::read_to_string(path) {
+        Ok(contents) if !contents.is_empty() => {
             serde_json::from_str(&contents).unwrap_or_default()
         }
+        _ => Vec::new(),
     };
 
     let existing_map: BTreeMap<String, usize> = existing
@@ -577,11 +565,10 @@ fn write_explore_json(
         }
     }
 
-    file.set_len(0)?;
-    file.seek(std::io::SeekFrom::Start(0))?;
-    serde_json::to_writer_pretty(&file, &existing)?;
-
-    file.unlock()?;
+    let json = serde_json::to_string_pretty(&existing)?;
+    let tmp_path = format!("{}.tmp", path);
+    std::fs::write(&tmp_path, &json)?;
+    std::fs::rename(&tmp_path, path)?;
     Ok(())
 }
 
