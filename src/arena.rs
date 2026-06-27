@@ -41,6 +41,8 @@ struct MctsSettings {
     iterations: usize,
     time_limit: Option<f32>,
     threads: Option<usize>,
+    simulation_threads: Option<usize>,
+    simulations: Option<usize>,
 }
 
 fn run_episode<G: Game>(game: G, players: Vec<PlayerSettings>) -> Vec<f64> {
@@ -66,6 +68,14 @@ fn run_episode<G: Game>(game: G, players: Vec<PlayerSettings>) -> Vec<f64> {
                         match mcts_settings.threads {
                             None => 4,
                             Some(thread) => thread,
+                        },
+                        match mcts_settings.simulation_threads {
+                            None => 4,
+                            Some(thread) => thread,
+                        },
+                        match mcts_settings.simulations {
+                            None => 1,
+                            Some(sims) => sims,
                         },
                         state.clone(),
                         mcts_settings.policy,

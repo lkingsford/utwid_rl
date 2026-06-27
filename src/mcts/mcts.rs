@@ -17,6 +17,8 @@ pub fn run_mcts_iterations<
     iterations: usize,
     time_limit: Option<std::time::Duration>,
     thread_count: usize,
+    simulation_threads: usize,
+    simulations: usize,
 ) {
     let mut threads = vec![];
 
@@ -31,7 +33,7 @@ pub fn run_mcts_iterations<
                 "Starting iteration {}",
                 finished_iterations_clone.load(std::sync::atomic::Ordering::SeqCst)
             );
-            let result = tree_clone.iterate();
+            let result = tree_clone.iterate(simulation_threads, simulations);
             let current_iterations =
                 finished_iterations_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             trace!("Finished iteration {}", current_iterations);
@@ -64,6 +66,8 @@ pub fn calculate_best_turn<
     iterations: usize,
     time_limit: Option<std::time::Duration>,
     thread_count: usize,
+    simulation_threads: usize,
+    simulations: usize,
     state: StateType,
     policy: BestTurnPolicy,
     exploration_constant: f64,
@@ -102,7 +106,7 @@ where
         }),
     };
 
-    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count);
+    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count, simulation_threads, simulations);
 
     if log::log_enabled!(log::Level::Trace) || log_children {
         tree.root.clone().read().unwrap().log_children(0);
@@ -269,6 +273,8 @@ mod tests {
         let (_, tree) = calculate_best_turn(
             10,
             None,
+            1,
+            1,
             1,
             state,
             BestTurnPolicy::MostVisits,

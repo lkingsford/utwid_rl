@@ -339,8 +339,12 @@ struct Args {
     explore_out: String,
     #[arg(short, long, default_value_t = 1.0)]
     difficulty_mod: f32,
-    #[arg(short, long, default_value_t = THREADS)]
+    #[arg(short = 'T', long, default_value_t = THREADS)]
     threads: usize,
+    #[arg(short = 's', long, default_value_t = 8)]
+    simulation_threads: usize,
+    #[arg(short = 'S', long, default_value_t = 1)]
+    simulations: usize,
     #[arg(short, long, default_value_t = HUMAN_ITERATIONS)]
     iterations: usize,
     #[arg(
@@ -450,6 +454,8 @@ struct GameRunConfig {
     difficulty_mod: f32,
     iterations: usize,
     threads: usize,
+    simulation_threads: usize,
+    simulations: usize,
     exploration_constant: f64,
     reward_config: RewardConfig,
 }
@@ -644,7 +650,7 @@ fn sample_actions(stdout: &mut Stdout, state: &UtwidState, iterations: usize) {
     let tree = std::sync::Arc::new(mon2y::mcts::tree::Tree::new(
         mon2y::mcts::node::create_expanded_node(state.clone(), None, None),
     ));
-    run_mcts_iterations(tree.clone(), iterations, None, 8);
+    run_mcts_iterations(tree.clone(), iterations, None, 8, 1, 1);
     let root_ref = tree.root.clone();
     let root = root_ref.read().unwrap();
     if let mon2y::mcts::node::Node::Expanded { children, .. } = &*root {
@@ -829,6 +835,8 @@ fn run_game(
                     mcts_iterations,
                     None,
                     config.threads,
+                    config.simulation_threads,
+                    config.simulations,
                     ai_marked_state,
                     BestTurnPolicy::Ucb0,
                     config.exploration_constant,
@@ -940,6 +948,8 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
                         difficulty_mod: *difficulty_mod,
                         iterations: *iterations,
                         threads: args.threads,
+                        simulation_threads: args.simulation_threads,
+                        simulations: args.simulations,
                         exploration_constant: *exploration_constant,
                         reward_config: *reward_config,
                     };
@@ -1109,6 +1119,8 @@ fn main() -> std::io::Result<()> {
             difficulty_mod: args.difficulty_mod,
             iterations: args.iterations,
             threads: args.threads,
+            simulation_threads: args.simulation_threads,
+            simulations: args.simulations,
             exploration_constant: args.exploration_constant,
             reward_config: RewardConfig {
                 turn_weight: args.reward_turn_weight,
