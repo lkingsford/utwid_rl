@@ -83,28 +83,6 @@ where
         }
     }
 
-    pub fn deep_clone(&self, depth_limit: Option<usize>) -> Self {
-        let root = self.root.read().unwrap().deep_clone(depth_limit);
-        Tree {
-            root: Tree::node_ref(root),
-            constant: self.constant,
-            per: self.per,
-        }
-    }
-
-    pub fn tree_merge(&self, other: &Self) -> Self {
-        // Subtlety: merging trees with different root states will produce garbage.
-        // Callers should ensure both root nodes originate from the same state.
-        let root_self = self.root.read().unwrap();
-        let root_other = other.root.read().unwrap();
-        let merged = root_self.node_merge(&root_other);
-        Tree {
-            root: Tree::node_ref(merged),
-            constant: self.constant,
-            per: self.per,
-        }
-    }
-
     ///
     /// Returns a path to the current selection
     ///

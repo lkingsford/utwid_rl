@@ -368,8 +368,6 @@ struct Args {
         default_values_t = [0.05, 0.1, 0.3, 0.6, 1.0, 1.4142135623730951, 2.0]
     )]
     exploration_constant_set: Vec<f64>,
-    #[arg(long)]
-    deep_copy_depth: Option<usize>,
     #[arg(long, default_value_t = 0.2)]
     reward_turn_weight: f64,
     #[arg(long, default_value_t = 0.75)]
@@ -453,7 +451,6 @@ struct GameRunConfig {
     iterations: usize,
     threads: usize,
     exploration_constant: f64,
-    deep_copy_depth: Option<usize>,
     reward_config: RewardConfig,
 }
 
@@ -647,7 +644,7 @@ fn sample_actions(stdout: &mut Stdout, state: &UtwidState, iterations: usize) {
     let tree = std::sync::Arc::new(mon2y::mcts::tree::Tree::new(
         mon2y::mcts::node::create_expanded_node(state.clone(), None, None),
     ));
-    run_mcts_iterations(tree.clone(), iterations, None, 8, None);
+    run_mcts_iterations(tree.clone(), iterations, None, 8);
     let root_ref = tree.root.clone();
     let root = root_ref.read().unwrap();
     if let mon2y::mcts::node::Node::Expanded { children, .. } = &*root {
@@ -837,7 +834,6 @@ fn run_game(
                     config.exploration_constant,
                     false,
                     tree,
-                    config.deep_copy_depth,
                 );
                 tree = tree_from_calculate;
                 best_turn = Some(best_turn_from_calculate);
@@ -945,7 +941,6 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
                         iterations: *iterations,
                         threads: args.threads,
                         exploration_constant: *exploration_constant,
-                        deep_copy_depth: args.deep_copy_depth,
                         reward_config: *reward_config,
                     };
                     stats.insert(
@@ -1115,7 +1110,6 @@ fn main() -> std::io::Result<()> {
             iterations: args.iterations,
             threads: args.threads,
             exploration_constant: args.exploration_constant,
-            deep_copy_depth: args.deep_copy_depth,
             reward_config: RewardConfig {
                 turn_weight: args.reward_turn_weight,
                 level_base: args.reward_level_base,
