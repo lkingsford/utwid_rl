@@ -194,10 +194,9 @@ where
                 let current_leaf_arc = parent_guard.get_child(leaf_action);
 
                 if Arc::ptr_eq(&leaf_node_arc, &current_leaf_arc) {
-                    let parent_state = parent_guard.state();
                     let expanded_node = current_leaf_arc.read().unwrap().expansion(
                         leaf_action.clone(),
-                        parent_state,
+                        &*parent_guard.state(),
                         self.per,
                     );
                     parent_guard.insert_child(leaf_action.clone(), expanded_node);
@@ -283,14 +282,13 @@ where
         let expanded_nodes = self.expansion(&selection);
         if let Selection::Selection(selection_result) = selection {
             let play_out_result = {
+                let leaf = expanded_nodes
+                    .last()
+                    .unwrap()
+                    .read()
+                    .unwrap();
                 self.play_out(
-                    expanded_nodes
-                        .last()
-                        .unwrap()
-                        .read()
-                        .unwrap()
-                        .state()
-                        .clone(),
+                    leaf.state().as_ref().clone(),
                     self.perspective_player(),
                 )
             };

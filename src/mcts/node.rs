@@ -29,7 +29,7 @@ pub struct VisitCountValue {
 #[derive(Debug)]
 pub enum Node<StateType: State, ActionType: Action<StateType = StateType>> {
     Expanded {
-        state: Arc<StateType>,
+        state: RwLock<Option<Arc<StateType>>>,
         children: HashMap<ActionType, Arc<RwLock<Node<StateType, ActionType>>>>,
         visit_count: u32,
         value_sums: Vec<VisitCountValue>,
@@ -49,15 +49,14 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
             Node::Expanded {
                 children,
                 cached_fully_explored,
+                state,
                 ..
             } => {
                 if let Ok(cached_fully_explored_read) = cached_fully_explored.try_read() {
                     if let Some(cached_fully_explored_value) = *cached_fully_explored_read {
-                        //log::error!("CACHE HIT");
                         return cached_fully_explored_value;
                     }
                 }
-                //log::error!("CACHE MISS");
                 let fully_explored = children.is_empty()
                     || children.values().all(|child| {
                         let child_node = child.read().unwrap();
@@ -68,8 +67,12 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
                     });
                 if let Ok(mut cached_fully_explored) = cached_fully_explored.try_write() {
                     *cached_fully_explored = Some(fully_explored);
-                    // log::error!("CACHE WRITE");
                 };
+                if fully_explored {
+                    if let Ok(mut state_lock) = state.try_write() {
+                        *state_lock = None;
+                    }
+                }
                 fully_explored
             }
             Node::Placeholder { .. } => false,
@@ -237,9 +240,9 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         }
     }
 
-    pub fn state(&self) -> &StateType {
+    pub fn state(&self) -> Arc<StateType> {
         match self {
-            Node::Expanded { state, .. } => &**state,
+            Node::Expanded { state, .. } => state.read().unwrap().clone().expect("state is None"),
             Node::Placeholder { .. } => panic!("Placeholder node has no state"),
         }
     }
@@ -348,7 +351,7 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct BestPickEntry<ActionType> {
     pub action_to_take: ActionType,
     pub ucb: f64,
@@ -503,7 +506,7 @@ where
     };
 
     Node::Expanded {
-        state,
+        state: RwLock::new(Some(state)),
         children,
         visit_count: 0,
         value_sums: vec![VisitCountValue::default(); reward_len],
