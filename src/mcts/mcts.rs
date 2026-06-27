@@ -108,31 +108,37 @@ where
     ActionType: Action<StateType = StateType>,
 {
     log::debug!("Starting next turn");
-    let per = match state.next_actor() {
-        Actor::Player(player_id) => Some(player_id),
-        Actor::GameAction(_) => None,
-    };
-    let root_node = create_expanded_node(state, None, per);
-    if let Node::Expanded { children, .. } = &root_node {
-        if children.is_empty() {
-            panic!("calculate_best_turn called with a root state that has no available actions");
-        }
-        if children.len() == 1 {
-            log::debug!("Short circuited - only one option");
-            return (children.keys().next().unwrap().clone(), None);
-        }
-    }
 
     let tree = match existing_tree {
         Some(existing_tree) => existing_tree,
-        None => Arc::new(Tree::new_with_constant_and_per(
-            root_node,
-            exploration_constant,
-            per,
-        )),
+        None => Arc::new({
+            let per = match state.next_actor() {
+                Actor::Player(player_id) => Some(player_id),
+                Actor::GameAction(_) => None,
+            };
+            let root_node = create_expanded_node(state, None, per);
+            if let Node::Expanded { children, .. } = &root_node {
+                if children.is_empty() {
+                    panic!(
+                        "calculate_best_turn called with a root state that has no available actions"
+                    );
+                }
+                if children.len() == 1 {
+                    log::debug!("Short circuited - only one option");
+                    return (children.keys().next().unwrap().clone(), None);
+                }
+            };
+            Tree::new_with_constant_and_per(root_node, exploration_constant, per)
+        }),
     };
 
-    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count, deep_copy_depth);
+    run_mcts_iterations(
+        tree.clone(),
+        iterations,
+        time_limit,
+        thread_count,
+        deep_copy_depth,
+    );
 
     if log::log_enabled!(log::Level::Trace) || log_children {
         tree.root.clone().read().unwrap().log_children(0);
