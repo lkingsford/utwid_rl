@@ -5,26 +5,27 @@ use super::types::*;
 use super::*;
 
 impl UtwidAction {
-    pub(super) fn execute_move(&self, state: &UtwidState) -> (UtwidState, Vec<UtwidEvent>) {
+    pub(super) fn execute_move(&self, state: UtwidState) -> (UtwidState, Vec<UtwidEvent>) {
         log::trace!("execute_move");
         let direction = match self {
             UtwidAction::Move(direction) => *direction,
             _ => unreachable!("execute_move only handles Move actions"),
         };
 
-        let actor = state.actor(state.to_act).unwrap();
-        let (new_x, new_y) = apply_dir(actor.x, actor.y, direction);
+        let (new_x, new_y) = {
+            let actor = state.actor(state.to_act).unwrap();
+            apply_dir(actor.x, actor.y, direction)
+        };
         self.move_to(state, new_x, new_y)
     }
 
     pub(super) fn move_to(
         &self,
-        state: &UtwidState,
+        mut new_state: UtwidState,
         new_x: usize,
         new_y: usize,
     ) -> (UtwidState, Vec<UtwidEvent>) {
         log::trace!("move_to");
-        let mut new_state = state.clone();
         let mut events: Vec<UtwidEvent> = vec![];
         let actor_id = new_state.to_act;
 
@@ -77,14 +78,14 @@ impl UtwidAction {
             (actor.x, actor.y) = (new_x, new_y);
         }
 
-        let actor_ref = new_state.actor(actor_id).unwrap();
+        let actor_clone = new_state.actor(actor_id).unwrap().clone();
 
-        if actor_ref.actor_type == ACTOR_TYPE_YOU {
-            let tile = new_state.board.get(actor_ref.x, actor_ref.y);
+        if actor_clone.actor_type == ACTOR_TYPE_YOU {
+            let tile = new_state.board.get(actor_clone.x, actor_clone.y);
             if tile.traits.contains(TileTraits::STAIRS) {
-                (self.execute_stairs(actor_ref, &new_state), events)
+                (self.execute_stairs(actor_clone, new_state), events)
             } else if tile.traits.contains(TileTraits::WIN) {
-                let (win_state, mut win_events) = self.execute_win(&new_state);
+                let (win_state, mut win_events) = self.execute_win(new_state);
                 events.append(&mut win_events);
                 (win_state, events)
             } else {
@@ -97,16 +98,14 @@ impl UtwidAction {
 
     pub(crate) fn execute_stairs(
         &self,
-        acting_character: &GameActor,
-        state: &UtwidState,
+        acting_character: GameActor,
+        mut new_state: UtwidState,
     ) -> UtwidState {
         log::trace!("execute_stairs");
-        let mut new_state = state.clone();
-        new_state.current_level = state.current_level + 1;
-        // new_state.game_state = GameState::Checkpoint;
-        let mut board_rng = state.board.rng.clone();
+        new_state.current_level += 1;
+        let mut board_rng = new_state.board.rng.clone();
         new_state.board = Board::new(new_state.current_level, &mut board_rng);
-        let mut you = acting_character.clone();
+        let mut you = acting_character;
         you.x = 1;
         you.y = 3;
         you.traits.remove(ActorTraits::DEAD);
@@ -124,9 +123,8 @@ impl UtwidAction {
         new_state
     }
 
-    pub(super) fn execute_win(&self, state: &UtwidState) -> (UtwidState, Vec<UtwidEvent>) {
+    pub(super) fn execute_win(&self, mut new_state: UtwidState) -> (UtwidState, Vec<UtwidEvent>) {
         log::trace!("execute_win");
-        let mut new_state = state.clone();
         new_state.game_state = GameState::Won;
         (new_state, vec![UtwidEvent::Won])
     }
