@@ -68,11 +68,6 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
                 if let Ok(mut cached_fully_explored) = cached_fully_explored.try_write() {
                     *cached_fully_explored = Some(fully_explored);
                 };
-                if fully_explored {
-                    if let Ok(mut state_lock) = state.try_write() {
-                        *state_lock = None;
-                    }
-                }
                 fully_explored
             }
             Node::Placeholder { .. } => false,
