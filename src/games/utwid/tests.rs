@@ -195,7 +195,8 @@ fn stairs_transition_resets_turn_state_across_multiple_floors() {
         else {
             break;
         };
-        state = UtwidAction::Move(Dir::N).execute_stairs(state.actor(0).unwrap(), &state);
+        let you = state.actor(0).unwrap().clone();
+        state = UtwidAction::Move(Dir::N).execute_stairs(you, state);
         transitioned = true;
 
         assert_eq!(state.to_act, 0);
@@ -233,7 +234,8 @@ fn stairs_transition_clears_monsters_dead_entries_and_stale_turn_ids() {
         else {
             break;
         };
-        state = UtwidAction::Move(Dir::N).execute_stairs(state.actor(0).unwrap(), &state);
+        let you = state.actor(0).unwrap().clone();
+        state = UtwidAction::Move(Dir::N).execute_stairs(you, state);
         transitioned = true;
 
         assert_eq!(state.to_act, 0);

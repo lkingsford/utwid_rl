@@ -29,7 +29,7 @@ pub struct VisitCountValue {
 #[derive(Debug)]
 pub enum Node<StateType: State, ActionType: Action<StateType = StateType>> {
     Expanded {
-        state: Arc<StateType>,
+        state: RwLock<Option<Arc<StateType>>>,
         children: HashMap<ActionType, Arc<RwLock<Node<StateType, ActionType>>>>,
         visit_count: u32,
         value_sums: Vec<VisitCountValue>,
@@ -49,15 +49,14 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
             Node::Expanded {
                 children,
                 cached_fully_explored,
+                state,
                 ..
             } => {
                 if let Ok(cached_fully_explored_read) = cached_fully_explored.try_read() {
                     if let Some(cached_fully_explored_value) = *cached_fully_explored_read {
-                        //log::error!("CACHE HIT");
                         return cached_fully_explored_value;
                     }
                 }
-                //log::error!("CACHE MISS");
                 let fully_explored = children.is_empty()
                     || children.values().all(|child| {
                         let child_node = child.read().unwrap();
@@ -68,7 +67,6 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
                     });
                 if let Ok(mut cached_fully_explored) = cached_fully_explored.try_write() {
                     *cached_fully_explored = Some(fully_explored);
-                    // log::error!("CACHE WRITE");
                 };
                 fully_explored
             }
@@ -237,9 +235,9 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         }
     }
 
-    pub fn state(&self) -> &StateType {
+    pub fn state(&self) -> Arc<StateType> {
         match self {
-            Node::Expanded { state, .. } => &**state,
+            Node::Expanded { state, .. } => state.read().unwrap().clone().expect("state is None"),
             Node::Placeholder { .. } => panic!("Placeholder node has no state"),
         }
     }
@@ -268,31 +266,6 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         create_expanded_node(state, weight, per)
     }
 
-    pub fn reset_visits(&mut self) {
-        match self {
-            Node::Expanded {
-                visit_count,
-                value_sums,
-                cached_ucb,
-                cached_fully_explored,
-                children,
-                ..
-            } => {
-                *visit_count = 0;
-                for vs in value_sums.iter_mut() {
-                    vs.visit_count = 0;
-                    vs.value_sum = 0.0;
-                }
-                *cached_ucb = RwLock::new(None);
-                *cached_fully_explored = RwLock::new(None);
-                for child in children.values_mut() {
-                    child.write().unwrap().reset_visits();
-                }
-            }
-            Node::Placeholder { .. } => {}
-        }
-    }
-
     pub fn mean_child_est_reward_for_player(&self, player_id: u8) -> f64 {
         match self {
             Node::Expanded { children, .. } => {
@@ -312,61 +285,6 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         }
     }
 
-    pub fn deep_clone(&self, depth_limit: Option<usize>) -> Self {
-        match self {
-            Node::Expanded {
-                state,
-                children,
-                visit_count,
-                value_sums,
-                game_action,
-                weight,
-                ..
-            } => {
-                let cloned_children = if let Some(limit) = depth_limit {
-                    if limit <= 1 {
-                        children
-                            .iter()
-                            .map(|(action, _)| {
-                                (
-                                    action.clone(),
-                                    Arc::new(RwLock::new(Node::Placeholder { weight: None })),
-                                )
-                            })
-                            .collect()
-                    } else {
-                        children
-                            .iter()
-                            .map(|(action, child)| {
-                                let cloned = child.read().unwrap().deep_clone(Some(limit - 1));
-                                (action.clone(), Arc::new(RwLock::new(cloned)))
-                            })
-                            .collect()
-                    }
-                } else {
-                    children
-                        .iter()
-                        .map(|(action, child)| {
-                            let cloned = child.read().unwrap().deep_clone(None);
-                            (action.clone(), Arc::new(RwLock::new(cloned)))
-                        })
-                        .collect()
-                };
-                Node::Expanded {
-                    state: state.clone(),
-                    children: cloned_children,
-                    visit_count: *visit_count,
-                    value_sums: value_sums.clone(),
-                    cached_ucb: RwLock::new(None),
-                    cached_fully_explored: RwLock::new(None),
-                    game_action: *game_action,
-                    weight: *weight,
-                }
-            }
-            Node::Placeholder { weight } => Node::Placeholder { weight: *weight },
-        }
-    }
-
     pub fn get_node_by_path(
         &self,
         path: Vec<ActionType>,
@@ -383,81 +301,6 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
             }
         }
         node.unwrap()
-    }
-
-    pub fn node_merge(&self, other: &Self) -> Self {
-        // Subtlety: merging trees with different root states will produce garbage.
-        // Callers should ensure both nodes originate from the same state (Arc::ptr_eq).
-        match (self, other) {
-            (Node::Placeholder { weight: _ }, Node::Expanded { .. }) => other.deep_clone(None),
-            (Node::Expanded { .. }, Node::Placeholder { weight: _ }) => self.deep_clone(None),
-            (Node::Placeholder { weight }, Node::Placeholder { weight: weight_b }) => {
-                Node::Placeholder {
-                    weight: weight.or(*weight_b),
-                }
-            }
-            (
-                Node::Expanded {
-                    state,
-                    children,
-                    visit_count,
-                    value_sums,
-                    game_action,
-                    weight,
-                    ..
-                },
-                Node::Expanded {
-                    children: children_b,
-                    visit_count: visit_count_b,
-                    value_sums: value_sums_b,
-                    game_action: game_action_b,
-                    weight: weight_b,
-                    ..
-                },
-            ) => {
-                let merged_visits = *visit_count + *visit_count_b;
-                let merged_values: Vec<VisitCountValue> = value_sums
-                    .iter()
-                    .zip(value_sums_b.iter())
-                    .map(|(a, b)| VisitCountValue {
-                        visit_count: a.visit_count + b.visit_count,
-                        value_sum: a.value_sum + b.value_sum,
-                    })
-                    .collect();
-
-                let mut merged_children: HashMap<
-                    ActionType,
-                    Arc<RwLock<Node<StateType, ActionType>>>,
-                > = HashMap::new();
-                for (action, child) in children.iter() {
-                    merged_children.insert(action.clone(), child.clone());
-                }
-                for (action, child_b) in children_b.iter() {
-                    if let Some(existing) = merged_children.get(action) {
-                        let merged = {
-                            let a = existing.read().unwrap();
-                            let b = child_b.read().unwrap();
-                            a.node_merge(&b)
-                        };
-                        merged_children.insert(action.clone(), Arc::new(RwLock::new(merged)));
-                    } else {
-                        let cloned = child_b.read().unwrap().deep_clone(None);
-                        merged_children.insert(action.clone(), Arc::new(RwLock::new(cloned)));
-                    }
-                }
-
-                Node::Expanded {
-                    state: state.clone(),
-                    children: merged_children,
-                    visit_count: merged_visits,
-                    value_sums: merged_values,
-                    cached_ucb: RwLock::new(None),
-                    cached_fully_explored: RwLock::new(None),
-                    game_action: *game_action,
-                    weight: weight.or(*weight_b),
-                }
-            }
-        }
     }
 
     pub fn log_children(&self, level: usize) {
@@ -503,7 +346,7 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct BestPickEntry<ActionType> {
     pub action_to_take: ActionType,
     pub ucb: f64,
@@ -658,7 +501,7 @@ where
     };
 
     Node::Expanded {
-        state,
+        state: RwLock::new(Some(state)),
         children,
         visit_count: 0,
         value_sums: vec![VisitCountValue::default(); reward_len],

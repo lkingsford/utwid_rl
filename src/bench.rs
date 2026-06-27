@@ -28,6 +28,8 @@ fn run_benchmark<G: Game>(game: G, iterations: usize, thread_count: usize) -> f6
         iterations,
         None,
         thread_count,
+        1,
+        1,
         state,
         BestTurnPolicy::MostVisits,
         2.0_f64.sqrt(),

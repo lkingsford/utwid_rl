@@ -33,7 +33,7 @@ pub struct PlayOutResult<GameHyperrewardType> {
     pub round_hyperreward: GameHyperrewardType,
 }
 
-impl<StateType: State<ActionType = ActionType>, ActionType: Action<StateType = StateType>>
+impl<StateType: State<ActionType = ActionType> + Send + 'static, ActionType: Action<StateType = StateType>>
     Tree<StateType, ActionType>
 where
     StateType: State<ActionType = ActionType>,
@@ -80,28 +80,6 @@ where
             root: Tree::node_ref(root),
             constant,
             per,
-        }
-    }
-
-    pub fn deep_clone(&self, depth_limit: Option<usize>) -> Self {
-        let root = self.root.read().unwrap().deep_clone(depth_limit);
-        Tree {
-            root: Tree::node_ref(root),
-            constant: self.constant,
-            per: self.per,
-        }
-    }
-
-    pub fn tree_merge(&self, other: &Self) -> Self {
-        // Subtlety: merging trees with different root states will produce garbage.
-        // Callers should ensure both root nodes originate from the same state.
-        let root_self = self.root.read().unwrap();
-        let root_other = other.root.read().unwrap();
-        let merged = root_self.node_merge(&root_other);
-        Tree {
-            root: Tree::node_ref(merged),
-            constant: self.constant,
-            per: self.per,
         }
     }
 
@@ -216,10 +194,9 @@ where
                 let current_leaf_arc = parent_guard.get_child(leaf_action);
 
                 if Arc::ptr_eq(&leaf_node_arc, &current_leaf_arc) {
-                    let parent_state = parent_guard.state();
                     let expanded_node = current_leaf_arc.read().unwrap().expansion(
                         leaf_action.clone(),
-                        parent_state,
+                        &*parent_guard.state(),
                         self.per,
                     );
                     parent_guard.insert_child(leaf_action.clone(), expanded_node);
@@ -236,41 +213,115 @@ where
         &self,
         state: StateType,
         per: u8,
+        simulation_threads: usize,
+        simulations: usize,
     ) -> PlayOutResult<StateType::GameHyperrewardType> {
-        let mut rng = rand::rng();
-
-        let mut cur_state = state;
-
-        let mut random_walk_steps = 0;
-
-        while !cur_state.terminal() {
-            random_walk_steps += 1;
-            match cur_state.next_actor() {
-                Actor::Player(_) => {
-                    let permitted_actions = cur_state.permitted_actions(Some(per));
-
-                    if permitted_actions.is_empty() {
-                        log::warn!("Player has no permitted actions in a non-terminal state.");
-                        break;
+        let single_playout = move |s: StateType| -> PlayOutResult<StateType::GameHyperrewardType> {
+            let mut rng = rand::rng();
+            let mut cur_state = s;
+            let mut random_walk_steps = 0;
+            while !cur_state.terminal() {
+                random_walk_steps += 1;
+                match cur_state.next_actor() {
+                    Actor::Player(_) => {
+                        let permitted_actions = cur_state.permitted_actions(Some(per));
+                        if permitted_actions.is_empty() {
+                            log::warn!("Player has no permitted actions in a non-terminal state.");
+                            break;
+                        }
+                        let action: ActionType =
+                            permitted_actions[rng.random_range(0..permitted_actions.len())].clone();
+                        let (new_state, _events) = action.execute(&cur_state);
+                        cur_state = new_state;
                     }
-
-                    let action: ActionType =
-                        permitted_actions[rng.random_range(0..permitted_actions.len())].clone();
-                    let (new_state, _events) = action.execute(&cur_state);
-                    cur_state = new_state;
-                }
-                Actor::GameAction(actions) => {
-                    let action = weighted_random(actions);
-                    let (new_state, _events) = action.execute(&cur_state);
-                    cur_state = new_state;
+                    Actor::GameAction(actions) => {
+                        let action = weighted_random(actions);
+                        let (new_state, _events) = action.execute(&cur_state);
+                        cur_state = new_state;
+                    }
                 }
             }
+            trace!("Reward is {:?}", cur_state.reward());
+            PlayOutResult {
+                reward: cur_state.reward(),
+                random_walk_steps,
+                round_hyperreward: cur_state.round_hyperreward(),
+            }
+        };
+
+        let run_batch = move |s: StateType, count: usize| -> PlayOutResult<StateType::GameHyperrewardType> {
+            if count <= 1 {
+                return single_playout(s);
+            }
+            let mut total_reward: Option<Vec<f64>> = None;
+            let mut total_walk_steps = 0u64;
+            let mut last_hyperreward: Option<StateType::GameHyperrewardType> = None;
+            for _ in 0..count {
+                let result = single_playout(s.clone());
+                if let Some(ref mut total) = total_reward {
+                    for (j, r) in result.reward.iter().enumerate() {
+                        if j < total.len() {
+                            total[j] += r;
+                        }
+                    }
+                } else {
+                    total_reward = Some(result.reward);
+                }
+                total_walk_steps += result.random_walk_steps as u64;
+                last_hyperreward = Some(result.round_hyperreward);
+            }
+            if let Some(ref mut total) = total_reward {
+                for r in total.iter_mut() {
+                    *r /= count as f64;
+                }
+            }
+            PlayOutResult {
+                reward: total_reward.unwrap_or_default(),
+                random_walk_steps: (total_walk_steps / count as u64) as u32,
+                round_hyperreward: last_hyperreward.unwrap(),
+            }
+        };
+
+        if simulation_threads <= 1 {
+            return run_batch(state, simulations);
         }
-        trace!("Reward is {:?}", cur_state.reward());
+
+        let mut threads = Vec::with_capacity(simulation_threads);
+        for _ in 0..simulation_threads {
+            let state_clone = state.clone();
+            threads.push(std::thread::spawn(move || run_batch(state_clone, simulations)));
+        }
+
+        let mut total_reward: Option<Vec<f64>> = None;
+        let mut total_walk_steps = 0u64;
+        let mut result_count = 0u32;
+        let mut last_hyperreward: Option<StateType::GameHyperrewardType> = None;
+        for thread in threads {
+            let result = thread.join().unwrap();
+            if let Some(ref mut total) = total_reward {
+                for (j, r) in result.reward.iter().enumerate() {
+                    if j < total.len() {
+                        total[j] += r;
+                    }
+                }
+            } else {
+                total_reward = Some(result.reward);
+            }
+            total_walk_steps += result.random_walk_steps as u64;
+            result_count += 1;
+            last_hyperreward = Some(result.round_hyperreward);
+        }
+
+        if let Some(ref mut total) = total_reward {
+            for r in total.iter_mut() {
+                *r /= result_count as f64;
+            }
+        }
+
         PlayOutResult {
-            reward: cur_state.reward(),
-            random_walk_steps: random_walk_steps,
-            round_hyperreward: cur_state.round_hyperreward(),
+            reward: total_reward.unwrap_or_default(),
+            random_walk_steps: (total_walk_steps / result_count as u64) as u32,
+            round_hyperreward: last_hyperreward.unwrap(),
         }
     }
 
@@ -296,7 +347,7 @@ where
         }
     }
 
-    pub fn iterate(&self) -> Selection<ActionType> {
+    pub fn iterate(&self, simulation_threads: usize, simulations: usize) -> Selection<ActionType> {
         let selection = self.selection();
         if let Selection::FullyExplored = selection {
             log::warn!("Iterate short circuited - fully explored");
@@ -304,18 +355,14 @@ where
         };
         let expanded_nodes = self.expansion(&selection);
         if let Selection::Selection(selection_result) = selection {
-            let play_out_result = {
-                self.play_out(
-                    expanded_nodes
-                        .last()
-                        .unwrap()
-                        .read()
-                        .unwrap()
-                        .state()
-                        .clone(),
-                    self.perspective_player(),
-                )
+            let leaf_state = {
+                let leaf = expanded_nodes.last().unwrap().read().unwrap();
+                leaf.state().as_ref().clone()
             };
+            let per = self.perspective_player();
+
+            let play_out_result = self.play_out(leaf_state.clone(), per, simulation_threads, simulations);
+
             self.propagate_reward(expanded_nodes, &play_out_result.reward);
 
             return Selection::Selection(SelectionResult {
@@ -577,7 +624,7 @@ mod tests {
         let (explored_state, _events) = InjectableGameAction::WinInXTurns(2).execute(&root_state);
         let root = create_expanded_node(root_state, None, None);
         let tree = Tree::new(root);
-        let reward = tree.play_out(explored_state, 0);
+        let reward = tree.play_out(explored_state, 0, 1, 1);
 
         assert_eq!(reward.reward, vec![1.0]);
     }
@@ -792,7 +839,7 @@ mod tests {
         let mut weight_1_visits = 0;
         let mut weight_2_visits = 0;
         for _ in 0..1000 {
-            let reward = tree.play_out(root_state.clone(), 0).reward;
+            let reward = tree.play_out(root_state.clone(), 0, 1, 1).reward;
             if reward[0] < 0.0 {
                 weight_1_visits += 1
             } else {
@@ -828,7 +875,7 @@ mod tests {
 
         let root = create_expanded_node(root_state, None, None);
         let tree = Tree::new(root);
-        let play_out_result = tree.play_out(tree.root.read().unwrap().state().clone(), 0);
+        let play_out_result = tree.play_out(tree.root.read().unwrap().state().as_ref().clone(), 0, 1, 1);
         assert_eq!(
             play_out_result.round_hyperreward,
             TestHyperreward { value: 100 }

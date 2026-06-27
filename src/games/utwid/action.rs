@@ -78,35 +78,35 @@ impl Action for UtwidAction {
         let mut action_events: Vec<UtwidEvent> = vec![];
         let mut new_state = match self {
             UtwidAction::Move(_) => {
-                let (s, e) = self.execute_move(&cost_spent_state);
+                let (s, e) = self.execute_move(cost_spent_state);
                 action_events = e;
                 s
             }
             UtwidAction::Wait => cost_spent_state,
             UtwidAction::Explode => {
-                let (s, e) = self.execute_explode(&cost_spent_state);
+                let (s, e) = self.execute_explode(cost_spent_state);
                 action_events = e;
                 s
             }
-            UtwidAction::Prescription => self.execute_prescription(&cost_spent_state),
+            UtwidAction::Prescription => self.execute_prescription(cost_spent_state),
             UtwidAction::Conclusion(_) => {
-                let (s, e) = self.execute_conclusion(&cost_spent_state);
+                let (s, e) = self.execute_conclusion(cost_spent_state);
                 action_events = e;
                 s
             }
-            UtwidAction::Stagnation(_) => self.execute_stagnation(&cost_spent_state),
+            UtwidAction::Stagnation(_) => self.execute_stagnation(cost_spent_state),
             UtwidAction::Contention(_) => {
-                let (s, e) = self.execute_contention(&cost_spent_state);
+                let (s, e) = self.execute_contention(cost_spent_state);
                 action_events = e;
                 s
             }
             UtwidAction::Multiplication(_) => {
-                let (s, e) = self.execute_multiplication(&cost_spent_state);
+                let (s, e) = self.execute_multiplication(cost_spent_state);
                 action_events = e;
                 s
             }
             UtwidAction::Assumption(_) => {
-                let (s, e) = self.execute_assumption(&cost_spent_state);
+                let (s, e) = self.execute_assumption(cost_spent_state);
                 action_events = e;
                 s
             }

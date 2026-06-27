@@ -5,9 +5,8 @@ fn neighborhood_range(center: usize, max: usize) -> std::ops::Range<usize> {
 }
 
 impl UtwidAction {
-    pub(super) fn execute_explode(&self, state: &UtwidState) -> (UtwidState, Vec<UtwidEvent>) {
+    pub(super) fn execute_explode(&self, mut new_state: UtwidState) -> (UtwidState, Vec<UtwidEvent>) {
         log::trace!("execute_explode");
-        let mut new_state = state.clone();
         let mut events: Vec<UtwidEvent> = vec![];
         let actor_id = new_state.to_act;
         let (x0, y0, damage) = {

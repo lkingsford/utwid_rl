@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
-use log::{debug, trace};
+use log::trace;
 
 use super::BestTurnPolicy;
 use super::game_trait::{Action, Actor, State};
@@ -17,67 +17,40 @@ pub fn run_mcts_iterations<
     iterations: usize,
     time_limit: Option<std::time::Duration>,
     thread_count: usize,
-    deep_copy_depth: Option<usize>,
+    simulation_threads: usize,
+    simulations: usize,
 ) {
     let mut threads = vec![];
 
     let finished_iterations: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
 
-    let original_snapshot = tree.root.read().unwrap().deep_clone(deep_copy_depth);
-
     for _ in 0..thread_count {
         let tree_clone = Arc::clone(&tree);
         let finished_iterations_clone: Arc<AtomicUsize> = Arc::clone(&finished_iterations);
         let time_started = std::time::Instant::now();
-        threads.push(std::thread::spawn(move || {
-            let mut thread_tree = tree_clone.deep_clone(deep_copy_depth);
-            thread_tree.root.write().unwrap().reset_visits();
-            loop {
-                {
-                    debug!(
-                        "Starting iteration {}",
-                        finished_iterations_clone.load(std::sync::atomic::Ordering::SeqCst)
-                    );
-                    let result = thread_tree.iterate();
-                    let current_iterations =
-                        finished_iterations_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    trace!("Finished iteration {}", current_iterations);
-                    if current_iterations >= iterations
-                        || matches!(result, Selection::FullyExplored)
-                        || time_started.elapsed() > time_limit.unwrap_or(std::time::Duration::MAX)
-                    {
-                        break;
-                    }
-                }
+        threads.push(std::thread::spawn(move || loop {
+            trace!(
+                "Starting iteration {}",
+                finished_iterations_clone.load(std::sync::atomic::Ordering::SeqCst)
+            );
+            let result = tree_clone.iterate(simulation_threads, simulations);
+            let current_iterations =
+                finished_iterations_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            trace!("Finished iteration {}", current_iterations);
+            if current_iterations >= iterations
+                || matches!(result, Selection::FullyExplored)
+                || time_started.elapsed() > time_limit.unwrap_or(std::time::Duration::MAX)
+            {
+                break;
             }
-            thread_tree
         }));
     }
 
-    let mut threads_iter = threads.into_iter();
-    let mut merged_node = match threads_iter.next() {
-        Some(thread) => {
-            let thread_tree = thread.join().unwrap();
-            let lock = Arc::into_inner(thread_tree.root).unwrap();
-            lock.into_inner().unwrap()
-        }
-        None => return,
-    };
-    for thread in threads_iter {
-        match thread.join() {
-            Ok(thread_tree) => {
-                let lock = Arc::into_inner(thread_tree.root).unwrap();
-                let thread_root = lock.into_inner().unwrap();
-                merged_node = merged_node.node_merge(&thread_root);
-            }
-            Err(e) => {
-                log::error!("A worker thread panicked: {:?}", e);
-            }
+    for thread in threads {
+        if let Err(e) = thread.join() {
+            log::error!("A worker thread panicked: {:?}", e);
         }
     }
-
-    merged_node = merged_node.node_merge(&original_snapshot);
-    *tree.root.write().unwrap() = merged_node;
 
     log::debug!(
         "Completed {} iterations",
@@ -93,12 +66,13 @@ pub fn calculate_best_turn<
     iterations: usize,
     time_limit: Option<std::time::Duration>,
     thread_count: usize,
+    simulation_threads: usize,
+    simulations: usize,
     state: StateType,
     policy: BestTurnPolicy,
     exploration_constant: f64,
     log_children: bool,
     existing_tree: Option<Arc<Tree<StateType, ActionType>>>,
-    deep_copy_depth: Option<usize>,
 ) -> (
     <StateType as State>::ActionType,
     Option<Arc<Tree<StateType, ActionType>>>,
@@ -108,31 +82,31 @@ where
     ActionType: Action<StateType = StateType>,
 {
     log::debug!("Starting next turn");
-    let per = match state.next_actor() {
-        Actor::Player(player_id) => Some(player_id),
-        Actor::GameAction(_) => None,
-    };
-    let root_node = create_expanded_node(state, None, per);
-    if let Node::Expanded { children, .. } = &root_node {
-        if children.is_empty() {
-            panic!("calculate_best_turn called with a root state that has no available actions");
-        }
-        if children.len() == 1 {
-            log::debug!("Short circuited - only one option");
-            return (children.keys().next().unwrap().clone(), None);
-        }
-    }
 
     let tree = match existing_tree {
         Some(existing_tree) => existing_tree,
-        None => Arc::new(Tree::new_with_constant_and_per(
-            root_node,
-            exploration_constant,
-            per,
-        )),
+        None => Arc::new({
+            let per = match state.next_actor() {
+                Actor::Player(player_id) => Some(player_id),
+                Actor::GameAction(_) => None,
+            };
+            let root_node = create_expanded_node(state, None, per);
+            if let Node::Expanded { children, .. } = &root_node {
+                if children.is_empty() {
+                    panic!(
+                        "calculate_best_turn called with a root state that has no available actions"
+                    );
+                }
+                if children.len() == 1 {
+                    log::debug!("Short circuited - only one option");
+                    return (children.keys().next().unwrap().clone(), None);
+                }
+            };
+            Tree::new_with_constant_and_per(root_node, exploration_constant, per)
+        }),
     };
 
-    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count, deep_copy_depth);
+    run_mcts_iterations(tree.clone(), iterations, time_limit, thread_count, simulation_threads, simulations);
 
     if log::log_enabled!(log::Level::Trace) || log_children {
         tree.root.clone().read().unwrap().log_children(0);
@@ -300,11 +274,12 @@ mod tests {
             10,
             None,
             1,
+            1,
+            1,
             state,
             BestTurnPolicy::MostVisits,
             2.0_f64.sqrt(),
             false,
-            None,
             None,
         );
 
