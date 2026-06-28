@@ -814,7 +814,8 @@ fn run_game(
                     Some((
                         usize::max(
                             1,
-                            ((mon2y.iterations as f32) * config.difficulty_mod) as usize,
+                            ((mon2y.iterations as f32) * config.difficulty_mod) as usize 
+                                / (config.simulation_threads * config.simulations).max(1),
                         ),
                         0,
                     ))
