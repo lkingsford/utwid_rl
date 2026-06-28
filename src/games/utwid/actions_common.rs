@@ -35,14 +35,27 @@ impl UtwidAction {
         } - new_state.temporary_damage_bonus.unwrap_or_default() as isize;
 
         let mut human_died = false;
-        for (_, actor) in new_state.actors_iter_mut().filter(|(_, actor)| {
-            !actor.traits.contains(ActorTraits::DEAD) && actor.x == new_x && actor.y == new_y
-        }) {
-            events.push(UtwidEvent::DamageTaken(actor.clone(), damage));
-            actor.modify_health(damage);
-            if actor.traits.contains(ActorTraits::DEAD) && actor.traits.contains(ActorTraits::HUMAN)
-            {
-                human_died = true;
+        if let Some(&actor_id) = new_state.spatial_hashmap.get(&(new_x, new_y)) {
+            let mut actor_died = false;
+            let mut was_human = false;
+            
+            if let Some(actor) = new_state.actor_mut(actor_id) {
+                if !actor.traits.contains(ActorTraits::DEAD) {
+                    was_human = actor.traits.contains(ActorTraits::HUMAN);
+                    events.push(UtwidEvent::DamageTaken(actor.clone(), damage));
+                    let was_alive = !actor.traits.contains(ActorTraits::DEAD);
+                    actor.modify_health(damage);
+                    if actor.traits.contains(ActorTraits::DEAD) && was_alive {
+                        actor_died = true;
+                    }
+                }
+            }
+            
+            if actor_died {
+                new_state.spatial_hashmap.remove(&(new_x, new_y));
+                if was_human {
+                    human_died = true;
+                }
             }
         }
 
@@ -61,13 +74,7 @@ impl UtwidAction {
             tile.modify_health(damage);
         }
 
-        if new_state
-            .actors_iter()
-            .map(|(_, actor)| actor)
-            .find(|actor| {
-                !actor.traits.contains(ActorTraits::DEAD) && actor.x == new_x && actor.y == new_y
-            })
-            .is_none()
+        if new_state.actor_in_space(new_x, new_y).is_none()
             && new_state
                 .board
                 .get(new_x, new_y)
@@ -75,7 +82,10 @@ impl UtwidAction {
                 .contains(TileTraits::WALKABLE)
         {
             let actor = new_state.actor_mut(actor_id).unwrap();
+            let old_x = actor.x;
+            let old_y = actor.y;
             (actor.x, actor.y) = (new_x, new_y);
+            new_state.update_actor_position(actor_id, old_x, old_y, new_x, new_y);
         }
 
         let actor_clone = new_state.actor(actor_id).unwrap().clone();
@@ -111,9 +121,13 @@ impl UtwidAction {
         you.traits.remove(ActorTraits::DEAD);
         you.traits.insert(ActorTraits::HUMAN);
         new_state.actors = vec![Some(you)];
+        new_state.spatial_hashmap.clear();
+        new_state.spatial_hashmap.insert((1, 3), 0);
         new_state.turn_order = VecDeque::from([0]);
         new_state.to_act = 0;
         new_state.actor_id_counter = 1;
+        new_state.game_state = GameState::Checkpoint;
+        new_state.reward_progress = None;
         if let Some(current_short_circuit) = new_state.short_circuit_at_turns {
             if let Some(increment) = new_state.short_circuit_at_turns_increment {
                 new_state.short_circuit_at_turns = Some(current_short_circuit + increment);

@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use bitflags::bitflags;
 use rand::{SeedableRng, prelude::*, rngs::SmallRng};
@@ -30,6 +30,7 @@ pub struct UtwidState {
     pub actor_id_counter: ActorId,
     pub reward_progress: Option<Vec<f64>>,
     pub reward_config: RewardConfig,
+    pub(crate) spatial_hashmap: HashMap<(usize, usize), ActorId>,
 }
 
 bitflags! {
@@ -71,7 +72,7 @@ impl UtwidState {
         let spawn_rng = SmallRng::from_os_rng();
         let board = { Board::new(0, &mut board_rng) };
 
-        UtwidState {
+        let mut state = UtwidState {
             current_level: 0,
             board: board, // Use the pre-created board
             actors: vec![Some(GameActor::you_actor())],
@@ -89,15 +90,23 @@ impl UtwidState {
             temporary_damage_bonus: None,
             reward_progress: None,
             reward_config: RewardConfig::default(),
-        }
+            spatial_hashmap: HashMap::new(),
+        };
+        state.update_spatial_hashmap();
+        state
     }
 
     // Urgh - I don't know if I should be using an index here...
     pub fn add_actor(&mut self, actor: GameActor) -> ActorId {
         let id = self.actor_id_counter;
+        let pos = (actor.x, actor.y);
+        let is_dead = actor.traits.contains(ActorTraits::DEAD);
         self.actors.push(Some(actor));
         self.actor_id_counter += 1;
         self.turn_order.push_back(id);
+        if !is_dead {
+            self.spatial_hashmap.insert(pos, id);
+        }
         id
     }
 
@@ -114,7 +123,11 @@ impl UtwidState {
     }
 
     pub(crate) fn remove_actor(&mut self, actor_id: ActorId) -> Option<GameActor> {
-        self.actors.get_mut(actor_id).and_then(Option::take)
+        let actor = self.actors.get_mut(actor_id).and_then(Option::take);
+        if let Some(actor) = &actor {
+            self.spatial_hashmap.remove(&(actor.x, actor.y));
+        }
+        actor
     }
 
     pub(crate) fn actors_iter(&self) -> impl Iterator<Item = (ActorId, &GameActor)> {
@@ -173,19 +186,20 @@ impl UtwidState {
     }
 
     pub(crate) fn actor_in_space(&self, x: usize, y: usize) -> Option<&GameActor> {
-        self.actors
-            .iter()
-            .filter_map(|actor| actor.as_ref())
+        self.spatial_hashmap
+            .get(&(x, y))
+            .and_then(|&actor_id| self.actor(actor_id))
             .filter(|actor| !actor.traits.contains(ActorTraits::DEAD))
-            .find(|actor| actor.x == x && actor.y == y)
     }
 
     pub(crate) fn actor_id_in_space(&self, x: usize, y: usize) -> Option<ActorId> {
-        self.actors_iter()
-            .find(|(_, actor)| {
-                !actor.traits.contains(ActorTraits::DEAD) && actor.x == x && actor.y == y
+        self.spatial_hashmap
+            .get(&(x, y))
+            .copied()
+            .filter(|&actor_id| {
+                self.actor(actor_id)
+                    .map_or(false, |actor| !actor.traits.contains(ActorTraits::DEAD))
             })
-            .map(|(id, _)| id)
     }
 
     pub(crate) fn first_actor_in_direction(
@@ -221,12 +235,42 @@ impl UtwidState {
                 break None;
             }
 
-            if let Some(actor_id) = self.actor_id_in_space(target_x_usize, target_y_usize) {
-                return Some(actor_id);
+            if let Some(&actor_id) = self.spatial_hashmap.get(&(target_x_usize, target_y_usize)) {
+                if let Some(actor) = self.actor(actor_id) {
+                    if !actor.traits.contains(ActorTraits::DEAD) {
+                        return Some(actor_id);
+                    }
+                }
             }
 
             target_x += dx;
             target_y += dy;
+        }
+    }
+
+    pub(crate) fn update_spatial_hashmap(&mut self) {
+        self.spatial_hashmap.clear();
+        for (actor_id, actor_opt) in self.actors.iter().enumerate() {
+            if let Some(actor) = actor_opt {
+                if !actor.traits.contains(ActorTraits::DEAD) {
+                    self.spatial_hashmap.insert((actor.x, actor.y), actor_id);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn update_actor_position(&mut self, actor_id: ActorId, old_x: usize, old_y: usize, new_x: usize, new_y: usize) {
+        if old_x != new_x || old_y != new_y {
+            self.spatial_hashmap.remove(&(old_x, old_y));
+        }
+        if !self.actor(actor_id).map_or(true, |a| a.traits.contains(ActorTraits::DEAD)) {
+            self.spatial_hashmap.insert((new_x, new_y), actor_id);
+        }
+    }
+
+    pub(crate) fn remove_actor_from_spatial_hashmap(&mut self, actor_id: ActorId) {
+        if let Some(actor) = self.actor(actor_id) {
+            self.spatial_hashmap.remove(&(actor.x, actor.y));
         }
     }
 
@@ -432,77 +476,70 @@ impl State for UtwidState {
         let is_you = next_actor.actor_type == ACTOR_TYPE_YOU;
         let cost_suicide_protected = next_actor.effective_allegiance() == next_actor.allegiance;
 
-        let mut permitted_actions: Vec<_> = board_permitted_moves
-            .iter()
-            .copied()
-            .filter(|direction| {
-                let (x, y) = apply_dir(next_actor.x, next_actor.y, *direction);
-                let on_point = self.actor_in_space(x, y);
-                if let Some(actor) = on_point {
-                    next_actor.traits.contains(ActorTraits::MELEE)
-                        && next_actor.effective_allegiance() != actor.effective_allegiance()
-                } else {
-                    true
+        let mut permitted_actions = Vec::with_capacity(board_permitted_moves.len() + 10); // Estimate capacity
+        
+        // Add move actions
+        for &direction in &board_permitted_moves {
+            let (x, y) = apply_dir(next_actor.x, next_actor.y, direction);
+            if let Some(actor) = self.actor_in_space(x, y) {
+                if next_actor.traits.contains(ActorTraits::MELEE)
+                    && next_actor.effective_allegiance() != actor.effective_allegiance()
+                {
+                    permitted_actions.push(UtwidAction::Move(direction));
                 }
-            })
-            .map(UtwidAction::Move)
-            .chain(
-                next_actor
-                    .traits
-                    .contains(ActorTraits::BOMB)
-                    .then_some(UtwidAction::Explode),
-            )
-            .collect();
+            } else {
+                permitted_actions.push(UtwidAction::Move(direction));
+            }
+        }
+        
+        // Add explode action if applicable
+        if next_actor.traits.contains(ActorTraits::BOMB) {
+            permitted_actions.push(UtwidAction::Explode);
+        }
 
         if is_you {
-            permitted_actions.extend(
-                board_permitted_moves
-                    .iter()
-                    .copied()
-                    .map(UtwidAction::Conclusion),
-            );
+            // Add conclusion actions
+            for &direction in &board_permitted_moves {
+                permitted_actions.push(UtwidAction::Conclusion(direction));
+            }
+            
+            // Add stagnation moves
             let stagnation_moves = self
-                .filter_directions_by_board_space(CARDINAL_DIRS.to_vec(), next_actor)
-                .into_iter()
-                .map(UtwidAction::Stagnation);
-            permitted_actions.extend(stagnation_moves);
-
-            let contention_moves = CARDINAL_DIRS
-                .iter()
-                .chain(DIAGONAL_DIRS.iter())
-                .map(|d| d.0)
-                .map(UtwidAction::Contention);
-            permitted_actions.extend(contention_moves);
-
+                .filter_directions_by_board_space(CARDINAL_DIRS.to_vec(), next_actor);
+            for direction in stagnation_moves {
+                permitted_actions.push(UtwidAction::Stagnation(direction));
+            }
+            
+            // Add contention moves
+            for (direction, _, _) in CARDINAL_DIRS.iter().chain(DIAGONAL_DIRS.iter()) {
+                permitted_actions.push(UtwidAction::Contention(*direction));
+            }
+            
             permitted_actions.push(UtwidAction::Prescription);
-
+            
+            // Add multiplication moves
             let multiplication_moves = self
                 .filter_directions_by_board_space(
                     CARDINAL_DIRS.iter().chain(DIAGONAL_DIRS.iter()).copied(),
                     next_actor,
-                )
-                .into_iter()
-                .map(UtwidAction::Multiplication);
-            permitted_actions.extend(multiplication_moves);
-
-            let assumption_moves = CARDINAL_DIRS
-                .iter()
-                .chain(DIAGONAL_DIRS.iter())
-                .filter_map(|(direction, _, _)| {
-                    self.first_actor_in_direction(next_actor, *direction)
-                        .is_some()
-                        .then_some(*direction)
-                })
-                .map(UtwidAction::Assumption);
-            permitted_actions.extend(assumption_moves);
+                );
+            for direction in multiplication_moves {
+                permitted_actions.push(UtwidAction::Multiplication(direction));
+            }
+            
+            // Add assumption moves
+            for (direction, _, _) in CARDINAL_DIRS.iter().chain(DIAGONAL_DIRS.iter()) {
+                if self.first_actor_in_direction(next_actor, *direction).is_some() {
+                    permitted_actions.push(UtwidAction::Assumption(*direction));
+                }
+            }
         }
 
         let permitted_actions = if cost_suicide_protected {
             let hp = next_actor.health.unwrap();
             permitted_actions
-                .iter()
-                .filter(|&action| action_cost(action.clone()) < hp)
-                .cloned()
+                .into_iter()
+                .filter(|action| action_cost(*action) < hp)
                 .collect()
         } else {
             permitted_actions

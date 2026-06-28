@@ -70,10 +70,18 @@ impl Action for UtwidAction {
         log::trace!("execute");
         let mut cost_spent_state = state.clone();
         // Need to spend cost before making move
+        let actor_id = state.to_act;
         cost_spent_state
-            .actor_mut(state.to_act)
+            .actor_mut(actor_id)
             .unwrap()
             .modify_health(-1 * action_cost(*self) as isize);
+        
+        // Check if actor died from action cost
+        if let Some(actor) = cost_spent_state.actor(actor_id) {
+            if actor.traits.contains(ActorTraits::DEAD) {
+                cost_spent_state.remove_actor_from_spatial_hashmap(actor_id);
+            }
+        }
 
         let mut action_events: Vec<UtwidEvent> = vec![];
         let mut new_state = match self {
