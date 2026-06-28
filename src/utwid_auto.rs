@@ -295,8 +295,8 @@ const HUMAN_ITERATIONS: usize = 3000;
 const ITERATIONS_STEPS: usize = 10;
 const THREADS: usize = 8;
 const EXPLORATION_CONSTANT: f64 = 0.3;
-const SHORT_CIRCUIT_AT_TURNS: usize = 100;
-const SHORT_CIRCUIT_INCREMENT: usize = 100;
+const SHORT_CIRCUIT_AT_TURNS: usize = 50;
+const SHORT_CIRCUIT_INCREMENT: usize = 10;
 
 const DRAW_BOARD_X: u16 = 3;
 const DRAW_BOARD_Y: u16 = 3;
@@ -374,7 +374,7 @@ struct Args {
     exploration_constant_set: Vec<f64>,
     #[arg(long, default_value_t = 0.2)]
     reward_turn_weight: f64,
-    #[arg(long, default_value_t = 0.75)]
+    #[arg(long, default_value_t = 0.95)]
     reward_level_base: f64,
     #[arg(long, default_value_t = 2.5)]
     reward_health_weight: f64,
@@ -814,7 +814,7 @@ fn run_game(
                     Some((
                         usize::max(
                             1,
-                            ((mon2y.iterations as f32) * config.difficulty_mod) as usize 
+                            ((mon2y.iterations as f32) * config.difficulty_mod) as usize
                                 / (config.simulation_threads * config.simulations).max(1),
                         ),
                         0,
