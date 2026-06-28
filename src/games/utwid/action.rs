@@ -142,13 +142,13 @@ impl Action for UtwidAction {
                     new_state.add_actor(GameActor::one_actor(spawn.0, spawn.1));
                 }
             }
+        }
 
-            new_state.ai_turns += 1;
-            if let Some(short_circuit_turns_remaining) = new_state.short_circuit_at_turns {
-                new_state.short_circuit_at_turns = Some(short_circuit_turns_remaining - 1);
-                if short_circuit_turns_remaining == 1 {
-                    new_state.game_state = GameState::Mon2yShortcircuit;
-                }
+        new_state.ai_turns += 1;
+        if let Some(short_circuit_turns_remaining) = new_state.short_circuit_at_turns {
+            new_state.short_circuit_at_turns = Some(short_circuit_turns_remaining - 1);
+            if short_circuit_turns_remaining == 1 {
+                new_state.game_state = GameState::Mon2yShortcircuit;
             }
         }
         if matches!(state.game_state, GameState::Checkpoint)
