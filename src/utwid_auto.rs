@@ -388,6 +388,8 @@ struct Args {
     reward_stalemate: f64,
     #[arg(long, default_value_t = 20.0)]
     reward_level: f64,
+    #[arg(long, default_value_t = 1.0)]
+    reward_passivity_penalty: f64,
     #[arg(
         long,
         value_delimiter = ',',
@@ -444,6 +446,13 @@ struct Args {
         default_values_t = [20.0f64]
     )]
     reward_level_set: Vec<f64>,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 1..,
+        default_values_t = [1.0f64]
+    )]
+    reward_passivity_penalty_set: Vec<f64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -480,6 +489,7 @@ struct ExploreEntry {
     lose_reward: f64,
     stalemate_reward: f64,
     level_reward: f64,
+    passivity_penalty: f64,
     wins: usize,
     losses: usize,
     percentage: f64,
@@ -514,6 +524,7 @@ fn write_explore_json(
                     lose_reward: e.lose_reward,
                     stalemate_reward: e.stalemate_reward,
                     level_reward: e.level_reward,
+                    passivity_penalty: e.passivity_penalty,
                 },
             );
             (key, i)
@@ -557,6 +568,7 @@ fn write_explore_json(
                 lose_reward: config.reward_config.lose_reward,
                 stalemate_reward: config.reward_config.stalemate_reward,
                 level_reward: config.reward_config.level_reward,
+                passivity_penalty: config.reward_config.passivity_penalty,
                 wins,
                 losses,
                 percentage,
@@ -575,7 +587,7 @@ fn write_explore_json(
 
 fn format_reward_config_key(config: &RewardConfig) -> String {
     format!(
-        "tw{}_lb{}_hw{}_hb{}_wr{}_lr{}_sr{}_lvr{}",
+        "tw{}_lb{}_hw{}_hb{}_wr{}_lr{}_sr{}_lvr{}_pp{}",
         config.turn_weight,
         config.level_base,
         config.health_weight,
@@ -584,6 +596,7 @@ fn format_reward_config_key(config: &RewardConfig) -> String {
         config.lose_reward,
         config.stalemate_reward,
         config.level_reward,
+        config.passivity_penalty,
     )
 }
 
@@ -913,16 +926,19 @@ fn build_reward_configs(args: &Args) -> Vec<RewardConfig> {
                         for lose_reward in &args.reward_lose_set {
                             for stalemate_reward in &args.reward_stalemate_set {
                                 for level_reward in &args.reward_level_set {
-                                    configs.push(RewardConfig {
-                                        turn_weight: *turn_weight,
-                                        level_base: *level_base,
-                                        health_weight: *health_weight,
-                                        health_bias: *health_bias,
-                                        win_reward: *win_reward,
-                                        lose_reward: *lose_reward,
-                                        stalemate_reward: *stalemate_reward,
-                                        level_reward: *level_reward,
-                                    });
+                                    for passivity_penalty in &args.reward_passivity_penalty_set {
+                                        configs.push(RewardConfig {
+                                            turn_weight: *turn_weight,
+                                            level_base: *level_base,
+                                            health_weight: *health_weight,
+                                            health_bias: *health_bias,
+                                            win_reward: *win_reward,
+                                            lose_reward: *lose_reward,
+                                            stalemate_reward: *stalemate_reward,
+                                            level_reward: *level_reward,
+                                            passivity_penalty: *passivity_penalty,
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -1132,6 +1148,7 @@ fn main() -> std::io::Result<()> {
                 lose_reward: args.reward_lose,
                 stalemate_reward: args.reward_stalemate,
                 level_reward: args.reward_level,
+                passivity_penalty: args.reward_passivity_penalty,
             },
         },
         None,

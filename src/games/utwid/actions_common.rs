@@ -48,6 +48,12 @@ impl UtwidAction {
                     if actor.traits.contains(ActorTraits::DEAD) && was_alive {
                         actor_died = true;
                     }
+                    // Record aggressive action if player dealt damage
+                    if let Some(attacker) = new_state.actor(new_state.to_act) {
+                        if attacker.actor_type == ACTOR_TYPE_YOU {
+                            new_state.turns_since_aggressive_action = 0;
+                        }
+                    }
                 }
             }
             
@@ -128,6 +134,7 @@ impl UtwidAction {
         new_state.actor_id_counter = 1;
         new_state.game_state = GameState::Checkpoint;
         new_state.reward_progress = None;
+        new_state.turns_since_aggressive_action = 0;
         if let Some(current_short_circuit) = new_state.short_circuit_at_turns {
             if let Some(increment) = new_state.short_circuit_at_turns_increment {
                 new_state.short_circuit_at_turns = Some(current_short_circuit + increment);

@@ -31,6 +31,7 @@ pub struct UtwidState {
     pub reward_progress: Option<Vec<f64>>,
     pub reward_config: RewardConfig,
     pub(crate) spatial_hashmap: HashMap<(usize, usize), ActorId>,
+    pub(crate) turns_since_aggressive_action: usize,
 }
 
 bitflags! {
@@ -49,6 +50,7 @@ pub struct RewardConfig {
     pub lose_reward: f64,
     pub stalemate_reward: f64,
     pub level_reward: f64,
+    pub passivity_penalty: f64,
 }
 
 impl Default for RewardConfig {
@@ -62,6 +64,7 @@ impl Default for RewardConfig {
             lose_reward: -20.0,
             stalemate_reward: -5.0,
             level_reward: 20.0,
+            passivity_penalty: 1.0,
         }
     }
 }
@@ -91,6 +94,7 @@ impl UtwidState {
             reward_progress: None,
             reward_config: RewardConfig::default(),
             spatial_hashmap: HashMap::new(),
+            turns_since_aggressive_action: 0,
         };
         state.update_spatial_hashmap();
         state
@@ -274,6 +278,14 @@ impl UtwidState {
         }
     }
 
+    pub(crate) fn record_aggressive_action(&mut self) {
+        if let Some(actor) = self.actor(self.to_act) {
+            if actor.actor_type == ACTOR_TYPE_YOU {
+                self.turns_since_aggressive_action = 0;
+            }
+        }
+    }
+
     fn actor_debug_rows(&self) -> Vec<String> {
         let mut rows: Vec<String> = self
             .actors_iter()
@@ -445,9 +457,13 @@ impl UtwidState {
         let player_reward = ((self.player_health_ratio() + self.reward_config.health_bias)
             * self.reward_config.health_weight)
             * self.ai_turn_weight();
+        
+        // Apply passivity penalty if player hasn't taken aggressive actions
+        let passivity_penalty = self.turns_since_aggressive_action as f64 * self.reward_config.passivity_penalty;
+        
         let rewards = self.reward_progress.as_mut().unwrap();
-        rewards[YOU_ID] += player_reward;
-        rewards[MON2Y_ID] -= player_reward;
+        rewards[YOU_ID] += player_reward - passivity_penalty;
+        rewards[MON2Y_ID] -= player_reward - passivity_penalty;
     }
 }
 

@@ -153,6 +153,22 @@ impl Action for UtwidAction {
         }
 
         new_state.ai_turns += 1;
+        
+        // Increment passivity counter for player if they didn't take aggressive action
+        if let Some(actor) = state.actor(state.to_act) {
+            if actor.actor_type == ACTOR_TYPE_YOU {
+                // Only increment for basic Move or Wait actions
+                match self {
+                    UtwidAction::Move(_) | UtwidAction::Wait => {
+                        new_state.turns_since_aggressive_action += 1;
+                    }
+                    _ => {
+                        // All other actions reset the counter
+                        new_state.turns_since_aggressive_action = 0;
+                    }
+                }
+            }
+        }
         if let Some(short_circuit_turns_remaining) = new_state.short_circuit_at_turns {
             new_state.short_circuit_at_turns = Some(short_circuit_turns_remaining - 1);
             if short_circuit_turns_remaining == 1 {
@@ -165,7 +181,10 @@ impl Action for UtwidAction {
             new_state.game_state = GameState::Ongoing;
         }
 
-        new_state.accumulate_reward();
+        // Don't accumulate reward if we just reached a checkpoint (terminal state)
+        if !matches!(new_state.game_state, GameState::Checkpoint) {
+            new_state.accumulate_reward();
+        }
 
         // Decrement assumed_turns on the actor who just acted
         if let Some(actor) = new_state.actor_mut(state.to_act) {

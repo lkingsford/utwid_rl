@@ -1,4 +1,5 @@
 use super::*;
+use crate::games::utwid::types::ACTOR_TYPE_YOU;
 
 fn neighborhood_range(center: usize, max: usize) -> std::ops::Range<usize> {
     center.saturating_sub(1)..center.saturating_add(2).min(max)
@@ -27,6 +28,12 @@ impl UtwidAction {
                     events.push(UtwidEvent::DamageTaken(actor.clone(), damage));
                     actor.modify_health(damage);
                 }
+            }
+        }
+        // Record aggressive action if player used explode
+        if let Some(actor) = new_state.actor(actor_id) {
+            if actor.actor_type == ACTOR_TYPE_YOU {
+                new_state.turns_since_aggressive_action = 0;
             }
         }
         (new_state, events)
