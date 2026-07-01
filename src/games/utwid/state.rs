@@ -32,6 +32,7 @@ pub struct UtwidState {
     pub reward_config: RewardConfig,
     pub(crate) spatial_hashmap: HashMap<(usize, usize), ActorId>,
     pub(crate) turns_since_aggressive_action: usize,
+    pub player_kills: usize,
 }
 
 bitflags! {
@@ -95,6 +96,7 @@ impl UtwidState {
             reward_config: RewardConfig::default(),
             spatial_hashmap: HashMap::new(),
             turns_since_aggressive_action: 0,
+            player_kills: 0,
         };
         state.update_spatial_hashmap();
         state

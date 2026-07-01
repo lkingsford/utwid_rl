@@ -62,6 +62,12 @@ impl UtwidAction {
                 if was_human {
                     human_died = true;
                 }
+                // Increment player kills if attacker was the player
+                if let Some(attacker) = new_state.actor(new_state.to_act) {
+                    if attacker.actor_type == ACTOR_TYPE_YOU {
+                        new_state.player_kills += 1;
+                    }
+                }
             }
         }
 

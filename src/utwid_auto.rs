@@ -474,6 +474,7 @@ struct ExplorationResult {
     wins: usize,
     total_games: usize,
     depths: Vec<usize>,
+    kills: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -495,6 +496,7 @@ struct ExploreEntry {
     percentage: f64,
     last_run_time: String,
     depths: Vec<usize>,
+    kills: Vec<usize>,
 }
 
 fn write_explore_json(
@@ -554,6 +556,7 @@ fn write_explore_json(
             entry.losses = losses;
             entry.percentage = percentage;
             entry.depths = stat.depths.clone();
+            entry.kills = stat.kills.clone();
             entry.last_run_time = now.clone();
         } else {
             existing.push(ExploreEntry {
@@ -573,6 +576,7 @@ fn write_explore_json(
                 losses,
                 percentage,
                 depths: stat.depths.clone(),
+                kills: stat.kills.clone(),
                 last_run_time: now.clone(),
             });
         }
@@ -641,6 +645,7 @@ fn append_exploration_log(
     exploration_constant: f64,
     reward_config: &RewardConfig,
     win: bool,
+    player_kills: usize,
 ) -> std::io::Result<()> {
     let mut log_file = OpenOptions::new()
         .create(true)
@@ -648,13 +653,14 @@ fn append_exploration_log(
         .open("exploration_log.log")?;
     writeln!(
         log_file,
-        "{}, iterations={}, difficulty_mod={}, exploration_constant={}, reward_config={}, win={}",
+        "{}, iterations={}, difficulty_mod={}, exploration_constant={}, reward_config={}, win={}, kills={}",
         Local::now().to_rfc3339(),
         iterations,
         difficulty_mod,
         exploration_constant,
         format_reward_config_key(reward_config),
-        win
+        win,
+        player_kills
     )?;
     Ok(())
 }
@@ -711,7 +717,7 @@ fn run_game(
     stdout: &mut Stdout,
     config: GameRunConfig,
     exploration_stats: Option<&BTreeMap<String, ExplorationResult>>,
-) -> std::io::Result<(Option<GameState>, usize)> {
+) -> std::io::Result<(Option<GameState>, usize, usize)> {
     let mut state = UtwidState::new();
     state.reward_config = config.reward_config;
     state.short_circuit_at_turns = Some(SHORT_CIRCUIT_AT_TURNS);
@@ -739,7 +745,7 @@ fn run_game(
             }
             stdout.flush()?;
             if poll_for_exit()? {
-                return Ok((None, max_level));
+                return Ok((None, max_level, state.player_kills));
             }
         }
         let to_act = state
@@ -804,7 +810,7 @@ fn run_game(
                             } // Take over a perso
                             KeyCode::Char('c') => {
                                 if key_event.modifiers.intersects(KeyModifiers::CONTROL) {
-                                    return Ok((None, max_level));
+                                    return Ok((None, max_level, state.player_kills));
                                 } else {
                                     None
                                 }
@@ -872,7 +878,7 @@ fn run_game(
                     }
                     stdout.flush()?;
                     if poll_for_exit()? {
-                        return Ok((None, max_level));
+                        return Ok((None, max_level, state.player_kills));
                     }
                 }
             }
@@ -913,7 +919,7 @@ fn run_game(
         stdout.flush()?;
     }
 
-    Ok((Some(state.game_state), max_level))
+    Ok((Some(state.game_state), max_level, state.player_kills))
 }
 
 fn build_reward_configs(args: &Args) -> Vec<RewardConfig> {
@@ -1002,7 +1008,7 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
                 config.exploration_constant,
                 &config.reward_config,
             );
-            let (game_result, max_level) = run_game(stdout, *config, Some(&stats))?;
+            let (game_result, max_level, player_kills) = run_game(stdout, *config, Some(&stats))?;
 
             let Some(game_state) = game_result else {
                 return Ok(());
@@ -1016,12 +1022,14 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
             }
             entry.total_games += 1;
             entry.depths.push(max_level);
+            entry.kills.push(player_kills);
             append_exploration_log(
                 config.iterations,
                 config.difficulty_mod,
                 config.exploration_constant,
                 &config.reward_config,
                 win,
+                player_kills,
             )?;
             write_explore_json(&args.explore_out, &configs, &stats)?;
 
@@ -1153,11 +1161,11 @@ fn main() -> std::io::Result<()> {
         },
         None,
     )? {
-        (Some(GameState::Won), _) => print!("Won!"),
-        (Some(GameState::Lost), _) => print!("Lost!"),
-        (Some(GameState::Stalemate), _) => print!("Stalemate!"),
-        (Some(_), _) => panic!("Invalid end game state"),
-        (None, _) => {}
+        (Some(GameState::Won), _, kills) => println!("Won! Kills: {}", kills),
+        (Some(GameState::Lost), _, kills) => println!("Lost! Kills: {}", kills),
+        (Some(GameState::Stalemate), _, kills) => println!("Stalemate! Kills: {}", kills),
+        (Some(_), _, _) => panic!("Invalid end game state"),
+        (None, _, _) => {}
     }
 
     Ok(())
