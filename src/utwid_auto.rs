@@ -341,10 +341,31 @@ struct Args {
     difficulty_mod: f32,
     #[arg(short = 'T', long, default_value_t = THREADS)]
     threads: usize,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 1..,
+        default_values_t = [THREADS]
+    )]
+    threads_set: Vec<usize>,
     #[arg(short = 's', long, default_value_t = 8)]
     simulation_threads: usize,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 1..,
+        default_values_t = [8usize]
+    )]
+    simulation_threads_set: Vec<usize>,
     #[arg(short = 'S', long, default_value_t = 1)]
     simulations: usize,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 1..,
+        default_values_t = [1usize]
+    )]
+    simulations_set: Vec<usize>,
     #[arg(short, long, default_value_t = HUMAN_ITERATIONS)]
     iterations: usize,
     #[arg(
@@ -482,6 +503,9 @@ struct ExploreEntry {
     difficulty_mod: f32,
     iterations: usize,
     exploration_constant: f64,
+    threads: usize,
+    simulation_threads: usize,
+    simulations: usize,
     turn_weight: f64,
     level_base: f64,
     health_weight: f64,
@@ -517,6 +541,9 @@ fn write_explore_json(
                 e.difficulty_mod,
                 e.iterations,
                 e.exploration_constant,
+                e.threads,
+                e.simulation_threads,
+                e.simulations,
                 &RewardConfig {
                     turn_weight: e.turn_weight,
                     level_base: e.level_base,
@@ -539,6 +566,9 @@ fn write_explore_json(
             config.difficulty_mod,
             config.iterations,
             config.exploration_constant,
+            config.threads,
+            config.simulation_threads,
+            config.simulations,
             &config.reward_config,
         );
         let stat = stats.get(&key).cloned().unwrap_or_default();
@@ -563,6 +593,9 @@ fn write_explore_json(
                 difficulty_mod: config.difficulty_mod,
                 iterations: config.iterations,
                 exploration_constant: config.exploration_constant,
+                threads: config.threads,
+                simulation_threads: config.simulation_threads,
+                simulations: config.simulations,
                 turn_weight: config.reward_config.turn_weight,
                 level_base: config.reward_config.level_base,
                 health_weight: config.reward_config.health_weight,
@@ -608,10 +641,13 @@ fn format_exploration_key(
     difficulty_mod: f32,
     iterations: usize,
     exploration_constant: f64,
+    threads: usize,
+    simulation_threads: usize,
+    simulations: usize,
     reward_config: &RewardConfig,
 ) -> String {
     format!(
-        "{difficulty_mod}x{iterations}i_c{exploration_constant}_{}",
+        "{difficulty_mod}x{iterations}i_c{exploration_constant}_t{threads}_st{simulation_threads}_s{simulations}_{}",
         format_reward_config_key(reward_config)
     )
 }
@@ -643,6 +679,9 @@ fn append_exploration_log(
     iterations: usize,
     difficulty_mod: f32,
     exploration_constant: f64,
+    threads: usize,
+    simulation_threads: usize,
+    simulations: usize,
     reward_config: &RewardConfig,
     win: bool,
     player_kills: usize,
@@ -653,11 +692,14 @@ fn append_exploration_log(
         .open("exploration_log.log")?;
     writeln!(
         log_file,
-        "{}, iterations={}, difficulty_mod={}, exploration_constant={}, reward_config={}, win={}, kills={}",
+        "{}, iterations={}, difficulty_mod={}, exploration_constant={}, threads={}, simulation_threads={}, simulations={}, reward_config={}, win={}, kills={}",
         Local::now().to_rfc3339(),
         iterations,
         difficulty_mod,
         exploration_constant,
+        threads,
+        simulation_threads,
+        simulations,
         format_reward_config_key(reward_config),
         win,
         player_kills
@@ -963,29 +1005,38 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
     for difficulty_mod in &args.difficulty_mod_set {
         for iterations in &args.iteration_set {
             for exploration_constant in &args.exploration_constant_set {
-                for reward_config in &reward_configs {
-                    let config = GameRunConfig {
-                        plain_mode: args.plain_mode,
-                        human: false,
-                        very_human: false,
-                        difficulty_mod: *difficulty_mod,
-                        iterations: *iterations,
-                        threads: args.threads,
-                        simulation_threads: args.simulation_threads,
-                        simulations: args.simulations,
-                        exploration_constant: *exploration_constant,
-                        reward_config: *reward_config,
-                    };
-                    stats.insert(
-                        format_exploration_key(
-                            *difficulty_mod,
-                            *iterations,
-                            *exploration_constant,
-                            reward_config,
-                        ),
-                        ExplorationResult::default(),
-                    );
-                    configs.push(config);
+                for threads in &args.threads_set {
+                    for simulation_threads in &args.simulation_threads_set {
+                        for simulations in &args.simulations_set {
+                            for reward_config in &reward_configs {
+                                let config = GameRunConfig {
+                                    plain_mode: args.plain_mode,
+                                    human: false,
+                                    very_human: false,
+                                    difficulty_mod: *difficulty_mod,
+                                    iterations: *iterations,
+                                    threads: *threads,
+                                    simulation_threads: *simulation_threads,
+                                    simulations: *simulations,
+                                    exploration_constant: *exploration_constant,
+                                    reward_config: *reward_config,
+                                };
+                                stats.insert(
+                                    format_exploration_key(
+                                        *difficulty_mod,
+                                        *iterations,
+                                        *exploration_constant,
+                                        *threads,
+                                        *simulation_threads,
+                                        *simulations,
+                                        reward_config,
+                                    ),
+                                    ExplorationResult::default(),
+                                );
+                                configs.push(config);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1006,6 +1057,9 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
                 config.difficulty_mod,
                 config.iterations,
                 config.exploration_constant,
+                config.threads,
+                config.simulation_threads,
+                config.simulations,
                 &config.reward_config,
             );
             let (game_result, max_level, player_kills) = run_game(stdout, *config, Some(&stats))?;
@@ -1027,6 +1081,9 @@ fn run_exploration(stdout: &mut Stdout, args: &Args) -> std::io::Result<()> {
                 config.iterations,
                 config.difficulty_mod,
                 config.exploration_constant,
+                config.threads,
+                config.simulation_threads,
+                config.simulations,
                 &config.reward_config,
                 win,
                 player_kills,
@@ -1102,6 +1159,24 @@ fn validate_args(args: &Args) {
     }
     for val in &args.reward_level_set {
         assert!(val.is_finite(), "--reward-level-set values must be finite");
+    }
+    for val in &args.reward_passivity_penalty_set {
+        assert!(
+            val.is_finite(),
+            "--reward-passivity-penalty-set values must be finite"
+        );
+    }
+    for val in &args.threads_set {
+        assert!(*val > 0, "--threads-set values must be positive integers");
+    }
+    for val in &args.simulation_threads_set {
+        assert!(
+            *val > 0,
+            "--simulation-threads-set values must be positive integers"
+        );
+    }
+    for val in &args.simulations_set {
+        assert!(*val > 0, "--simulations-set values must be positive integers");
     }
 }
 
