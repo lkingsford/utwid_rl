@@ -22,6 +22,8 @@ use std::{
     time::Duration,
 };
 
+use mimalloc::MiMalloc;
+
 use mon2y::mcts::tree::Tree;
 use mon2y::mcts::{BestTurnPolicy, calculate_best_turn};
 use mon2y::{games::utwid::ReprSet, mcts::game_trait::Action};
@@ -32,6 +34,9 @@ use mon2y::{
     },
     mcts::mcts::run_mcts_iterations,
 };
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 fn repr_to_char(repr: Repr) -> char {
     match repr {
@@ -1176,7 +1181,10 @@ fn validate_args(args: &Args) {
         );
     }
     for val in &args.simulations_set {
-        assert!(*val > 0, "--simulations-set values must be positive integers");
+        assert!(
+            *val > 0,
+            "--simulations-set values must be positive integers"
+        );
     }
 }
 
