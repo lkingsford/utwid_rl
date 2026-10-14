@@ -316,8 +316,28 @@ fn checkpoint_reward_uses_player_health_ratio_and_stays_terminal() {
 
     assert!(post_stairs.terminal());
     assert_eq!(rewards.len(), 2);
-    assert!((rewards[YOU_ID] - 4.0 / 7.0).abs() < f64::EPSILON);
-    assert!((rewards[MON2Y_ID] + 4.0 / 7.0).abs() < f64::EPSILON);
+    // Checkpoint reward includes player health ratio + level reward
+    // With default config: level_reward = 20.0
+    // ai_turns starts at 0, increments to 1 after action execution
+    // ai_turn_weight() = 0.75^(ai_turns * 0.2) / 2.0
+    // With ai_turns = 1: 0.75^0.2 / 2.0
+    let ai_turn_weight = 0.75_f64.powf(1.0 * 0.2) / 2.0;
+    let expected_player_reward = 4.0 / 7.0 + 20.0 * ai_turn_weight;
+    let expected_mon2y_reward = -expected_player_reward;
+    // Use a reasonable epsilon for floating point comparison
+    let epsilon = 1e-10;
+    assert!(
+        (rewards[YOU_ID] - expected_player_reward).abs() < epsilon,
+        "Player reward: {}, expected: {}",
+        rewards[YOU_ID],
+        expected_player_reward
+    );
+    assert!(
+        (rewards[MON2Y_ID] - expected_mon2y_reward).abs() < epsilon,
+        "Mon2y reward: {}, expected: {}",
+        rewards[MON2Y_ID],
+        expected_mon2y_reward
+    );
 }
 
 #[test]

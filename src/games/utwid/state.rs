@@ -663,6 +663,10 @@ impl State for UtwidState {
                 let player_health_ratio = self.player_health_ratio();
                 rewards[YOU_ID] += player_health_ratio;
                 rewards[MON2Y_ID] += -player_health_ratio;
+                // Add level reward for reaching checkpoint (stairs)
+                let level_reward = self.reward_config.level_reward * self.ai_turn_weight();
+                rewards[YOU_ID] += level_reward;
+                rewards[MON2Y_ID] -= level_reward;
             }
             GameState::Mon2yShortcircuit => {
                 let reward = 0.7 * (self.current_level as f64 / board::LEVEL_COUNT as f64);
