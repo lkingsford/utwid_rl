@@ -5,7 +5,7 @@ use log::trace;
 
 use super::BestTurnPolicy;
 use super::game_trait::{Action, Actor, State};
-use super::node::{Node, create_expanded_node};
+use super::node::{Node, create_expanded_node, NodeStatus};
 use super::tree::{Selection, Tree};
 
 /// Run multiple iterations of the MCTS algorithm on a state.
@@ -165,7 +165,7 @@ where
             let root = root_ref.read().unwrap();
             if let Node::Expanded { children, .. } = &*root {
                 log::info!(
-                    "Action, Visits, Value: {:?}",
+                    "Action, Visits, Value, Status: {:?}",
                     children
                         .iter()
                         .map(|(action, node)| {
@@ -177,43 +177,24 @@ where
                                     .iter()
                                     .map(|value| value.value_sum)
                                     .collect::<Vec<_>>(),
+                                node.node_status(),
                             )
                         })
                         .collect::<Vec<_>>()
                 );
-                // Short circuit on a winning move
-                // Implemented because (I think) the UCB formula doesn't end up prioritizing
-                // certainly winning moves, because they're already explored. Dunno if this
-                // is a cludge though.
-                let winning_moves: Vec<ActionType> = children
+                // First, check for proven winning moves
+                let proven_winning_moves: Vec<ActionType> = children
                     .iter()
                     .filter_map(|(action, node)| {
                         let node = node.read().unwrap();
-                        if let Node::Placeholder { .. } = &*node {
-                            return None;
+                        if node.node_status() == NodeStatus::ProvenWin {
+                            Some(action.clone())
+                        } else {
+                            None
                         }
-                        if node.state().terminal() {
-                            let actor = root.state().next_actor();
-                            if let Actor::Player(player_id) = actor {
-                                if let Some((index, _)) =
-                                    // Annoying - but necessary because I was dumb enough to use f64
-                                    // (otherwise, it'd be max_by_key)
-                                    node.state().reward().iter().enumerate().max_by(
-                                            |(_, a), (_, b)| {
-                                                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Less)
-                                            },
-                                        )
-                                {
-                                    if index == player_id as usize {
-                                        return Some(action.clone());
-                                    }
-                                }
-                            }
-                        }
-                        None
                     })
                     .collect();
-                if let Some(action) = winning_moves.first() {
+                if let Some(action) = proven_winning_moves.first() {
                     return (action.clone(), Some(tree));
                 }
 

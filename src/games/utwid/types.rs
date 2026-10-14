@@ -27,8 +27,8 @@ pub(crate) const ASSUMPTION_TURNS: usize = 5;
 pub(crate) const VISUAL_ROOMS: usize = 7;
 pub(crate) const CONTENTION_R_WIDTH: usize = 2;
 pub(crate) const CONTENTION_NET_WIDTH: usize = 5; //CONTENTION_R_WIDTH * 2 + 1
-pub(crate) const BOARD_WIDTH: usize = 11;
-pub(crate) const BOARD_HEIGHT: usize = 11;
+pub(crate) const BOARD_WIDTH: usize = 7;
+pub(crate) const BOARD_HEIGHT: usize = 7;
 
 #[derive(Clone, std::fmt::Debug, PartialEq)]
 pub enum GameState {

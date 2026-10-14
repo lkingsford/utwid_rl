@@ -26,6 +26,14 @@ pub struct VisitCountValue {
     pub value_sum: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NodeStatus {
+    Unsolved,
+    ProvenWin,
+    ProvenLoss,
+    ProvenDraw,
+}
+
 #[derive(Debug)]
 pub enum Node<StateType: State, ActionType: Action<StateType = StateType>> {
     Expanded {
@@ -35,6 +43,7 @@ pub enum Node<StateType: State, ActionType: Action<StateType = StateType>> {
         value_sums: Vec<VisitCountValue>,
         cached_ucb: RwLock<Option<CachedUcb>>,
         cached_fully_explored: RwLock<Option<bool>>,
+        node_status: RwLock<NodeStatus>,
         game_action: bool,
         weight: Option<u32>,
     },
@@ -74,6 +83,126 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         }
     }
 
+    pub fn update_node_status_from_children(&self) -> bool {
+        match self {
+            Node::Expanded {
+                children,
+                node_status,
+                state,
+                ..
+            } => {
+                let current_status = node_status.read().unwrap();
+                if *current_status != NodeStatus::Unsolved {
+                    // Already solved, no need to update
+                    return false;
+                }
+                drop(current_status);
+
+                let state_ref = state.read().unwrap();
+                let state_arc = state_ref.as_ref().unwrap();
+                
+                if state_arc.terminal() {
+                    // Terminal state should already have correct status
+                    return false;
+                }
+
+                // Get the player to move at this node
+                let player_to_move = match state_arc.next_actor() {
+                    Actor::Player(player_id) => player_id,
+                    Actor::GameAction(_) => {
+                        // Game action node - we need to handle this differently
+                        // For now, return false
+                        return false;
+                    }
+                };
+
+                // For minimax: 
+                // - If it's player_to_move's turn and any child is a win for them, this is a win
+                // - If it's player_to_move's turn and all children are losses for them, this is a loss  
+                // - If it's the opponent's turn and any child is a loss for player_to_move, this is a loss
+                // - If it's the opponent's turn and all children are wins for player_to_move, this is a win
+                
+                let mut has_win_for_player = false;
+                let mut has_loss_for_player = false;
+                let mut has_draw = false;
+                let mut has_unsolved = false;
+                let mut all_win_for_player = true;
+                let mut all_loss_for_player = true;
+                let mut all_draw = true;
+
+                for child in children.values() {
+                    let child_node = child.read().unwrap();
+                    let child_status = child_node.node_status();
+                    
+                    match child_status {
+                        NodeStatus::ProvenWin => {
+                            // Child is a win for the player who moved to get there
+                            // Need to determine if this is a win for player_to_move or opponent
+                            has_win_for_player = true;
+                            all_loss_for_player = false;
+                            all_draw = false;
+                        }
+                        NodeStatus::ProvenLoss => {
+                            // Child is a loss for the player who moved to get there
+                            has_loss_for_player = true;
+                            all_win_for_player = false;
+                            all_draw = false;
+                        }
+                        NodeStatus::ProvenDraw => {
+                            has_draw = true;
+                            all_win_for_player = false;
+                            all_loss_for_player = false;
+                        }
+                        NodeStatus::Unsolved => {
+                            has_unsolved = true;
+                            all_win_for_player = false;
+                            all_loss_for_player = false;
+                            all_draw = false;
+                        }
+                    }
+                }
+
+                let new_status = if !has_unsolved {
+                    // All children are solved
+                    if player_to_move == 0 { // Assuming player 0 is the perspective player
+                        // It's player 0's turn
+                        if has_win_for_player {
+                            NodeStatus::ProvenWin
+                        } else if all_loss_for_player {
+                            NodeStatus::ProvenLoss
+                        } else if all_draw {
+                            NodeStatus::ProvenDraw
+                        } else {
+                            NodeStatus::Unsolved
+                        }
+                    } else {
+                        // It's opponent's turn
+                        if has_loss_for_player {
+                            NodeStatus::ProvenLoss
+                        } else if all_win_for_player {
+                            NodeStatus::ProvenWin
+                        } else if all_draw {
+                            NodeStatus::ProvenDraw
+                        } else {
+                            NodeStatus::Unsolved
+                        }
+                    }
+                } else {
+                    NodeStatus::Unsolved
+                };
+
+                if new_status != NodeStatus::Unsolved {
+                    let mut node_status = node_status.write().unwrap();
+                    *node_status = new_status;
+                    true
+                } else {
+                    false
+                }
+            }
+            Node::Placeholder { .. } => false,
+        }
+    }
+
     pub fn visit_count(&self) -> u32 {
         match self {
             Node::Expanded { visit_count, .. } => *visit_count,
@@ -85,6 +214,28 @@ impl<StateType: State, ActionType: Action<StateType = StateType>> Node<StateType
         match self {
             Node::Expanded { game_action, .. } => *game_action,
             Node::Placeholder { .. } => false,
+        }
+    }
+
+    pub fn node_status(&self) -> NodeStatus {
+        match self {
+            Node::Expanded { node_status, .. } => {
+                let status = node_status.read().unwrap();
+                *status
+            }
+            Node::Placeholder { .. } => NodeStatus::Unsolved,
+        }
+    }
+
+    pub fn set_node_status(&self, status: NodeStatus) {
+        match self {
+            Node::Expanded { node_status, .. } => {
+                let mut node_status = node_status.write().unwrap();
+                *node_status = status;
+            }
+            Node::Placeholder { .. } => {
+                // Cannot set status on placeholder nodes
+            }
         }
     }
 
@@ -394,6 +545,13 @@ where
             log::trace!("Select short circuited - fully explored");
             continue;
         }
+        
+        // Skip actions that lead to proven losses (from perspective of player who would move next)
+        let child_status = child_node.node_status();
+        if child_status == NodeStatus::ProvenLoss {
+            log::trace!("Skipping action leading to proven loss");
+            continue;
+        }
 
         let child_visit_count = child_node.visit_count();
         let cached_player_value_sum = player_id
@@ -500,6 +658,13 @@ where
         }
     };
 
+    // Determine node status for terminal states
+    let initial_node_status = if state.terminal() {
+        determine_node_status_from_reward(&state.reward(), per.unwrap_or(0))
+    } else {
+        NodeStatus::Unsolved
+    };
+
     Node::Expanded {
         state: RwLock::new(Some(state)),
         children,
@@ -507,8 +672,33 @@ where
         value_sums: vec![VisitCountValue::default(); reward_len],
         cached_ucb: RwLock::new(None),
         cached_fully_explored: RwLock::new(None),
+        node_status: RwLock::new(initial_node_status),
         game_action,
         weight,
+    }
+}
+
+fn determine_node_status_from_reward(reward: &[f64], perspective_player: u8) -> NodeStatus {
+    if reward.len() <= perspective_player as usize {
+        return NodeStatus::Unsolved;
+    }
+    
+    let player_reward = reward[perspective_player as usize];
+    
+    // Check if this is a win (positive reward for the perspective player)
+    if player_reward > 0.0 {
+        NodeStatus::ProvenWin
+    } 
+    // Check if this is a loss (negative reward for the perspective player)
+    else if player_reward < 0.0 {
+        NodeStatus::ProvenLoss
+    }
+    // Check if this is a draw (approximately zero reward for all players)
+    else if reward.iter().all(|&r| r.abs() < 1e-10) {
+        NodeStatus::ProvenDraw
+    }
+    else {
+        NodeStatus::Unsolved
     }
 }
 

@@ -330,9 +330,16 @@ where
         nodes: Vec<Arc<RwLock<Node<StateType, ActionType>>>>,
         reward: &[Reward],
     ) {
+        // First, update visit counts and values
         for node in nodes.iter() {
             let mut cur_node = node.write().unwrap();
             cur_node.visit(reward);
+        }
+        
+        // Then, update node status from children (propagate from leaf to root)
+        for node in nodes.iter().rev() {
+            let cur_node = node.read().unwrap();
+            cur_node.update_node_status_from_children();
         }
     }
 
