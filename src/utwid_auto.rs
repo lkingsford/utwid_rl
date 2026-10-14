@@ -899,13 +899,13 @@ fn run_game(
                 ai_marked_state.short_circuit_at_turns_increment = Some(short_circuit_increment);
                 ai_marked_state.ai_turns = 0;
                 let (best_turn_from_calculate, tree_from_calculate) = calculate_best_turn(
-                    mcts_iterations,
+                    iterations_step,
                     None,
                     config.threads,
                     config.simulation_threads,
                     config.simulations,
                     ai_marked_state,
-                    BestTurnPolicy::Ucb0,
+                    BestTurnPolicy::MostVisits,
                     config.exploration_constant,
                     false,
                     tree,
