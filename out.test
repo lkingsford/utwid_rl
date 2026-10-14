@@ -1,0 +1,64 @@
+
+running 29 tests
+test games::utwid::tests::first_actor_in_direction_finds_adjacent_live_actor ... ok
+test games::utwid::tests::first_actor_in_direction_skips_dead_actor ... ok
+test games::utwid::tests::conclusion_passes_through_dead_actor ... ok
+test games::utwid::tests::move_into_dead_actor_space_removes_dead_actor ... ok
+test games::utwid::tests::lost_and_won_rewards_match_actor_outcomes ... ok
+test games::utwid::tests::checkpoint_reward_uses_player_health_ratio_and_stays_terminal ... FAILED
+test games::utwid::tests::execute_path_keeps_to_act_valid_between_floors_and_after_win ... FAILED
+test games::utwid::tests::entering_stairs_turn_keeps_to_act_valid_and_terminal_node_safe ... FAILED
+test games::utwid::tests::multiplication_passes_through_dead_actor ... ok
+test mcts::mcts::tests::perceived_actions_can_still_include_hidden_win_for_owner ... ok
+test games::utwid::tests::stairs_transition_clears_monsters_dead_entries_and_stale_turn_ids ... ok
+test games::utwid::tests::stairs_transition_resets_turn_state_across_multiple_floors ... ok
+test mcts::node::tests::test_best_pick_expected_value ... ok
+test mcts::node::tests::test_best_pick_weighted_visits ... ok
+test mcts::node::tests::test_create_expanded_node ... ok
+test mcts::node::tests::test_create_expanded_terminal_node_has_no_children ... ok
+test mcts::node::tests::test_est_reward ... ok
+test mcts::node::tests::test_mean_child_est_reward ... ok
+test mcts::tree::tests::test_expansion_basic ... ok
+test mcts::tree::tests::test_expansion_returns_selected_child_path ... ok
+test mcts::tree::tests::test_iterate_hyperreward ... ok
+test mcts::tree::tests::test_play_out ... ok
+test mcts::mcts::tests::calculate_best_turn_does_not_expand_hidden_opponent_win ... FAILED
+test mcts::tree::tests::test_propagate_one_player ... ok
+test mcts::tree::tests::test_propagate_two_players ... ok
+test mcts::tree::tests::test_selection_basic ... ok
+test mcts::tree::tests::test_sum_diff_est_reward ... ok
+test mcts::tree::tests::test_selection_multiple_expanded ... ok
+test mcts::tree::tests::test_weighted_game_action_play_out ... ok
+
+failures:
+
+---- games::utwid::tests::checkpoint_reward_uses_player_health_ratio_and_stays_terminal stdout ----
+
+thread 'games::utwid::tests::checkpoint_reward_uses_player_health_ratio_and_stays_terminal' (5883701) panicked at src/games/utwid/tests.rs:315:5:
+assertion failed: post_stairs.terminal()
+
+---- games::utwid::tests::execute_path_keeps_to_act_valid_between_floors_and_after_win stdout ----
+
+thread 'games::utwid::tests::execute_path_keeps_to_act_valid_between_floors_and_after_win' (5883704) panicked at src/games/utwid/tests.rs:265:5:
+assertion failed: matches!(state.game_state, GameState::Checkpoint)
+
+---- games::utwid::tests::entering_stairs_turn_keeps_to_act_valid_and_terminal_node_safe stdout ----
+
+thread 'games::utwid::tests::entering_stairs_turn_keeps_to_act_valid_and_terminal_node_safe' (5883703) panicked at src/games/utwid/tests.rs:290:5:
+assertion failed: matches!(post_stairs.game_state, GameState::Checkpoint)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- mcts::mcts::tests::calculate_best_turn_does_not_expand_hidden_opponent_win stdout ----
+
+thread 'mcts::mcts::tests::calculate_best_turn_does_not_expand_hidden_opponent_win' (5883712) panicked at src/mcts/node.rs:245:75:
+state is None
+
+
+failures:
+    games::utwid::tests::checkpoint_reward_uses_player_health_ratio_and_stays_terminal
+    games::utwid::tests::entering_stairs_turn_keeps_to_act_valid_and_terminal_node_safe
+    games::utwid::tests::execute_path_keeps_to_act_valid_between_floors_and_after_win
+    mcts::mcts::tests::calculate_best_turn_does_not_expand_hidden_opponent_win
+
+test result: FAILED. 25 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

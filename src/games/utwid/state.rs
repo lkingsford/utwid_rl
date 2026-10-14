@@ -33,6 +33,13 @@ pub struct UtwidState {
     pub(crate) spatial_hashmap: HashMap<(usize, usize), ActorId>,
     pub(crate) turns_since_aggressive_action: usize,
     pub player_kills: usize,
+    // Track monsters from previous level for delayed spawning
+    pub(crate) previous_level_monsters_distance_1: Vec<GameActor>,
+    pub(crate) previous_level_monsters_distance_2: Vec<GameActor>,
+    pub(crate) turns_since_level_change: usize,
+    // Player max HP tracking
+    pub(crate) player_max_hp: usize,
+    pub(crate) next_healing_threshold: usize,
 }
 
 bitflags! {
@@ -71,6 +78,45 @@ impl Default for RewardConfig {
 }
 
 impl UtwidState {
+    /// Spawn monsters from previous level around player spawn point
+    pub(crate) fn spawn_previous_level_monsters(&mut self, monsters: &[GameActor]) {
+        let player_spawn = (1, 3); // Player spawn position
+        let directions = [
+            (0, 0),   // Center (player position)
+            (-1, -1), // NW
+            (0, -1),  // N
+            (1, -1),  // NE
+            (-1, 0),  // W
+            (1, 0),   // E
+            (-1, 1),  // SW
+            (0, 1),   // S
+            (1, 1),   // SE
+        ];
+        
+        for monster in monsters {
+            // Try each position around player spawn
+            for &(dx, dy) in &directions {
+                let x = (player_spawn.0 as isize + dx) as usize;
+                let y = (player_spawn.1 as isize + dy) as usize;
+                
+                // Check if position is valid and walkable
+                if x < self.board.width && y < self.board.height
+                    && self.board.get(x, y).traits.contains(TileTraits::WALKABLE)
+                    && self.actor_in_space(x, y).is_none()
+                {
+                    // Create a copy of the monster at new position
+                    let mut new_monster = monster.clone();
+                    new_monster.x = x;
+                    new_monster.y = y;
+                    self.add_actor(new_monster);
+                    break; // Monster placed, move to next
+                }
+            }
+        }
+    }
+}
+
+impl UtwidState {
     pub fn new() -> UtwidState {
         let mut board_rng = SmallRng::from_os_rng();
         let spawn_rng = SmallRng::from_os_rng();
@@ -97,6 +143,11 @@ impl UtwidState {
             spatial_hashmap: HashMap::new(),
             turns_since_aggressive_action: 0,
             player_kills: 0,
+            previous_level_monsters_distance_1: Vec::new(),
+            previous_level_monsters_distance_2: Vec::new(),
+            turns_since_level_change: 0,
+            player_max_hp: 7, // Default player max HP
+            next_healing_threshold: 2, // Heal after 2 kills
         };
         state.update_spatial_hashmap();
         state

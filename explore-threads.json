@@ -1,0 +1,1001 @@
+[
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 4,
+    "simulation_threads": 1,
+    "simulations": 2,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:02:36.606080349+00:00",
+    "depths": [
+      8
+    ],
+    "kills": [
+      11
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 4,
+    "simulation_threads": 1,
+    "simulations": 1,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:05:01.043142672+00:00",
+    "depths": [
+      0
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 2,
+    "simulation_threads": 1,
+    "simulations": 1,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:05:25.709821950+00:00",
+    "depths": [
+      0
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 4,
+    "simulation_threads": 2,
+    "simulations": 2,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:04:30.939903663+00:00",
+    "depths": [
+      2
+    ],
+    "kills": [
+      1
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 2,
+    "simulation_threads": 1,
+    "simulations": 8,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:03:56.731564868+00:00",
+    "depths": [
+      2
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 2,
+    "simulation_threads": 1,
+    "simulations": 2,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 1,
+    "losses": 0,
+    "percentage": 100.0,
+    "last_run_time": "2026-07-02T14:04:11.050593663+00:00",
+    "depths": [
+      9
+    ],
+    "kills": [
+      8
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 2,
+    "simulation_threads": 2,
+    "simulations": 1,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:05:13.073072126+00:00",
+    "depths": [
+      2
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 4,
+    "simulation_threads": 2,
+    "simulations": 1,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:05:25.709821950+00:00",
+    "depths": [
+      4
+    ],
+    "kills": [
+      1
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 1,
+    "simulation_threads": 1,
+    "simulations": 1,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:05:01.043142672+00:00",
+    "depths": [
+      1
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 4,
+    "simulation_threads": 8,
+    "simulations": 8,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:05:13.073072126+00:00",
+    "depths": [
+      1
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 4,
+    "simulation_threads": 1,
+    "simulations": 8,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:05:01.043142672+00:00",
+    "depths": [
+      6
+    ],
+    "kills": [
+      3
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 1,
+    "simulation_threads": 2,
+    "simulations": 2,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:05:06.089952704+00:00",
+    "depths": [
+      3
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 2,
+    "simulation_threads": 2,
+    "simulations": 2,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:03:56.731564868+00:00",
+    "depths": [
+      1
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 2,
+    "simulation_threads": 8,
+    "simulations": 2,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:05:25.709821950+00:00",
+    "depths": [
+      1
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 1,
+    "simulation_threads": 8,
+    "simulations": 2,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:03:46.101823763+00:00",
+    "depths": [
+      3
+    ],
+    "kills": [
+      1
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 2,
+    "simulation_threads": 8,
+    "simulations": 8,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 1,
+    "losses": 0,
+    "percentage": 100.0,
+    "last_run_time": "2026-07-02T14:05:06.089952704+00:00",
+    "depths": [
+      9
+    ],
+    "kills": [
+      1
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 2,
+    "simulation_threads": 2,
+    "simulations": 8,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 1,
+    "losses": 0,
+    "percentage": 100.0,
+    "last_run_time": "2026-07-02T14:04:30.939903663+00:00",
+    "depths": [
+      9
+    ],
+    "kills": [
+      5
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 1,
+    "simulation_threads": 1,
+    "simulations": 8,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:03:54.750193135+00:00",
+    "depths": [
+      0
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 4,
+    "simulation_threads": 8,
+    "simulations": 2,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:04:50.743599910+00:00",
+    "depths": [
+      3
+    ],
+    "kills": [
+      1
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 4,
+    "simulation_threads": 2,
+    "simulations": 8,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:03:56.731564868+00:00",
+    "depths": [
+      0
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 2,
+    "simulation_threads": 8,
+    "simulations": 1,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:04:30.939903663+00:00",
+    "depths": [
+      0
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 1,
+    "simulation_threads": 2,
+    "simulations": 1,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:05:01.043142672+00:00",
+    "depths": [
+      0
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 1,
+    "simulation_threads": 2,
+    "simulations": 8,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 1,
+    "losses": 0,
+    "percentage": 100.0,
+    "last_run_time": "2026-07-02T14:05:13.073072126+00:00",
+    "depths": [
+      9
+    ],
+    "kills": [
+      2
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 1,
+    "simulation_threads": 1,
+    "simulations": 2,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:02:36.606080349+00:00",
+    "depths": [
+      0
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 4,
+    "simulation_threads": 8,
+    "simulations": 1,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:03:54.750193135+00:00",
+    "depths": [
+      2
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2000,
+    "exploration_constant": 0.3,
+    "threads": 1,
+    "simulation_threads": 8,
+    "simulations": 1,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:04:36.299420040+00:00",
+    "depths": [
+      1
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 10000,
+    "exploration_constant": 0.3,
+    "threads": 16,
+    "simulation_threads": 1,
+    "simulations": 1,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:09:03.775836656+00:00",
+    "depths": [
+      1
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 10000,
+    "exploration_constant": 0.3,
+    "threads": 16,
+    "simulation_threads": 1,
+    "simulations": 2,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:10:39.567106594+00:00",
+    "depths": [
+      3
+    ],
+    "kills": [
+      19
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 10000,
+    "exploration_constant": 0.3,
+    "threads": 16,
+    "simulation_threads": 2,
+    "simulations": 1,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:09:03.775836656+00:00",
+    "depths": [
+      7
+    ],
+    "kills": [
+      18
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 10000,
+    "exploration_constant": 0.3,
+    "threads": 16,
+    "simulation_threads": 2,
+    "simulations": 2,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:10:39.567106594+00:00",
+    "depths": [
+      7
+    ],
+    "kills": [
+      2
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 10000,
+    "exploration_constant": 0.3,
+    "threads": 16,
+    "simulation_threads": 8,
+    "simulations": 2,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:08:11.831102601+00:00",
+    "depths": [
+      0
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 10000,
+    "exploration_constant": 0.3,
+    "threads": 16,
+    "simulation_threads": 1,
+    "simulations": 8,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:09:03.775836656+00:00",
+    "depths": [
+      0
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 10000,
+    "exploration_constant": 0.3,
+    "threads": 16,
+    "simulation_threads": 8,
+    "simulations": 1,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:10:39.567106594+00:00",
+    "depths": [
+      0
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 10000,
+    "exploration_constant": 0.3,
+    "threads": 16,
+    "simulation_threads": 2,
+    "simulations": 8,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:10:39.567106594+00:00",
+    "depths": [
+      2
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 1000,
+    "exploration_constant": 0.3,
+    "threads": 16,
+    "simulation_threads": 8,
+    "simulations": 32,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:13:26.824249542+00:00",
+    "depths": [
+      0
+    ],
+    "kills": [
+      0
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 1000,
+    "exploration_constant": 0.3,
+    "threads": 16,
+    "simulation_threads": 4,
+    "simulations": 32,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:13:26.824249542+00:00",
+    "depths": [
+      2
+    ],
+    "kills": [
+      6
+    ]
+  },
+  {
+    "difficulty_mod": 1.0,
+    "iterations": 2500,
+    "exploration_constant": 0.3,
+    "threads": 16,
+    "simulation_threads": 4,
+    "simulations": 32,
+    "turn_weight": 0.1,
+    "level_base": 0.75,
+    "health_weight": 2.5,
+    "health_bias": -0.3,
+    "win_reward": 20.0,
+    "lose_reward": -10.0,
+    "stalemate_reward": -20.0,
+    "level_reward": 20.0,
+    "passivity_penalty": 2.0,
+    "wins": 0,
+    "losses": 1,
+    "percentage": 0.0,
+    "last_run_time": "2026-07-02T14:14:39.301940608+00:00",
+    "depths": [
+      1
+    ],
+    "kills": [
+      0
+    ]
+  }
+]

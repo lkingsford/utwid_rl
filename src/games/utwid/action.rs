@@ -191,6 +191,20 @@ impl Action for UtwidAction {
         if !matches!(new_state.game_state, GameState::Checkpoint) {
             new_state.accumulate_reward();
         }
+        
+        // Increment turns since level change
+        new_state.turns_since_level_change += 1;
+        
+        // Spawn monsters from previous level based on turns
+        if new_state.turns_since_level_change == 1 {
+            // Spawn distance 1 monsters
+            let monsters = new_state.previous_level_monsters_distance_1.clone();
+            new_state.spawn_previous_level_monsters(&monsters);
+        } else if new_state.turns_since_level_change == 2 {
+            // Spawn distance 2 monsters
+            let monsters = new_state.previous_level_monsters_distance_2.clone();
+            new_state.spawn_previous_level_monsters(&monsters);
+        }
 
         // Decrement assumed_turns on the actor who just acted
         if let Some(actor) = new_state.actor_mut(state.to_act) {

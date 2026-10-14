@@ -47,6 +47,29 @@ impl UtwidAction {
                     actor.modify_health(damage);
                     if actor.traits.contains(ActorTraits::DEAD) && was_alive {
                         actor_died = true;
+                        
+                        // Check if player killed this monster
+                        if let Some(attacker) = new_state.actor(new_state.to_act) {
+                            if attacker.actor_type == ACTOR_TYPE_YOU {
+                                // Increment player kills
+                                new_state.player_kills += 1;
+                                
+                                // Check if we've reached a healing threshold
+                                if new_state.player_kills >= new_state.next_healing_threshold {
+                                    // Increase max HP
+                                    new_state.player_max_hp += 1;
+                                    let new_max_hp = new_state.player_max_hp;
+                                    
+                                    // Heal player to new max HP
+                                    if let Some(player) = new_state.actor_mut(0) {
+                                        player.health = Some(new_max_hp);
+                                    }
+                                    
+                                    // Set next threshold (2, 3, 4, ... kills)
+                                    new_state.next_healing_threshold += 1;
+                                }
+                            }
+                        }
                     }
                     // Record aggressive action if player dealt damage
                     if let Some(attacker) = new_state.actor(new_state.to_act) {
@@ -124,6 +147,37 @@ impl UtwidAction {
         mut new_state: UtwidState,
     ) -> UtwidState {
         log::trace!("execute_stairs");
+        
+        // Capture monsters from current level before resetting
+        let player_pos = (acting_character.x, acting_character.y);
+        let mut distance_1_monsters = Vec::new();
+        let mut distance_2_monsters = Vec::new();
+        
+        for actor_opt in &new_state.actors {
+            if let Some(actor) = actor_opt {
+                // Skip player and dead actors
+                if actor.actor_type == crate::games::utwid::types::ACTOR_TYPE_YOU 
+                    || actor.traits.contains(ActorTraits::DEAD) {
+                    continue;
+                }
+                
+                // Calculate Manhattan distance
+                let distance = (actor.x as isize - player_pos.0 as isize).abs() 
+                    + (actor.y as isize - player_pos.1 as isize).abs();
+                
+                if distance == 1 {
+                    distance_1_monsters.push(actor.clone());
+                } else if distance == 2 {
+                    distance_2_monsters.push(actor.clone());
+                }
+            }
+        }
+        
+        // Store for delayed spawning
+        new_state.previous_level_monsters_distance_1 = distance_1_monsters;
+        new_state.previous_level_monsters_distance_2 = distance_2_monsters;
+        new_state.turns_since_level_change = 0;
+        
         new_state.current_level += 1;
         let mut board_rng = new_state.board.rng.clone();
         new_state.board = Board::new(new_state.current_level, &mut board_rng);
@@ -146,6 +200,25 @@ impl UtwidAction {
                 new_state.short_circuit_at_turns = Some(current_short_circuit + increment);
             }
         };
+        
+        // Feature 1: Spawn level_number + 1 of each monster type
+        let spawn_count = new_state.current_level + 1;
+        for _ in 0..spawn_count {
+            // Spawn one_actor (bomb type)
+            let one_spawn = new_state.suggest_spawn(crate::games::utwid::types::ACTOR_TYPE_ONE);
+            if one_spawn.0 != usize::MAX && one_spawn.1 != usize::MAX {
+                new_state.add_actor(GameActor::one_actor(one_spawn.0, one_spawn.1));
+            }
+            
+            // Spawn them_actor
+            let them_spawn = new_state.suggest_spawn(crate::games::utwid::types::ACTOR_TYPE_THEM);
+            new_state.add_actor(GameActor::them_actor(them_spawn.0, them_spawn.1));
+            
+            // Spawn are_actor
+            let are_spawn = new_state.suggest_spawn(crate::games::utwid::types::ACTOR_TYPE_ARE);
+            new_state.add_actor(GameActor::are_actor(are_spawn.0, are_spawn.1));
+        }
+        
         log::debug!("execute_stairs after {}", new_state.debug_summary());
         new_state
     }
