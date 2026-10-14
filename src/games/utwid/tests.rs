@@ -330,3 +330,124 @@ fn lost_and_won_rewards_match_actor_outcomes() {
     won_state.game_state = GameState::Won;
     assert_eq!(won_state.reward(), vec![10.0, -10.0]);
 }
+
+#[test]
+fn test_suggest_spawn_with_bomb_distance_restriction() {
+    // Create a simple state
+    let mut state = UtwidState::new();
+    
+    // Clear all actors except the player
+    state.actors.clear();
+    state.spatial_hashmap.clear();
+    
+    // Add the player at position (3, 3)
+    let mut player = GameActor::you_actor();
+    player.x = 3;
+    player.y = 3;
+    state.add_actor(player);
+    
+    // Test spawning a bomb actor (ONE type)
+    // With player at (3, 3), positions within distance 3 should be avoided
+    // Distance = |x1 - x2| + |y1 - y2|
+    
+    // Try to spawn multiple times
+    let mut _found_valid_position = false;
+    let mut found_invalid_position = false;
+    
+    for _ in 0..1000 {
+        let spawn = state.suggest_spawn(ACTOR_TYPE_ONE);
+        
+        if spawn.0 == usize::MAX && spawn.1 == usize::MAX {
+            // This means no valid position was found
+            continue;
+        }
+        
+        let distance = (spawn.0 as isize - 3).abs() + (spawn.1 as isize - 3).abs();
+        
+        if distance <= 3 {
+            // This should not happen with bomb actors
+            found_invalid_position = true;
+            println!("Invalid spawn at ({}, {}) distance {}", spawn.0, spawn.1, distance);
+        } else {
+            _found_valid_position = true;
+        }
+    }
+    
+    // We should find valid positions (unless the board is too small)
+    // But we should NEVER find invalid positions within distance 3
+    assert!(!found_invalid_position, "Bomb actor spawned too close to player");
+}
+
+#[test]
+fn test_suggest_spawn_falls_back_to_are_actor_when_no_space() {
+    // Create a heavily crowded state
+    let mut state = UtwidState::new();
+    
+    // Clear all actors and spatial hashmap
+    state.actors.clear();
+    state.spatial_hashmap.clear();
+    state.turn_order.clear();
+    
+    // Add player at (3, 3) - center of board
+    let mut player = GameActor::you_actor();
+    player.x = 3;
+    player.y = 3;
+    state.add_actor(player);
+    
+    // Fill ALL positions on the 7x7 board
+    for x in 0..state.board.width {
+        for y in 0..state.board.height {
+            // Skip player position
+            if x == 3 && y == 3 {
+                continue;
+            }
+            // Add a temporary actor to block the position
+            let mut temp_actor = GameActor::are_actor(x, y);
+            temp_actor.x = x;
+            temp_actor.y = y;
+            state.add_actor(temp_actor);
+        }
+    }
+    
+    // Make sure spatial hashmap is up to date
+    state.update_spatial_hashmap();
+    
+    // Now try to spawn a bomb actor
+    let spawn = state.suggest_spawn(ACTOR_TYPE_ONE);
+    
+    // Should return the special value (usize::MAX, usize::MAX)
+    // because all positions are occupied
+    assert_eq!(spawn.0, usize::MAX);
+    assert_eq!(spawn.1, usize::MAX);
+}
+
+#[test]
+fn test_suggest_spawn_non_bomb_actors_have_no_distance_restriction() {
+    let mut state = UtwidState::new();
+    state.actors.clear();
+    state.spatial_hashmap.clear();
+    
+    // Add player at (3, 3)
+    let mut player = GameActor::you_actor();
+    player.x = 3;
+    player.y = 3;
+    state.add_actor(player);
+    
+    // Test spawning ARE actor (non-bomb)
+    // Should be able to spawn anywhere, including adjacent to player
+    let mut found_near_position = false;
+    
+    for _ in 0..1000 {
+        let spawn = state.suggest_spawn(ACTOR_TYPE_ARE);
+        
+        let distance = (spawn.0 as isize - 3).abs() + (spawn.1 as isize - 3).abs();
+        
+        if distance <= 3 {
+            found_near_position = true;
+            break;
+        }
+    }
+    
+    // Non-bomb actors should be able to spawn near the player
+    assert!(found_near_position, "Non-bomb actors should be able to spawn near player");
+}

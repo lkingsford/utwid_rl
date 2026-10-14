@@ -175,20 +175,70 @@ impl UtwidState {
         health / PLAYER_MAX_HEALTH as f64
     }
 
-    pub(crate) fn suggest_spawn(&mut self) -> (usize, usize) {
-        let mut result: Option<(usize, usize)> = None;
-        while result.is_none() {
+    pub(crate) fn suggest_spawn(&mut self, actor_type: usize) -> (usize, usize) {
+        let has_bomb_trait = actor_type == super::types::ACTOR_TYPE_ONE;
+        let max_attempts = 100;
+        
+        for _ in 0..max_attempts {
             let (x, y) = (
                 self.spawn_rng.random_range(0..self.board.width),
                 self.spawn_rng.random_range(0..self.board.height),
             );
-            result = if self.actor_in_space(x, y).is_some() {
-                None
+            
+            if self.actor_in_space(x, y).is_some() {
+                continue;
+            }
+            
+            // Check bomb distance restriction
+            if has_bomb_trait {
+                if self.is_within_bomb_distance_of_you(x, y) {
+                    continue;
+                }
+            }
+            
+            return (x, y);
+        }
+        
+        // If we couldn't find a valid position for a bomb actor, return a special position
+        // The caller should handle this by spawning an are_actor instead
+        if has_bomb_trait {
+            (usize::MAX, usize::MAX)
+        } else {
+            // For non-bomb actors, fall back to any empty space
+            for x in 0..self.board.width {
+                for y in 0..self.board.height {
+                    if self.actor_in_space(x, y).is_none() {
+                        // Check bomb distance for consistency
+                        if !has_bomb_trait || !self.is_within_bomb_distance_of_you(x, y) {
+                            return (x, y);
+                        }
+                    }
+                }
+            }
+            // Last resort: spawn at (0, 0) if it's empty
+            if self.actor_in_space(0, 0).is_none() {
+                (0, 0)
             } else {
-                Some((x, y))
+                // No empty spaces at all
+                (usize::MAX, usize::MAX)
             }
         }
-        result.unwrap()
+    }
+    
+    fn is_within_bomb_distance_of_you(&self, x: usize, y: usize) -> bool {
+        // Calculate explosion radius + 2 distance
+        // Manhattan distance check
+        for actor in self.actors.iter().flatten() {
+            if actor.actor_type == super::types::ACTOR_TYPE_YOU {
+                let distance = (actor.x as isize - x as isize).abs() + 
+                              (actor.y as isize - y as isize).abs();
+                // Explosion radius is 1 (adjacent tiles), plus 2 = total distance 3
+                if distance <= 3 {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub(crate) fn actor_in_space(&self, x: usize, y: usize) -> Option<&GameActor> {

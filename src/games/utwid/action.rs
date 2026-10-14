@@ -138,16 +138,22 @@ impl Action for UtwidAction {
                 new_state.turn_number += 1;
 
                 if (new_state.turn_number % 9) == 0 {
-                    let spawn = new_state.suggest_spawn();
+                    let spawn = new_state.suggest_spawn(crate::games::utwid::types::ACTOR_TYPE_ARE);
                     new_state.add_actor(GameActor::are_actor(spawn.0, spawn.1));
                 }
                 if (new_state.turn_number % 13) == 0 {
-                    let spawn = new_state.suggest_spawn();
+                    let spawn = new_state.suggest_spawn(crate::games::utwid::types::ACTOR_TYPE_THEM);
                     new_state.add_actor(GameActor::them_actor(spawn.0, spawn.1));
                 }
                 if (new_state.turn_number % 5) == 0 {
-                    let spawn = new_state.suggest_spawn();
-                    new_state.add_actor(GameActor::one_actor(spawn.0, spawn.1));
+                    let spawn = new_state.suggest_spawn(crate::games::utwid::types::ACTOR_TYPE_ONE);
+                    // If no valid space for bomb actor, spawn an are_actor instead
+                    if spawn.0 == usize::MAX && spawn.1 == usize::MAX {
+                        let are_spawn = new_state.suggest_spawn(crate::games::utwid::types::ACTOR_TYPE_ARE);
+                        new_state.add_actor(GameActor::are_actor(are_spawn.0, are_spawn.1));
+                    } else {
+                        new_state.add_actor(GameActor::one_actor(spawn.0, spawn.1));
+                    }
                 }
             }
         }
